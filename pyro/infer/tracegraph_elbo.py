@@ -235,7 +235,7 @@ class TraceGraph_ELBO(object):
             for node in non_reparam_nodes:
                 guide_site = guide_trace.nodes[node]
                 log_pdf_key = 'batch_log_pdf' if node in guide_vec_md_nodes else 'log_pdf'
-                downstream_cost = downstream_costs[node]
+                downstream_cost = downstream_costs[node] / guide_site["scale"]  # not scaled by subsampling
                 baseline = 0.0
                 (nn_baseline, nn_baseline_input, use_decaying_avg_baseline, baseline_beta,
                     baseline_value) = _get_baseline_options(guide_site)
@@ -260,7 +260,7 @@ class TraceGraph_ELBO(object):
                     # accumulate baseline loss
                     baseline_loss += torch.pow(downstream_cost.detach() - baseline, 2.0).sum()
 
-                guide_log_pdf = guide_site[log_pdf_key] / guide_site["scale"]  # not scaled by subsampling
+                guide_log_pdf = guide_site[log_pdf_key]
                 if use_nn_baseline or use_decaying_avg_baseline or use_baseline_value:
                     if downstream_cost.size() != baseline.size():
                         raise ValueError("Expected baseline at site {} to be {} instead got {}".format(
