@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import sigmoid, softplus
 
+
+from torch.autograd import Variable
+
 # A general purpose module to construct networks that look like:
 # [Linear (256 -> 1)]
 # [Linear (256 -> 256), ReLU (), Linear (256 -> 1)]
@@ -36,6 +39,20 @@ class SquishStateParams(nn.Module):
         z_sd = softplus(cols[1])
         return z_mean, z_sd
 
+class DummyTransition(nn.Module):
+    def __init__(self):
+        super(DummyTransition, self).__init__()
+        self.w = Variable(torch.Tensor([[1, 0, 0, 0],
+                                        [0, 1, 0, 0],
+                                        [1, 0, 1, 0],
+                                        [0, 1, 0, 1]]))
+
+    def forward(self, z_prev):
+        z_mean = torch.mm(z_prev, self.w)
+        z_sd = Variable(torch.ones([z_prev.size(0), 4]) * 0.01)
+        return z_mean, z_sd
+
+# Not used by dynair2.
 class SquishObjParams(nn.Module):
     def __init__(self, z_pres_size, z_where_size, z_what_size):
         super(SquishObjParams, self).__init__()
