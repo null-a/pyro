@@ -8,7 +8,7 @@ from PIL.ImageTransform import AffineTransform
 # montage out.tiff -tile x1 -geometry +2 out.png
 # http://www.imagemagick.org/Usage/montage/
 
-SIZE = 200
+SIZE = 32
 
 def interp1(n, a, b, t):
     return a + (b - a) * (t / float(n - 1))
@@ -92,7 +92,7 @@ def position(img, x, y):
 
 
 def in_frame(xy, width):
-    m = 7 # margin
+    m = 5 # margin.
     x, y = xy
     return (m <= x < (width-m)) and (m <= y < (width-m))
 
@@ -115,12 +115,13 @@ def sample_end_points(n):
 def sample_scene():
 
     # number of frames
-    n = 15
+    n = 14
 
-    bkg = checker_board(4)
+    #bkg = checker_board(4)
+    bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
 
     # Sample objects
-    num_objs = np.random.randint(3) + 1
+    num_objs = 1#np.random.randint(3) + 1
     objs = []
     for i in range(num_objs):
         xy1, xy2 = sample_end_points(n)
@@ -129,7 +130,7 @@ def sample_scene():
             xy2=xy2,
             shape=np.random.randint(3),
             color=np.random.randint(2),
-            rotation=np.random.uniform(360)
+            rotation=np.random.randint(4) * 90#np.random.uniform(360)
         ))
     #print(objs)
 
@@ -147,7 +148,32 @@ def sample_scene():
 
     return frames
 
-# TODO: Figure out how to arrange these in an array for a DMM type
-# model. What order are channel, time, batch, etc. dims in?
 
-save_seq(sample_scene())
+def sample_dataset(n):
+    return np.stack(np.stack(img_to_arr(frame) for frame in sample_scene()) for _ in range(n))
+
+def img_to_arr(img):
+    assert img.mode == 'RGBA'
+    channels = 4
+    w, h = img.size
+    arr = np.fromstring(img.tobytes(), dtype=np.uint8)
+    return arr.reshape(w * h, channels).T.reshape(channels, h, w)
+
+
+
+# Save a tiff
+frames = sample_scene()
+save_seq(frames)
+
+# Convert a frame to correct array format for the model.
+#arr = img_to_arr(frames[0])
+#print(arr.shape)
+
+# Using with `imshow` requires an additional `transpose(1, 2, 0)`.
+#plt.imshow(arr.transpose(1, 2, 0))
+#plt.show()
+
+# Make a dataset
+# out = sample_dataset(1000)
+# print(out.shape)
+# np.savez_compressed('single_object_no_bkg.npz', X=out)
