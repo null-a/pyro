@@ -17,6 +17,7 @@ from modules import MLP, SquishStateParams, DummyTransition, InputRNN, EncodeRNN
 from matplotlib import pyplot as plt
 
 import visdom
+from PIL import Image, ImageDraw
 
 class DynAIR(nn.Module):
     def __init__(self):
@@ -101,6 +102,7 @@ class DynAIR(nn.Module):
     def background(self):
         return torch.cat((self.bkg_rgb, self.bkg_alpha))
 
+    # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, do_likelihood=True):
 
         batch_size = batch.size(0)
@@ -109,21 +111,25 @@ class DynAIR(nn.Module):
 
         z = self.model_sample_z_0(batch_size)
         frame_mean = self.model_emission(z, y_att)
+
+        zs = [z]
         frames = [frame_mean]
 
         # Recall, that the data are in reverse time order.
-        self.likelihood(0, frame_mean, batch[:, -1])
+        if do_likelihood:
+            self.likelihood(0, frame_mean, batch[:, -1])
 
         # TODO: iarange here (or somewhere)
         for t in range(1, self.seq_length):
             z = self.model_transition(t, z)
             frame_mean = self.model_emission(z, y_att)
             #print(frame_mean)
+            zs.append(z)
             frames.append(frame_mean)
             if do_likelihood:
                 self.likelihood(t, frame_mean, batch[:, -(t + 1)])
 
-        return frames
+        return frames, zs
 
     def likelihood(self, t, frame_mean, obs):
         frame_sd = (self.likelihood_sd * ng_ones(1)).expand_as(frame_mean)
@@ -327,19 +333,15 @@ def run_svi(X):
         ix = 7
         # TODO: Make reconstruct method.
         trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+1])
-        frames = poutine.replay(dynair.model, trace)(X[ix:ix+1], do_likelihood=False)
-        # TODO: These will be in opposite orders I think,
-        vis.images([frame.data[0, 0:3].numpy() for frame in frames], nrow=7)
-        vis.images(list(reversed([frame.data[0:3].numpy() for frame in X[ix]])), nrow=7)
+        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+1], do_likelihood=False)
 
-        # Sample from the model: (I'm not convinced this makes much
-        # sense, though it does reveal something about the transition
-        # function.)
-        dummy_data = Variable(torch.ones(1, 15, 4, 32, 32))
-        frames = dynair.model(dummy_data, do_likelihood=False)
-        vis.images([frame.data[0, 0:3].numpy() for frame in frames], nrow=7)
+        frames = latent_seq_to_tensor(frames)
+        zs = latent_seq_to_tensor(zs)
+        out = overlay_window_outlines(dynair, frames[0], zs[0, :, 0:2])
 
-        #vis.image(dynair.bkg_rgb.data.numpy())
+        vis.images(list(reversed(frames_to_rgb_list(X[ix]))), nrow=7)
+        vis.images(frames_to_rgb_list(out), nrow=7)
+
 
 
 def load_data():
@@ -349,6 +351,36 @@ def load_data():
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
     return X
+
+def frames_to_rgb_list(frames):
+    return frames[:, 0:3].data.numpy().tolist()
+
+def img_to_arr(img):
+    assert img.mode == 'RGBA'
+    channels = 4
+    w, h = img.size
+    arr = np.fromstring(img.tobytes(), dtype=np.uint8)
+    return arr.reshape(w * h, channels).T.reshape(channels, h, w)
+
+def draw_rect(size):
+    img = Image.new('RGBA', (size, size))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, size - 1, size - 1], outline='white')
+    return torch.from_numpy(img_to_arr(img).astype(np.float32) / 255.0)
+
+def draw_window_outline(dynair, z_where):
+    n = z_where.size(0)
+    rect = draw_rect(dynair.window_size)
+    rect_batch = Variable(batch_expand(rect.contiguous().view(-1), n).contiguous())
+    return dynair.window_to_image(z_where, rect_batch)
+
+def overlay_window_outlines(dynair, frame, z_where):
+    return over(draw_window_outline(dynair, z_where), frame)
+
+def latent_seq_to_tensor(arr):
+    # Turn an array of latents (of length seq_len) returned by the
+    # model into a (batch, seq_len, rest...) tensor.
+    return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1)
 
 
 
