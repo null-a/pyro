@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.functional import sigmoid, softplus
+from torch.nn.functional import sigmoid, softplus, tanh
 
 
 from torch.autograd import Variable
@@ -78,9 +78,7 @@ def split_at(t, widths):
 
 # dynair3
 
-# TODO: This is network is unlikely to be rich enough, this is just
-# something to get this to run. Replace with something more like the
-# DMM combiner perhaps?
+# Simple combine function, mostly for testing.
 class Combine(nn.Module):
     def __init__(self, input_rnn_hid_size, z_size):
         super(Combine, self).__init__()
@@ -92,6 +90,20 @@ class Combine(nn.Module):
         cols = split_at(x, self.col_sizes)
         z_mean = cols[0]
         z_sd = softplus(cols[1])
+        return z_mean, z_sd
+
+# The DMM combiner function.
+class CombineDMM(nn.Module):
+    def __init__(self, input_rnn_hid_size, z_size):
+        super(CombineDMM, self).__init__()
+        self.l_h = nn.Linear(z_size, input_rnn_hid_size)
+        self.l_mean = nn.Linear(input_rnn_hid_size, z_size)
+        self.l_sd = nn.Linear(input_rnn_hid_size, z_size)
+
+    def forward(self, input_rnn_hid, z_prev):
+        h = 0.5 * (tanh(self.l_h(z_prev)) + input_rnn_hid)
+        z_mean = self.l_mean(h)
+        z_sd = softplus(self.l_sd(h))
         return z_mean, z_sd
 
 class InputRNN(nn.Module):

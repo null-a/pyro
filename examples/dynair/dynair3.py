@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, InputRNN, EncodeRNN, Decoder, Combine
+from modules import MLP, SquishStateParams, FixedTransition, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM
 
 from matplotlib import pyplot as plt
 
@@ -88,7 +88,7 @@ class DynAIR(nn.Module):
 
         self.input_rnn = InputRNN(self.image_size, self.num_chan, self.input_rnn_hid_size)
 
-        self.combine = Combine(self.input_rnn_hid_size, self.z_size)
+        self.combine = CombineDMM(self.input_rnn_hid_size, self.z_size)
 
 
         # Model modules:
