@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM
+from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM
 
 from matplotlib import pyplot as plt
 
@@ -92,10 +92,11 @@ class DynAIR(nn.Module):
 
 
         # Model modules:
-        # TODO: Use something more like the DMM transition here.
-        self.transition = nn.Sequential(
-            nn.Linear(self.z_size, 2*self.z_size),
-            SquishStateParams(self.z_size))
+        # self.transition = nn.Sequential(
+        #     nn.Linear(self.z_size, 2*self.z_size),
+        #     SquishStateParams(self.z_size))
+
+        self.transition = TransitionDMM(self.z_size)
 
         # self.transition = FixedTransition()
 

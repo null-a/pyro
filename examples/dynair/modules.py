@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.functional import sigmoid, softplus, tanh
+from torch.nn.functional import sigmoid, softplus, tanh, relu
 
 
 from torch.autograd import Variable
@@ -52,6 +52,25 @@ class FixedTransition(nn.Module):
     def forward(self, z_prev):
         z_mean = torch.mm(z_prev, self.w)
         z_sd = Variable(torch.ones([z_prev.size(0), 4]) * 0.01)
+        return z_mean, z_sd
+
+# The DMM gated transition function.
+class TransitionDMM(nn.Module):
+    def __init__(self, z_size):
+        super(TransitionDMM, self).__init__()
+        # Could vary MLP hidden sizes if desired.
+        self.mlp_g = MLP(z_size, [z_size, z_size], nn.ReLU)
+        self.mlp_h = MLP(z_size, [z_size, z_size], nn.ReLU)
+        self.lin_mean = nn.Linear(z_size, z_size)
+        self.lin_sd = nn.Linear(z_size, z_size)
+        nn.init.eye(self.lin_mean.weight)
+        nn.init.constant(self.lin_mean.bias, 0)
+
+    def forward(self, z_prev):
+        g = sigmoid(self.mlp_g(z_prev))
+        h = self.mlp_h(z_prev)
+        z_mean = (1 - g) * self.lin_mean(z_prev) + g * h
+        z_sd = softplus(self.lin_sd(relu(h)))
         return z_mean, z_sd
 
 # Not used by dynair2.
