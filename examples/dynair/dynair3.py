@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, DummyTransition, InputRNN, EncodeRNN, Decoder, Combine
+from modules import MLP, SquishStateParams, FixedTransition, InputRNN, EncodeRNN, Decoder, Combine
 
 from matplotlib import pyplot as plt
 
@@ -97,7 +97,7 @@ class DynAIR(nn.Module):
             nn.Linear(self.z_size, 2*self.z_size),
             SquishStateParams(self.z_size))
 
-        # self.transition = DummyTransition()
+        # self.transition = FixedTransition()
 
     def background(self):
         return torch.cat((self.bkg_rgb, self.bkg_alpha))

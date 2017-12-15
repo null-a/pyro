@@ -41,9 +41,9 @@ class SquishStateParams(nn.Module):
         z_sd = softplus(cols[1])
         return z_mean, z_sd
 
-class DummyTransition(nn.Module):
+class FixedTransition(nn.Module):
     def __init__(self):
-        super(DummyTransition, self).__init__()
+        super(FixedTransition, self).__init__()
         self.w = Variable(torch.Tensor([[1, 0, 0, 0],
                                         [0, 1, 0, 0],
                                         [1, 0, 1, 0],
