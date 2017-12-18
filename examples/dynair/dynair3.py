@@ -314,8 +314,20 @@ def over(a, b):
     return torch.cat((rgb, alpha), 1)
 
 
+class Plot():
+    def __init__(self, vis):
+        self.win = None
+        self.vis = vis
+
+    def add(self, x, y):
+        if self.win is None:
+            self.win = self.vis.line(X=np.array([x]), Y=np.array([y]))
+        else:
+            self.vis.line(X=np.array([x]), Y=np.array([y]), win=self.win, update='append')
+
 def run_svi(X):
     vis = visdom.Visdom()
+    progress_plot = Plot(visdom.Visdom(env='progress'))
     dynair = DynAIR()
 
     batches = X.chunk(40)
@@ -325,11 +337,13 @@ def run_svi(X):
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
-    for i in range(100):
+    for i in range(1000):
 
-        for batch in batches:
+        for j, batch in enumerate(batches):
             loss = svi.step(batch)
-            print(loss / (15 * 25)) # elbo per datum, per frame
+            elbo = -loss / (15 * 25) # elbo per datum, per frame
+            print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
+            progress_plot.add(i*len(batches) + j, elbo)
 
         ix = 7
         # TODO: Make reconstruct method.
