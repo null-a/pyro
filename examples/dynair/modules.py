@@ -54,6 +54,22 @@ class FixedTransition(nn.Module):
         z_sd = Variable(torch.ones([z_prev.size(0), 4]) * 0.01)
         return z_mean, z_sd
 
+class LinearTransition(nn.Module):
+    def __init__(self, z_size):
+        super(LinearTransition, self).__init__()
+        self.lin = nn.Linear(z_size, z_size, bias=False)
+        nn.init.normal(self.lin.weight, std=0.01)
+        self.lin.weight.data += torch.eye(z_size)
+        # nn.init.eye(self.lin.weight)
+        # self.lin.weight.data = torch.Tensor([[1, 0, 1, 0],
+        #                                      [0, 1, 0, 1],
+        #                                      [0, 0, 1, 0],
+        #                                      [0, 0, 0, 1]])
+
+
+    def forward(self, z):
+        return self.lin(z)
+
 # The DMM gated transition function.
 class TransitionDMM(nn.Module):
     def __init__(self, z_size):
@@ -172,3 +188,14 @@ class Decoder(nn.Module):
 
     def forward(self, z_what):
         return sigmoid(self.mlp(z_what) + self.bias)
+
+# dynair4
+
+class CombineSD(nn.Module):
+    def __init__(self, input_rnn_hid_size, z_size):
+        super(CombineSD, self).__init__()
+        self.mlp = MLP(input_rnn_hid_size + z_size, [40, z_size], nn.ReLU)
+
+    def forward(self, input_rnn_hid, z_prev):
+        x = self.mlp(torch.cat((input_rnn_hid, z_prev), 1))
+        return softplus(x)
