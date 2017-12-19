@@ -7,7 +7,7 @@ import numpy as np
 
 import pyro
 import pyro.distributions as dist
-from pyro.util import zeros, ng_zeros, ng_ones
+from pyro.util import ng_zeros, ng_ones
 import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
@@ -19,10 +19,16 @@ from matplotlib import pyplot as plt
 import visdom
 from PIL import Image, ImageDraw
 
+import argparse
+
 class DynAIR(nn.Module):
-    def __init__(self):
+    def __init__(self, use_cuda=False):
 
         super(DynAIR, self).__init__()
+
+        # Set here so that self.ng_ones/self.ng_zeros does the right
+        # thing.
+        self.use_cuda = use_cuda
 
         self.seq_length = 14
 
@@ -42,10 +48,10 @@ class DynAIR(nn.Module):
         #                                         [z_where , rest... ]
         #self.w_0_prior_sd = Variable(torch.Tensor([1.3, 1.3, 0.4, 0.4]), requires_grad=False)
         self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
-        self.w_prior_sd = ng_ones(self.z_size) * 0.1
+        self.w_prior_sd = self.ng_ones(self.z_size) * 0.1
 
-        self.z_what_prior_mean = ng_zeros(self.z_what_size)
-        self.z_what_prior_sd = ng_ones(self.z_what_size)
+        self.z_what_prior_mean = self.ng_zeros(self.z_what_size)
+        self.z_what_prior_sd = self.ng_ones(self.z_what_size)
 
         self.input_rnn_hid_size = 100
         self.encode_rnn_hid_size = 100
@@ -61,10 +67,10 @@ class DynAIR(nn.Module):
         #self.bkg_rgb = nn.Parameter(torch.zeros(self.num_chan - 1, self.image_size, self.image_size) + 0.5)
 
         # Fixed bkg:
-        self.bkg_rgb = ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
+        self.bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
 
         # I think we'll want fixed alpha=1 for the background. (i.e. background is opaque)
-        self.bkg_alpha = ng_ones(1, self.image_size, self.image_size)
+        self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
         # Sample dummy background when testing sampling from model.
         # param = zeros(self.num_chan - 1, self.image_size, self.image_size)
@@ -112,6 +118,10 @@ class DynAIR(nn.Module):
         # correct thing.
         self.transition = LinearTransition(self.z_size)
 
+        # CUDA
+        if use_cuda:
+            self.cuda()
+
 
     def background(self):
         return torch.cat((self.bkg_rgb, self.bkg_alpha))
@@ -147,7 +157,7 @@ class DynAIR(nn.Module):
         return frames, zs
 
     def likelihood(self, t, frame_mean, obs):
-        frame_sd = (self.likelihood_sd * ng_ones(1)).expand_as(frame_mean)
+        frame_sd = (self.likelihood_sd * self.ng_ones(1)).expand_as(frame_mean)
         # TODO: Using a normal here isn't very sensible since the data
         # is in [0, 1]. Do something better.
         pyro.sample('x_{}'.format(t),
@@ -167,14 +177,14 @@ class DynAIR(nn.Module):
     def model_sample_w_0(self, batch_size):
         return pyro.sample('w_0',
                            dist.normal,
-                           ng_zeros(self.z_size),
+                           self.ng_zeros(self.z_size),
                            self.w_0_prior_sd,
                            batch_size=batch_size)
 
     def model_sample_w(self, t, batch_size):
         return pyro.sample('w_{}'.format(t),
                            dist.normal,
-                           ng_zeros(self.z_size),
+                           self.ng_zeros(self.z_size),
                            self.w_prior_sd,
                            batch_size=batch_size)
 
@@ -298,6 +308,19 @@ class DynAIR(nn.Module):
         # first arg to grid sample should be (n, c, in_w, in_h)
         return grid_sample(windows.view(n, self.num_chan, self.window_size, self.window_size), grid)
 
+    # Helpers to create zeros/ones on cpu/gpu as appropriate.
+    def ng_zeros(self, *args, **kwargs):
+        t = ng_zeros(*args, **kwargs)
+        if self.use_cuda:
+            t = t.cuda()
+        return t
+
+    def ng_ones(self, *args, **kwargs):
+        t = ng_ones(*args, **kwargs)
+        if self.use_cuda:
+            t = t.cuda()
+        return t
+
 
 def batch_expand(t, b):
     return t.expand((b,) + t.size())
@@ -355,10 +378,10 @@ class Plot():
         else:
             self.vis.line(X=np.array([x]), Y=np.array([y]), win=self.win, update='append')
 
-def run_svi(X):
+def run_svi(X, args):
     vis = visdom.Visdom()
     progress_plot = Plot(visdom.Visdom(env='progress'))
-    dynair = DynAIR()
+    dynair = DynAIR(use_cuda=args.cuda)
 
     batches = X.chunk(40)
 
@@ -375,25 +398,21 @@ def run_svi(X):
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
             progress_plot.add(i*len(batches) + j, elbo)
 
-        ix = 7
+        ix = 0
+        n = 8
+
         # TODO: Make reconstruct method.
-        trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+3])
-        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+3], do_likelihood=False)
+        trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
+        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
 
         frames = latent_seq_to_tensor(frames)
         zs = latent_seq_to_tensor(zs)
 
-        out0 = overlay_window_outlines(dynair, frames[0], zs[0, :, 0:2])
-        vis.images(list(reversed(frames_to_rgb_list(X[ix]))), nrow=7)
-        vis.images(frames_to_rgb_list(out0), nrow=7)
+        for k in range(n):
+            out = overlay_window_outlines(dynair, frames[k], zs[k, :, 0:2])
+            vis.images(list(reversed(frames_to_rgb_list(X[ix+k]))), nrow=7)
+            vis.images(frames_to_rgb_list(out), nrow=7)
 
-        out1 = overlay_window_outlines(dynair, frames[1], zs[1, :, 0:2])
-        vis.images(list(reversed(frames_to_rgb_list(X[ix+1]))), nrow=7)
-        vis.images(frames_to_rgb_list(out1), nrow=7)
-
-        out2 = overlay_window_outlines(dynair, frames[2], zs[2, :, 0:2])
-        vis.images(list(reversed(frames_to_rgb_list(X[ix+2]))), nrow=7)
-        vis.images(frames_to_rgb_list(out2), nrow=7)
 
 
         # Test extrapolation.
@@ -465,6 +484,10 @@ def latent_seq_to_tensor(arr):
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
+    args = parser.parse_args()
+
     # Test model by sampling:
     # dynair = DynAIR()
     # dummy_data = Variable(torch.ones(1, 14, 4, 32, 32))
@@ -484,4 +507,7 @@ if __name__ == '__main__':
     # data = Variable(torch.ones(1, 14, 4, 32, 32))
     # dynair.guide(data)
 
-    run_svi(load_data())
+    X = load_data()
+    if args.cuda:
+        X.cuda()
+    run_svi(X, args)
