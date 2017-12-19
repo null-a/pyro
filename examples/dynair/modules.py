@@ -142,18 +142,21 @@ class CombineDMM(nn.Module):
         return z_mean, z_sd
 
 class InputRNN(nn.Module):
-    def __init__(self, image_size, num_chan, hid_size):
+    def __init__(self, image_embed_size, hid_size):
         super(InputRNN, self).__init__()
-        self.rnn = nn.GRU(num_chan * image_size**2, hid_size, batch_first=True)
+        self.rnn = nn.LSTM(image_embed_size, hid_size, batch_first=True)
         self.h0 = zeros(hid_size)
+        self.c0 = zeros(hid_size)
         nn.init.normal(self.h0)
+        nn.init.normal(self.c0)
         self.hid_size = hid_size
 
     def forward(self, seq):
         batch_size = seq.size(0)
-        # CUDNN complains if h0 isn't contiguous.
+        # CUDNN complains if h0, c0 are not contiguous.
         h0 = self.h0.expand(1, batch_size, self.hid_size).contiguous()
-        hid_seq, _ = self.rnn(seq, h0)
+        c0 = self.c0.expand(1, batch_size, self.hid_size).contiguous()
+        hid_seq, _, = self.rnn(seq, (h0, c0))
         return hid_seq
 
 # I don't have a good sense about what net arch. is sensible here.

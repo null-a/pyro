@@ -55,6 +55,7 @@ class DynAIR(nn.Module):
         self.z_what_prior_mean = self.ng_zeros(self.z_what_size)
         self.z_what_prior_sd = self.ng_ones(self.z_what_size)
 
+        self.input_embed_size = 50
         self.input_rnn_hid_size = 100
         self.encode_rnn_hid_size = 100
 
@@ -99,7 +100,8 @@ class DynAIR(nn.Module):
         # inference can choose to "turn off" the object.)
         self.decode = Decoder(self.z_what_size, self.decoder_hidden_layers, self.num_chan, self.window_size, -2)
 
-        self.input_rnn = InputRNN(self.image_size, self.num_chan, self.input_rnn_hid_size)
+        self.input_mlp = nn.Sequential(MLP(self.num_chan * self.image_size**2, [500, self.input_embed_size], nn.ReLU), nn.Tanh())
+        self.input_rnn = InputRNN(self.input_embed_size, self.input_rnn_hid_size)
 
         self.combine = CombineDMM(self.input_rnn_hid_size, self.z_size)
         #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
@@ -233,10 +235,10 @@ class DynAIR(nn.Module):
         batch_size = batch.size(0)
         assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
 
-        flat_batch = batch.view(batch_size, self.seq_length, -1)
-        assert_size(flat_batch, (batch_size, self.seq_length, self.num_chan * self.image_size ** 2))
-
-        input_rnn_h = self.input_rnn(flat_batch)
+        flat_batch = batch.view(-1, self.num_chan * self.image_size ** 2)
+        input_embed = self.input_mlp(flat_batch)
+        rnn_input = input_embed.view(batch_size, self.seq_length, -1)
+        input_rnn_h = self.input_rnn(rnn_input)
 
         # Initialise z_{-1} from RNN state
         z = self.initial_state(input_rnn_h[:, -1])
