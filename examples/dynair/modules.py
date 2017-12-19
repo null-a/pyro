@@ -151,7 +151,8 @@ class InputRNN(nn.Module):
 
     def forward(self, seq):
         batch_size = seq.size(0)
-        h0 = self.h0.expand(1, batch_size, self.hid_size)
+        # CUDNN complains if h0 isn't contiguous.
+        h0 = self.h0.expand(1, batch_size, self.hid_size).contiguous()
         hid_seq, _ = self.rnn(seq, h0)
         return hid_seq
 
@@ -172,7 +173,8 @@ class EncodeRNN(nn.Module):
     def forward(self, seq):
         # seq.size(0) is sequence length for this RNN.
         batch_size = seq.size(1)
-        h0 = self.h0.expand(1, batch_size, self.hid_size)
+        # CUDNN complains if h0 isn't contiguous.
+        h0 = self.h0.expand(1, batch_size, self.hid_size).contiguous()
         _, hid = self.rnn(seq, h0)
         assert hid.size() == (1, batch_size, self.hid_size)
         x = self.mlp(hid.view(batch_size, self.hid_size))

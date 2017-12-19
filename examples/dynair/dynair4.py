@@ -48,6 +48,8 @@ class DynAIR(nn.Module):
         #                                         [z_where , rest... ]
         #self.w_0_prior_sd = Variable(torch.Tensor([1.3, 1.3, 0.4, 0.4]), requires_grad=False)
         self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
+        if use_cuda:
+            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
         self.w_prior_sd = self.ng_ones(self.z_size) * 0.1
 
         self.z_what_prior_mean = self.ng_zeros(self.z_what_size)
@@ -333,6 +335,8 @@ def expand_z_where(z_where, scale):
     # (scale, [x, y]) -> [[scale, 0,     x],
     #                     [0,     scale, y]]
     I = batch_expand(Variable(torch.eye(2) * scale), b)
+    if z_where.is_cuda:
+        I = I.cuda()
     return torch.cat((I, z_where.view(b, 2, 1)), 2)
 
 def assert_size(t, expected_size):
@@ -394,24 +398,25 @@ def run_svi(X, args):
 
         for j, batch in enumerate(batches):
             loss = svi.step(batch)
-            elbo = -loss / (15 * 25) # elbo per datum, per frame
+            elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
             progress_plot.add(i*len(batches) + j, elbo)
 
         ix = 0
         n = 8
 
-        # TODO: Make reconstruct method.
-        trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
-        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
+        if (i+1) % 10 == 0:
+            # TODO: Make reconstruct method.
+            trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
+            frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
 
-        frames = latent_seq_to_tensor(frames)
-        zs = latent_seq_to_tensor(zs)
+            frames = latent_seq_to_tensor(frames)
+            zs = latent_seq_to_tensor(zs)
 
-        for k in range(n):
-            out = overlay_window_outlines(dynair, frames[k], zs[k, :, 0:2])
-            vis.images(list(reversed(frames_to_rgb_list(X[ix+k]))), nrow=7)
-            vis.images(frames_to_rgb_list(out), nrow=7)
+            for k in range(n):
+                out = overlay_window_outlines(dynair, frames[k], zs[k, :, 0:2])
+                vis.images(list(reversed(frames_to_rgb_list(X[ix+k].cpu()))), nrow=7)
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
 
 
@@ -469,6 +474,8 @@ def draw_rect(size):
 def draw_window_outline(dynair, z_where):
     n = z_where.size(0)
     rect = draw_rect(dynair.window_size)
+    if z_where.is_cuda:
+        rect = rect.cuda()
     rect_batch = Variable(batch_expand(rect.contiguous().view(-1), n).contiguous())
     return dynair.window_to_image(z_where, rect_batch)
 
@@ -509,5 +516,5 @@ if __name__ == '__main__':
 
     X = load_data()
     if args.cuda:
-        X.cuda()
+        X = X.cuda()
     run_svi(X, args)
