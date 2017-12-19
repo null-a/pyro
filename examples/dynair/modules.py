@@ -5,7 +5,7 @@ from torch.nn.functional import sigmoid, softplus, tanh, relu
 
 from torch.autograd import Variable
 
-from pyro.util import ng_zeros
+from pyro.util import ng_zeros, zeros
 
 # A general purpose module to construct networks that look like:
 # [Linear (256 -> 1)]
@@ -145,7 +145,8 @@ class InputRNN(nn.Module):
     def __init__(self, image_size, num_chan, hid_size):
         super(InputRNN, self).__init__()
         self.rnn = nn.GRU(num_chan * image_size**2, hid_size, batch_first=True)
-        self.h0 = ng_zeros(hid_size) # TODO: Make optimizable.
+        self.h0 = zeros(hid_size)
+        nn.init.normal(self.h0)
         self.hid_size = hid_size
 
     def forward(self, seq):
@@ -163,7 +164,8 @@ class EncodeRNN(nn.Module):
         super(EncodeRNN, self).__init__()
         self.hid_size = hid_size
         self.rnn = nn.GRU(num_chan * window_size**2, hid_size)
-        self.h0 = ng_zeros(hid_size) # TODO: Make optimizable.
+        self.h0 = zeros(hid_size)
+        nn.init.normal(self.h0)
         self.mlp = MLP(hid_size, [z_what_size * 2], nn.ReLU)
         self.col_widths = [z_what_size, z_what_size]
 

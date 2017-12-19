@@ -38,18 +38,17 @@ class DynAIR(nn.Module):
 
         assert self.z_where_size <= self.z_size # z_where is a slice of z
 
+        # TODO: Are these sensible?
         #                                         [z_where , rest... ]
         #self.w_0_prior_sd = Variable(torch.Tensor([1.3, 1.3, 0.4, 0.4]), requires_grad=False)
-        self.w_0_prior_sd = Variable(torch.Tensor([4, 4, 0.5, 0.5]), requires_grad=False)
-
-        # TODO: Is this sensible?
+        self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
         self.w_prior_sd = ng_ones(self.z_size) * 0.1
 
         self.z_what_prior_mean = ng_zeros(self.z_what_size)
         self.z_what_prior_sd = ng_ones(self.z_what_size)
 
         self.input_rnn_hid_size = 100
-        self.encode_rnn_hid_size = 50
+        self.encode_rnn_hid_size = 100
 
         self.decoder_hidden_layers = [100]
 
@@ -76,7 +75,7 @@ class DynAIR(nn.Module):
 
         # Guide modules:
 
-        self.initial_state = MLP(self.input_rnn_hid_size, [self.z_size], nn.ReLU)
+        self.initial_state = MLP(self.input_rnn_hid_size, [self.input_rnn_hid_size, self.z_size], nn.ReLU)
 
         self.encode_rnn = EncodeRNN(self.window_size, self.num_chan,
                                     self.encode_rnn_hid_size, self.z_what_size)
@@ -245,16 +244,16 @@ class DynAIR(nn.Module):
     def guide_w(self, t, rnn_hid, z_prev):
         batch_size = z_prev.size(0)
         # TODO: If the guide outputs the mean it has the option of
-        # ignoring the transition and use only w to predict the state
-        # for the current frame. This can lead to good reconstructions
-        # without learning the dynamics. However, this extra
-        # flexibility might help get inference off the ground (by
-        # having a way to position windows before the transition is
-        # learned) so it could be useful. Will the prior ensure that
-        # optimization eventually finds the solution that uses the
-        # transition rather than w?
-        _, w_sd = self.combine(rnn_hid, z_prev)
-        w_mean = ng_zeros(batch_size, self.z_size)
+        # ignoring the transition and using only w to predict the
+        # state for the current frame. This can lead to good
+        # reconstructions without learning the dynamics. However, this
+        # extra flexibility might help get inference off the ground
+        # (by having a way to position windows before the transition
+        # is learned) so it could be useful. Will the prior on w
+        # ensure that optimization eventually finds the solution that
+        # uses the transition rather than w?
+        w_mean, w_sd = self.combine(rnn_hid, z_prev)
+        #w_mean = ng_zeros(batch_size, self.z_size)
         w = pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
         return w
 
@@ -378,37 +377,46 @@ def run_svi(X):
 
         ix = 7
         # TODO: Make reconstruct method.
-        trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+1])
-        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+1], do_likelihood=False)
+        trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+3])
+        frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+3], do_likelihood=False)
 
         frames = latent_seq_to_tensor(frames)
         zs = latent_seq_to_tensor(zs)
-        out = overlay_window_outlines(dynair, frames[0], zs[0, :, 0:2])
 
+        out0 = overlay_window_outlines(dynair, frames[0], zs[0, :, 0:2])
         vis.images(list(reversed(frames_to_rgb_list(X[ix]))), nrow=7)
-        vis.images(frames_to_rgb_list(out), nrow=7)
+        vis.images(frames_to_rgb_list(out0), nrow=7)
+
+        out1 = overlay_window_outlines(dynair, frames[1], zs[1, :, 0:2])
+        vis.images(list(reversed(frames_to_rgb_list(X[ix+1]))), nrow=7)
+        vis.images(frames_to_rgb_list(out1), nrow=7)
+
+        out2 = overlay_window_outlines(dynair, frames[2], zs[2, :, 0:2])
+        vis.images(list(reversed(frames_to_rgb_list(X[ix+2]))), nrow=7)
+        vis.images(frames_to_rgb_list(out2), nrow=7)
+
 
         # Test extrapolation.
         # TODO: Remove seq_length hack.
         # TODO: Clean-up.
-        dynair.seq_length = 7
-        zs, z_what = dynair.guide(X[ix:ix+1, 0:7])
-        y_att = dynair.decode(z_what)
-        z = zs[-1]
-        frames = []
-        extrap_zs = []
-        for t in range(7):
-            z = dynair.model_transition(t, z)
-            frame_mean = dynair.model_emission(z, y_att)
-            frames.append(frame_mean)
-            extrap_zs.append(z)
-        extrap_frames = latent_seq_to_tensor(frames)
-        extrap_zs = latent_seq_to_tensor(extrap_zs)
-        out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
-        #print(extrap_frames.size())
-        # TODO: Show ground truth and extrapolation.
-        vis.images(list(reversed(frames_to_rgb_list(X[ix])))[7:] + frames_to_rgb_list(out), nrow=7)
-        dynair.seq_length = 14
+        # dynair.seq_length = 7
+        # zs, z_what = dynair.guide(X[ix:ix+1, 0:7])
+        # y_att = dynair.decode(z_what)
+        # z = zs[-1]
+        # frames = []
+        # extrap_zs = []
+        # for t in range(7):
+        #     z = dynair.model_transition(t, z)
+        #     frame_mean = dynair.model_emission(z, y_att)
+        #     frames.append(frame_mean)
+        #     extrap_zs.append(z)
+        # extrap_frames = latent_seq_to_tensor(frames)
+        # extrap_zs = latent_seq_to_tensor(extrap_zs)
+        # out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
+        # #print(extrap_frames.size())
+        # # TODO: Show ground truth and extrapolation.
+        # vis.images(list(reversed(frames_to_rgb_list(X[ix])))[7:] + frames_to_rgb_list(out), nrow=7)
+        # dynair.seq_length = 14
 
         print(dynair.transition.lin.weight.data)
 
