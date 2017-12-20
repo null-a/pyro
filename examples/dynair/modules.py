@@ -198,11 +198,32 @@ class Decoder(nn.Module):
 
 # dynair4
 
-class CombineSD(nn.Module):
-    def __init__(self, input_rnn_hid_size, z_size):
-        super(CombineSD, self).__init__()
-        self.mlp = MLP(input_rnn_hid_size + z_size, [40, z_size], nn.ReLU)
+
+class Combine4(nn.Module):
+    def __init__(self, input_rnn_hid_size, hids, z_size, zero_mean=False):
+        super(Combine4, self).__init__()
+        self.zero_mean = zero_mean
+        self.mlp = MLP(input_rnn_hid_size + z_size, hids + [2 * z_size], nn.ReLU)
+        self.col_widths = [z_size, z_size]
 
     def forward(self, input_rnn_hid, z_prev):
         x = self.mlp(torch.cat((input_rnn_hid, z_prev), 1))
-        return softplus(x)
+        cols = split_at(x, self.col_widths)
+        mean = cols[0]
+        sd = softplus(cols[1])
+        if self.zero_mean:
+            mean = mean * 0
+        return mean, sd
+
+class InitialState(nn.Module):
+    def __init__(self, input_rnn_hid_size, hids, z_size):
+        super(InitialState, self).__init__()
+        self.mlp = MLP(input_rnn_hid_size, hids + [z_size * 2], nn.ReLU)
+        self.col_widths = [z_size, z_size]
+
+    def forward(self, input_rnn_hid):
+        x = self.mlp(input_rnn_hid)
+        cols = split_at(x, self.col_widths)
+        mean = cols[0]
+        sd = softplus(cols[1])
+        return mean, sd

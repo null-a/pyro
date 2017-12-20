@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, CombineSD
+from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine4, InitialState
 
 from matplotlib import pyplot as plt
 
@@ -84,8 +84,6 @@ class DynAIR(nn.Module):
 
         # Guide modules:
 
-        self.initial_state = MLP(self.input_rnn_hid_size, [self.input_rnn_hid_size, self.z_size], nn.ReLU)
-
         self.encode_rnn = EncodeRNN(self.window_size, self.num_chan,
                                     self.encode_rnn_hid_size, self.z_what_size)
 
@@ -103,7 +101,9 @@ class DynAIR(nn.Module):
         self.input_mlp = nn.Sequential(MLP(self.num_chan * self.image_size**2, [500, self.input_embed_size], nn.ReLU), nn.Tanh())
         self.input_rnn = InputRNN(self.input_embed_size, self.input_rnn_hid_size)
 
-        self.combine = CombineDMM(self.input_rnn_hid_size, self.z_size)
+        # Predicting params of w:
+        self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
+        self.combine = Combine4(self.input_rnn_hid_size, [50], self.z_size, zero_mean=False)
         #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
 
 
@@ -240,12 +240,14 @@ class DynAIR(nn.Module):
         rnn_input = input_embed.view(batch_size, self.seq_length, -1)
         input_rnn_h = self.input_rnn(rnn_input)
 
+
         # Initialise z_{-1} from RNN state
-        z = self.initial_state(input_rnn_h[:, -1])
+        w_0 = self.guide_w_0(input_rnn_h[:, -1])
 
-        zs = []
+        z = w_0
+        zs = [z]
 
-        for t in range (self.seq_length):
+        for t in range (1, self.seq_length):
             # print(t)
             # print(z.size())
             # Reminder: input_rnn_h is in reverse time order.
@@ -254,6 +256,11 @@ class DynAIR(nn.Module):
             zs.append(z)
 
         return zs
+
+    def guide_w_0(self, rnn_hid):
+        w_mean, w_sd = self.initial_state(rnn_hid)
+        w = pyro.sample('w_0', dist.normal, w_mean, w_sd)
+        return w
 
     def guide_w(self, t, rnn_hid, z_prev):
         batch_size = z_prev.size(0)
@@ -267,7 +274,6 @@ class DynAIR(nn.Module):
         # ensure that optimization eventually finds the solution that
         # uses the transition rather than w?
         w_mean, w_sd = self.combine(rnn_hid, z_prev)
-        #w_mean = ng_zeros(batch_size, self.z_size)
         w = pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
         return w
 
