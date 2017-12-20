@@ -412,10 +412,10 @@ def run_svi(X, args):
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
             progress_plot.add(i*len(batches) + j, elbo)
 
-        ix = 0
-        n = 8
+        ix = 54
+        n = 1
 
-        if (i+1) % 10 == 0:
+        if (i+1) % 1 == 0:
             # TODO: Make reconstruct method.
             trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
             frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
@@ -431,26 +431,23 @@ def run_svi(X, args):
 
 
         # Test extrapolation.
-        # TODO: Remove seq_length hack.
         # TODO: Clean-up.
-        # dynair.seq_length = 7
-        # zs, z_what = dynair.guide(X[ix:ix+1, 0:7])
-        # y_att = dynair.decode(z_what)
-        # z = zs[-1]
-        # frames = []
-        # extrap_zs = []
-        # for t in range(7):
-        #     z = dynair.model_transition(t, z)
-        #     frame_mean = dynair.model_emission(z, y_att)
-        #     frames.append(frame_mean)
-        #     extrap_zs.append(z)
-        # extrap_frames = latent_seq_to_tensor(frames)
-        # extrap_zs = latent_seq_to_tensor(extrap_zs)
-        # out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
-        # #print(extrap_frames.size())
-        # # TODO: Show ground truth and extrapolation.
-        # vis.images(list(reversed(frames_to_rgb_list(X[ix])))[7:] + frames_to_rgb_list(out), nrow=7)
-        # dynair.seq_length = 14
+        ex = X[54:54+1]
+        zs, z_what = dynair.guide(ex)
+        y_att = dynair.decode(z_what)
+        z = zs[-1]
+        frames = []
+        extrap_zs = []
+        for t in range(14):
+            #z = dynair.model_transition(14 + t, z)
+            z = dynair.transition(z)
+            frame_mean = dynair.model_emission(z, y_att)
+            frames.append(frame_mean)
+            extrap_zs.append(z)
+        extrap_frames = latent_seq_to_tensor(frames)
+        extrap_zs = latent_seq_to_tensor(extrap_zs)
+        out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
+        vis.images(frames_to_rgb_list(out), nrow=7)
 
         print(dynair.transition.lin.weight.data)
 
