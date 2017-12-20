@@ -251,6 +251,8 @@ class DynAIR(nn.Module):
             # print(t)
             # print(z.size())
             # Reminder: input_rnn_h is in reverse time order.
+            # TODO: Does it make sense/(is it beneficial) to predict w
+            # from the transition(z_prev) rather than z_prev?
             w = self.guide_w(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
             z = self.transition(z) + w
             zs.append(z)
