@@ -428,25 +428,24 @@ def run_svi(X, args):
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
 
-
-        # Test extrapolation.
-        # TODO: Clean-up.
-        ex = X[54:54+1]
-        zs, z_what = dynair.guide(ex)
-        y_att = dynair.decode(z_what)
-        z = zs[-1]
-        frames = []
-        extrap_zs = []
-        for t in range(14):
-            #z = dynair.model_transition(14 + t, z)
-            z = dynair.transition(z)
-            frame_mean = dynair.model_emission(z, y_att)
-            frames.append(frame_mean)
-            extrap_zs.append(z)
-        extrap_frames = latent_seq_to_tensor(frames)
-        extrap_zs = latent_seq_to_tensor(extrap_zs)
-        out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
-        vis.images(frames_to_rgb_list(out), nrow=7)
+            # Test extrapolation.
+            # TODO: Clean-up.
+            ex = X[54:54+1]
+            zs, z_what = dynair.guide(ex)
+            y_att = dynair.decode(z_what)
+            z = zs[-1]
+            frames = []
+            extrap_zs = []
+            for t in range(14):
+                #z = dynair.model_transition(14 + t, z)
+                z = dynair.transition(z)
+                frame_mean = dynair.model_emission(z, y_att)
+                frames.append(frame_mean)
+                extrap_zs.append(z)
+            extrap_frames = latent_seq_to_tensor(frames)
+            extrap_zs = latent_seq_to_tensor(extrap_zs)
+            out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
+            vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
         print(dynair.transition.lin.weight.data)
 
