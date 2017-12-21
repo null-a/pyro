@@ -7,7 +7,7 @@ import numpy as np
 
 import pyro
 import pyro.distributions as dist
-from pyro.util import ng_zeros, ng_ones
+from pyro.util import ng_zeros, ng_ones, zeros
 import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
@@ -47,10 +47,9 @@ class DynAIR(nn.Module):
         # TODO: Are these sensible?
         #                                         [z_where , rest... ]
         #self.w_0_prior_sd = Variable(torch.Tensor([1.3, 1.3, 0.4, 0.4]), requires_grad=False)
-        self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
+        self.z_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
         if use_cuda:
-            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
-        self.w_prior_sd = self.ng_ones(self.z_size) * 0.1
+            self.z_0_prior_sd = self.z_0_prior_sd.cuda()
 
         self.z_what_prior_mean = self.ng_zeros(self.z_what_size)
         self.z_what_prior_sd = self.ng_ones(self.z_what_size)
@@ -64,6 +63,8 @@ class DynAIR(nn.Module):
         self.likelihood_sd = 0.3
 
         # Parameters.
+
+        self.guide_z_init = zeros(self.z_size)
 
         # Optimizable bkg:
         # TODO: Squish to [0,1].
@@ -102,9 +103,9 @@ class DynAIR(nn.Module):
         self.input_rnn = InputRNN(self.input_embed_size, self.input_rnn_hid_size)
 
         # Predicting params of w:
-        self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
-        self.combine = Combine4(self.input_rnn_hid_size, [50], self.z_size, zero_mean=False)
-        #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
+        #self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
+        #self.combine = Combine4(self.input_rnn_hid_size, [50], self.z_size, zero_mean=False)
+        self.combine = CombineDMM(self.input_rnn_hid_size, self.z_size)
 
 
         # Model modules:
@@ -112,7 +113,7 @@ class DynAIR(nn.Module):
         #     nn.Linear(self.z_size, 2*self.z_size),
         #     SquishStateParams(self.z_size))
 
-        #self.transition = TransitionDMM(self.z_size)
+        self.transition = TransitionDMM(self.z_size)
 
         # self.transition = FixedTransition()
 
@@ -120,7 +121,7 @@ class DynAIR(nn.Module):
         # I think this will "just work", but if not compare with
         # adding to the model and guiding with a Delta, which is the
         # correct thing.
-        self.transition = LinearTransition(self.z_size)
+        #self.transition = LinearTransition(self.z_size)
 
         # CUDA
         if use_cuda:
@@ -137,8 +138,7 @@ class DynAIR(nn.Module):
         z_what = self.model_sample_z_what(batch_size)
         y_att = self.decode(z_what)
 
-        w = self.model_sample_w_0(batch_size)
-        z = w # + zero
+        z = self.model_sample_z_0(batch_size)
         frame_mean = self.model_emission(z, y_att)
 
         zs = [z]
@@ -178,25 +178,21 @@ class DynAIR(nn.Module):
                            self.z_what_prior_sd,
                            batch_size=batch_size)
 
-    def model_sample_w_0(self, batch_size):
-        return pyro.sample('w_0',
+    def model_sample_z_0(self, batch_size):
+        return pyro.sample('z_0',
                            dist.normal,
                            self.ng_zeros(self.z_size),
-                           self.w_0_prior_sd,
-                           batch_size=batch_size)
-
-    def model_sample_w(self, t, batch_size):
-        return pyro.sample('w_{}'.format(t),
-                           dist.normal,
-                           self.ng_zeros(self.z_size),
-                           self.w_prior_sd,
+                           self.z_0_prior_sd,
                            batch_size=batch_size)
 
     def model_transition(self, t, z):
         batch_size = z.size(0)
-        w = self.model_sample_w(t, batch_size)
-        z = self.transition(z) + w
-        assert_size(w, (batch_size, self.z_size))
+        z_mean, z_sd = self.transition(z)
+        z = pyro.sample('z_{}'.format(t),
+                        dist.normal,
+                        z_mean,
+                        z_sd,
+                        batch_size=batch_size)
         assert_size(z, (batch_size, self.z_size))
         return z
 
@@ -240,44 +236,23 @@ class DynAIR(nn.Module):
         rnn_input = input_embed.view(batch_size, self.seq_length, -1)
         input_rnn_h = self.input_rnn(rnn_input)
 
+        zs = []
+        z = batch_expand(self.guide_z_init, batch_size)
 
-        # Initialise z_{-1} from RNN state
-        w_0 = self.guide_w_0(input_rnn_h[:, -1])
-
-        z = w_0
-        zs = [z]
-
-        for t in range (1, self.seq_length):
+        for t in range (self.seq_length):
             # print(t)
             # print(z.size())
             # Reminder: input_rnn_h is in reverse time order.
-            # TODO: Does it make sense/(is it beneficial) to predict w
-            # from the transition(z_prev) rather than z_prev?
-            w = self.guide_w(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
-            z = self.transition(z) + w
+            z = self.guide_z(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
             zs.append(z)
 
         return zs
 
-    def guide_w_0(self, rnn_hid):
-        w_mean, w_sd = self.initial_state(rnn_hid)
-        w = pyro.sample('w_0', dist.normal, w_mean, w_sd)
-        return w
-
-    def guide_w(self, t, rnn_hid, z_prev):
+    def guide_z(self, t, rnn_hid, z_prev):
         batch_size = z_prev.size(0)
-        # TODO: If the guide outputs the mean it has the option of
-        # ignoring the transition and using only w to predict the
-        # state for the current frame. This can lead to good
-        # reconstructions without learning the dynamics. However, this
-        # extra flexibility might help get inference off the ground
-        # (by having a way to position windows before the transition
-        # is learned) so it could be useful. Will the prior on w
-        # ensure that optimization eventually finds the solution that
-        # uses the transition rather than w?
-        w_mean, w_sd = self.combine(rnn_hid, z_prev)
-        w = pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
-        return w
+        z_mean, z_sd = self.combine(rnn_hid, z_prev)
+        z = pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
+        return z
 
     def guide_z_what(self, batch, zs):
         batch_size = batch.size(0)
@@ -440,7 +415,7 @@ def run_svi(X, args):
         extrap_zs = []
         for t in range(14):
             #z = dynair.model_transition(14 + t, z)
-            z = dynair.transition(z)
+            z, _ = dynair.transition(z)
             frame_mean = dynair.model_emission(z, y_att)
             frames.append(frame_mean)
             extrap_zs.append(z)
@@ -449,7 +424,7 @@ def run_svi(X, args):
         out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
         vis.images(frames_to_rgb_list(out), nrow=7)
 
-        print(dynair.transition.lin.weight.data)
+        # print(dynair.transition.lin.weight.data)
 
 
 
