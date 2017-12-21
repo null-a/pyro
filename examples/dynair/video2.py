@@ -117,8 +117,8 @@ def sample_scene():
     # number of frames
     n = 14
 
-    #bkg = checker_board(4)
-    bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
+    bkg = checker_board(4)
+    #bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
 
     # Sample objects
     num_objs = 1#np.random.randint(3) + 1
@@ -176,4 +176,4 @@ save_seq(frames)
 # Make a dataset
 # out = sample_dataset(1000)
 # print(out.shape)
-# np.savez_compressed('single_object_no_bkg.npz', X=out)
+# np.savez_compressed('single_object_with_bkg.npz', X=out)
