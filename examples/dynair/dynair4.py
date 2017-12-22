@@ -14,7 +14,7 @@ import pyro.poutine as poutine
 
 from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine4, InitialState
 
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 
 import visdom
 from PIL import Image, ImageDraw
