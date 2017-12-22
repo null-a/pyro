@@ -398,8 +398,12 @@ def run_svi(X, args):
 
     batches = X.chunk(40)
 
+    def per_param_optim_args(module_name, param_name, tags):
+        return {'lr': 1e-1 if param_name == 'bkg_rgb' else 1e-4}
+
     svi = SVI(dynair.model, dynair.guide,
-              optim.Adam(dict(lr=1e-4)),
+              #optim.Adam(dict(lr=1e-4)),
+              optim.Adam(per_param_optim_args),
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
