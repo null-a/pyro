@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine4, InitialState, BasicTransition
+from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine5, InitialState, BasicTransition
 
 # from matplotlib import pyplot as plt
 
@@ -102,7 +102,7 @@ class DynAIR(nn.Module):
 
         # Predicting params of w:
         self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
-        self.combine = Combine4(self.input_rnn_hid_size, [50], self.z_size, zero_mean=False)
+        self.combine = Combine5(self.input_rnn_hid_size, [50], self.z_size)
         #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
 
 
@@ -239,42 +239,34 @@ class DynAIR(nn.Module):
 
 
         # Initialise z_{-1} from RNN state
-        w_0 = self.guide_w_0(input_rnn_h[:, -1])
-
-        z = w_0
+        z = self.guide_z_0(input_rnn_h[:, -1])
         zs = [z]
 
         for t in range (1, self.seq_length):
             # print(t)
             # print(z.size())
             # Reminder: input_rnn_h is in reverse time order.
-            # TODO: Does it make sense/(is it beneficial) to predict w
-            # from the transition(z_prev) rather than z_prev?
-            w = self.guide_w(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
-            z = self.transition(z) + w
+            z = self.guide_z(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
             zs.append(z)
 
         return zs
 
-    def guide_w_0(self, rnn_hid):
-        w_mean, w_sd = self.initial_state(rnn_hid)
-        w = pyro.sample('w_0', dist.normal, w_mean, w_sd)
-        return w
+    def guide_z_0(self, rnn_hid):
+        z_mean, z_sd = self.initial_state(rnn_hid)
+        z = pyro.sample('z_0', dist.normal, z_mean, z_sd)
+        return z
 
-    def guide_w(self, t, rnn_hid, z_prev):
+    def guide_z(self, t, rnn_hid, z_prev):
         batch_size = z_prev.size(0)
-        # TODO: If the guide outputs the mean it has the option of
-        # ignoring the transition and using only w to predict the
-        # state for the current frame. This can lead to good
-        # reconstructions without learning the dynamics. However, this
-        # extra flexibility might help get inference off the ground
-        # (by having a way to position windows before the transition
-        # is learned) so it could be useful. Will the prior on w
-        # ensure that optimization eventually finds the solution that
-        # uses the transition rather than w?
-        w_mean, w_sd = self.combine(rnn_hid, z_prev)
-        w = pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
-        return w
+        # TODO: Here we (optionally) make use of the model transition
+        # in the guide, though we only use the mean. This is probably
+        # fine for BasicTransition since it has a fixed noise
+        # distribution. But for TransitionDNN we might want to
+        # incorporate the uncertainty too?
+        z_pre, _ = self.transition(z_prev) # TODO: Make optional.
+        z_mean, z_sd = self.combine(rnn_hid, z_pre) # TODO: Make skip connection optional.
+        z = pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
+        return z
 
     def guide_z_what(self, batch, zs):
         batch_size = batch.size(0)
@@ -440,7 +432,7 @@ def run_svi(X, args):
             extrap_zs = []
             for t in range(14):
                 #z = dynair.model_transition(14 + t, z)
-                z = dynair.transition(z)
+                z, _ = dynair.transition(z)
                 frame_mean = dynair.model_emission(z, y_att)
                 frames.append(frame_mean)
                 extrap_zs.append(z)
