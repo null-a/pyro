@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine4, InitialState
+from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine4, InitialState, BasicTransition
 
 # from matplotlib import pyplot as plt
 
@@ -44,13 +44,13 @@ class DynAIR(nn.Module):
 
         assert self.z_where_size <= self.z_size # z_where is a slice of z
 
+        self.z_0_prior_mean = self.ng_zeros(self.z_size)
         # TODO: Are these sensible?
-        #                                         [z_where , rest... ]
-        #self.w_0_prior_sd = Variable(torch.Tensor([1.3, 1.3, 0.4, 0.4]), requires_grad=False)
-        self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 0.5, 0.5]), requires_grad=False)
+        self.z_0_prior_sd = Variable(torch.Tensor([2, 2,       # z_where
+                                                   0.5, 0.5]), # rest
+                                     requires_grad=False)
         if use_cuda:
-            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
-        self.w_prior_sd = self.ng_ones(self.z_size) * 0.1
+            self.z_0_prior_sd = self.z_0_prior_sd.cuda()
 
         self.z_what_prior_mean = self.ng_zeros(self.z_what_size)
         self.z_what_prior_sd = self.ng_ones(self.z_what_size)
@@ -119,7 +119,9 @@ class DynAIR(nn.Module):
         # I think this will "just work", but if not compare with
         # adding to the model and guiding with a Delta, which is the
         # correct thing.
-        self.transition = LinearTransition(self.z_size)
+
+        #self.transition = LinearTransition(self.z_size)
+        self.transition = BasicTransition(self.z_size, self.ng_ones(self.z_size) * 0.1)
 
         # CUDA
         if use_cuda:
@@ -136,8 +138,7 @@ class DynAIR(nn.Module):
         z_what = self.model_sample_z_what(batch_size)
         y_att = self.decode(z_what)
 
-        w = self.model_sample_w_0(batch_size)
-        z = w # + zero
+        z = self.model_sample_z_0(batch_size)
         frame_mean = self.model_emission(z, y_att)
 
         zs = [z]
@@ -177,27 +178,24 @@ class DynAIR(nn.Module):
                            self.z_what_prior_sd,
                            batch_size=batch_size)
 
-    def model_sample_w_0(self, batch_size):
-        return pyro.sample('w_0',
+    def model_sample_z_0(self, batch_size):
+        return pyro.sample('z_0',
                            dist.normal,
-                           self.ng_zeros(self.z_size),
-                           self.w_0_prior_sd,
+                           self.z_0_prior_mean,
+                           self.z_0_prior_sd,
                            batch_size=batch_size)
 
-    def model_sample_w(self, t, batch_size):
-        return pyro.sample('w_{}'.format(t),
+    def model_sample_z(self, t, z_mean, z_sd):
+        return pyro.sample('z_{}'.format(t),
                            dist.normal,
-                           self.ng_zeros(self.z_size),
-                           self.w_prior_sd,
-                           batch_size=batch_size)
+                           z_mean,
+                           z_sd)
 
     def model_transition(self, t, z):
         batch_size = z.size(0)
-        w = self.model_sample_w(t, batch_size)
-        z = self.transition(z) + w
-        assert_size(w, (batch_size, self.z_size))
+        z_mean, z_sd = self.transition(z)
         assert_size(z, (batch_size, self.z_size))
-        return z
+        return self.model_sample_z(t, z_mean, z_sd)
 
     def model_emission(self, z, y_att):
         assert z.size(0) == y_att.size(0)

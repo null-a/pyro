@@ -70,6 +70,19 @@ class LinearTransition(nn.Module):
     def forward(self, z):
         return self.lin(z)
 
+# Linear transition + fixed Gaussian noise.
+class BasicTransition(nn.Module):
+    def __init__(self, z_size, z_sd):
+        super(BasicTransition, self).__init__()
+        self.lin = nn.Linear(z_size, z_size, bias=False)
+        nn.init.normal(self.lin.weight, std=0.1)
+        self.lin.weight.data += torch.eye(z_size)
+        self.z_sd = z_sd
+
+    def forward(self, z):
+        z_mean = self.lin(z)
+        return z_mean, self.z_sd.expand_as(z_mean)
+
 # The DMM gated transition function.
 class TransitionDMM(nn.Module):
     def __init__(self, z_size):
