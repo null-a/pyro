@@ -66,10 +66,10 @@ class DynAIR(nn.Module):
         # Parameters.
 
         # Optimizable bkg:
-        self.bkg_rgb = nn.Parameter(torch.zeros(self.num_chan - 1, self.image_size, self.image_size))
+        #self.bkg_rgb = nn.Parameter(torch.zeros(self.num_chan - 1, self.image_size, self.image_size))
 
         # Fixed bkg:
-        #self.bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
+        self.bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
 
         # I think we'll want fixed alpha=1 for the background. (i.e. background is opaque)
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -127,7 +127,7 @@ class DynAIR(nn.Module):
 
 
     def background(self):
-        return torch.cat((sigmoid(self.bkg_rgb), self.bkg_alpha))
+        return torch.cat((self.bkg_rgb, self.bkg_alpha))
 
     # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, do_likelihood=True):
@@ -457,7 +457,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_with_bkg.npz')['X']
+    X_np = np.load('single_object_no_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
