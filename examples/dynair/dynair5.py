@@ -22,9 +22,15 @@ from PIL import Image, ImageDraw
 import argparse
 
 class DynAIR(nn.Module):
-    def __init__(self, use_cuda=False):
+    def __init__(self,
+                 use_combiner_skip_conns,
+                 use_transition_in_guide,
+                 use_linear_transition,
+                 use_cuda=False):
 
         super(DynAIR, self).__init__()
+
+        self.use_transition_in_guide = use_transition_in_guide
 
         # Set here so that self.ng_ones/self.ng_zeros does the right
         # thing.
@@ -102,7 +108,7 @@ class DynAIR(nn.Module):
 
         # Predicting params of w:
         self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
-        self.combine = Combine5(self.input_rnn_hid_size, [50], self.z_size)
+        self.combine = Combine5(self.input_rnn_hid_size, [50], self.z_size, use_combiner_skip_conns)
         #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
 
 
@@ -121,7 +127,11 @@ class DynAIR(nn.Module):
         # correct thing.
 
         #self.transition = LinearTransition(self.z_size)
-        self.transition = BasicTransition(self.z_size, self.ng_ones(self.z_size) * 0.1)
+
+        if use_linear_transition:
+            self.transition = BasicTransition(self.z_size, self.ng_ones(self.z_size) * 0.1)
+        else:
+            self.transition = TransitionDMM(self.z_size)
 
         # CUDA
         if use_cuda:
@@ -263,8 +273,8 @@ class DynAIR(nn.Module):
         # fine for BasicTransition since it has a fixed noise
         # distribution. But for TransitionDNN we might want to
         # incorporate the uncertainty too?
-        z_pre, _ = self.transition(z_prev) # TODO: Make optional.
-        z_mean, z_sd = self.combine(rnn_hid, z_pre) # TODO: Make skip connection optional.
+        z_pre, _ = self.transition(z_prev) if self.use_transition_in_guide else (z_prev, None)
+        z_mean, z_sd = self.combine(rnn_hid, z_pre)
         z = pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
         return z
 
@@ -384,7 +394,10 @@ class Plot():
 def run_svi(X, args):
     vis = visdom.Visdom()
     progress_plot = Plot(visdom.Visdom(env='progress'))
-    dynair = DynAIR(use_cuda=args.cuda)
+    dynair = DynAIR(use_combiner_skip_conns=not args.no_skip,
+                    use_transition_in_guide=not args.no_trans_in_guide,
+                    use_linear_transition=args.use_linear_transition,
+                    use_cuda=args.cuda)
 
     batches = X.chunk(40)
 
@@ -441,7 +454,7 @@ def run_svi(X, args):
             out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
             vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
-        print(dynair.transition.lin.weight.data)
+        # print(dynair.transition.lin.weight.data)
 
 
 
@@ -492,7 +505,12 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
+    parser.add_argument('--no-skip', action='store_true', default=False, help='No skip connections in combiner net.')
+    parser.add_argument('--no-trans-in-guide', action='store_true', default=False, help='Do not use model transition in guide.')
+    parser.add_argument('--use-linear-transition', action='store_true', default=False, help='Use linear transition.')
     args = parser.parse_args()
+    print(args)
+
 
     # Test model by sampling:
     # dynair = DynAIR()

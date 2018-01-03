@@ -244,14 +244,17 @@ class InitialState(nn.Module):
 # dynair5
 
 class Combine5(nn.Module):
-    def __init__(self, input_rnn_hid_size, hids, z_size):
+    def __init__(self, input_rnn_hid_size, hids, z_size, use_skip):
         super(Combine5, self).__init__()
         self.mlp = MLP(input_rnn_hid_size + z_size, hids + [2 * z_size], nn.ReLU)
         self.col_widths = [z_size, z_size]
+        self.use_skip = use_skip
 
     def forward(self, input_rnn_hid, z_pre):
         x = self.mlp(torch.cat((input_rnn_hid, z_pre), 1))
         cols = split_at(x, self.col_widths)
-        mean = cols[0] + z_pre # Notice the use of skip connection here.
+        mean = cols[0]
+        if self.use_skip:
+            mean = mean + z_pre
         sd = softplus(cols[1])
         return mean, sd
