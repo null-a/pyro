@@ -83,6 +83,38 @@ class BasicTransition(nn.Module):
         z_mean = self.lin(z)
         return z_mean, self.z_sd.expand_as(z_mean)
 
+# Either a linear or a simple non-linear transition. With (optionally
+# learnable) constant sd.
+class BasicTransition2(nn.Module):
+    def __init__(self, z_size, linear, opt_sd, use_cuda):
+        super(BasicTransition2, self).__init__()
+        if linear:
+            # linear transition
+            self.tr = nn.Linear(z_size, z_size, bias=False)
+            nn.init.normal(self.tr.weight, std=0.1)
+            self.tr.weight.data += torch.eye(z_size)
+        else:
+            self.tr = MLP(z_size, [50, z_size], nn.ReLU)
+        # sd
+        # Init. to about 0.1 (after softplus)
+        sd0 = torch.ones(z_size) * -2.25
+        if opt_sd:
+            self._sd = nn.Parameter(sd0)
+        else:
+            self._sd = Variable(sd0, requires_grad=False)
+
+        if use_cuda:
+            self._sd = self._sd.cuda()
+
+    def sd(self):
+        return softplus(self._sd)
+
+    def forward(self, z_prev):
+        z_mean = self.tr(z_prev)
+        z_sd = self.sd().expand_as(z_mean)
+        return z_mean, z_sd
+
+
 # The DMM gated transition function.
 class TransitionDMM(nn.Module):
     def __init__(self, z_size):

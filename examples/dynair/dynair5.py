@@ -12,7 +12,7 @@ import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
 
-from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine5, InitialState, BasicTransition
+from modules import MLP, SquishStateParams, FixedTransition, TransitionDMM, InputRNN, EncodeRNN, Decoder, Combine, CombineDMM, LinearTransition, Combine5, InitialState, BasicTransition, BasicTransition2
 
 # from matplotlib import pyplot as plt
 
@@ -26,6 +26,7 @@ class DynAIR(nn.Module):
                  use_combiner_skip_conns,
                  use_transition_in_guide,
                  use_linear_transition,
+                 optimize_transition_sd,
                  use_cuda=False):
 
         super(DynAIR, self).__init__()
@@ -128,10 +129,12 @@ class DynAIR(nn.Module):
 
         #self.transition = LinearTransition(self.z_size)
 
-        if use_linear_transition:
-            self.transition = BasicTransition(self.z_size, self.ng_ones(self.z_size) * 0.1)
-        else:
-            self.transition = TransitionDMM(self.z_size)
+
+
+        self.transition = BasicTransition2(self.z_size,
+                                           use_linear_transition,
+                                           optimize_transition_sd,
+                                           use_cuda)
 
         # CUDA
         if use_cuda:
@@ -397,6 +400,7 @@ def run_svi(X, args):
     dynair = DynAIR(use_combiner_skip_conns=not args.no_skip,
                     use_transition_in_guide=not args.no_trans_in_guide,
                     use_linear_transition=args.use_linear_transition,
+                    optimize_transition_sd=args.optimize_transition_sd,
                     use_cuda=args.cuda)
 
     batches = X.chunk(40)
@@ -422,6 +426,10 @@ def run_svi(X, args):
         n = 1
 
         if (i+1) % 1 == 0:
+
+            # Show transition s.d.
+            print(dynair.transition.sd())
+
             # TODO: Make reconstruct method.
             trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
             frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
@@ -508,6 +516,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-skip', action='store_true', default=False, help='No skip connections in combiner net.')
     parser.add_argument('--no-trans-in-guide', action='store_true', default=False, help='Do not use model transition in guide.')
     parser.add_argument('--use-linear-transition', action='store_true', default=False, help='Use linear transition.')
+    parser.add_argument('--optimize-transition-sd', action='store_true', default=False, help='Optimize transition sd.')
     args = parser.parse_args()
     print(args)
 
