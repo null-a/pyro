@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 from PIL.ImageTransform import AffineTransform
 
 # Turn multiple frames (gif,tiff,etc.) into a single strip of frames
@@ -112,6 +112,32 @@ def sample_end_points(n):
         #print('reject')
         return sample_end_points(n)
 
+def sample_shade():
+    img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    gray_level = (30,) * 3 + (128,)
+
+    hyp = SIZE * (np.sqrt(2) / 2.0)
+    theta = np.random.uniform() * 2 * np.pi
+
+    x = np.cos(theta) * hyp
+    y = np.sin(theta) * hyp
+
+    draw.line([(x+SIZE/2,y+SIZE/2), (-x+SIZE/2,-y+SIZE/2)], fill=gray_level)
+
+    # Pick a fill seed that is not on the boundary.
+    h = SIZE/4
+    xf = np.cos(theta + np.pi/2) * h
+    yf = np.sin(theta + np.pi/2) * h
+
+    ImageDraw.floodfill(img, (xf + SIZE/2, yf + SIZE/2), gray_level)
+
+    img = img.filter(ImageFilter.GaussianBlur(1))
+
+    return img
+
+
 def sample_scene():
 
     # number of frames
@@ -119,6 +145,8 @@ def sample_scene():
 
     bkg = checker_board(4)
     #bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
+
+    shade = sample_shade()
 
     # Sample objects
     num_objs = 1#np.random.randint(3) + 1
@@ -144,6 +172,9 @@ def sample_scene():
             s = scale(s, 2) # add variable scale, possibly dynamic
             s = position(s, x, y)
             acc = Image.alpha_composite(acc, s)
+
+        acc = Image.alpha_composite(acc, shade)
+
         frames.append(acc)
 
     return frames
