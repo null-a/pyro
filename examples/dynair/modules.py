@@ -209,14 +209,14 @@ class InputRNN(nn.Module):
 # the non-recurrent encoder in AIR has hidden layers), or something
 # bi-directional even?
 class EncodeRNN(nn.Module):
-    def __init__(self, window_size, num_chan, hid_size, z_what_size):
+    def __init__(self, window_size, num_chan, hid_size, w_size, y_size, z_size):
         super(EncodeRNN, self).__init__()
         self.hid_size = hid_size
-        self.rnn = nn.GRU(num_chan * window_size**2, hid_size)
+        self.rnn = nn.GRU(num_chan * window_size**2 + z_size + w_size, hid_size)
         self.h0 = zeros(hid_size)
         nn.init.normal(self.h0)
-        self.mlp = MLP(hid_size, [z_what_size * 2], nn.ReLU)
-        self.col_widths = [z_what_size, z_what_size]
+        self.mlp = MLP(hid_size, [y_size * 2], nn.ReLU)
+        self.col_widths = [y_size, y_size]
 
     def forward(self, seq):
         # seq.size(0) is sequence length for this RNN.
@@ -227,19 +227,20 @@ class EncodeRNN(nn.Module):
         assert hid.size() == (1, batch_size, self.hid_size)
         x = self.mlp(hid.view(batch_size, self.hid_size))
         cols = split_at(x, self.col_widths)
-        z_what_mean = cols[0]
-        z_what_sd = softplus(cols[1])
-        return z_what_mean, z_what_sd
+        y_mean = cols[0]
+        y_sd = softplus(cols[1])
+        return y_mean, y_sd
 
 class Decoder(nn.Module):
-    def __init__(self, z_what_size, hidden_layer_sizes, num_chan, window_size, bias):
+    def __init__(self, w_size, y_size, z_size, hidden_layer_sizes, num_chan, window_size, bias):
         super(Decoder, self).__init__()
+        in_size = w_size + y_size + z_size
         out_size = num_chan * window_size**2
         self.bias = bias
-        self.mlp = MLP(z_what_size, hidden_layer_sizes + [out_size], nn.ReLU)
+        self.mlp = MLP(in_size, hidden_layer_sizes + [out_size], nn.ReLU)
 
-    def forward(self, z_what):
-        return sigmoid(self.mlp(z_what) + self.bias)
+    def forward(self, w, y, z):
+        return sigmoid(self.mlp(torch.cat((w, y, z), 1)) + self.bias)
 
 # dynair4
 
@@ -288,5 +289,18 @@ class Combine5(nn.Module):
         mean = cols[0]
         if self.use_skip:
             mean = mean + z_pre
+        sd = softplus(cols[1])
+        return mean, sd
+
+class ParamW(nn.Module):
+    def __init__(self, input_rnn_hid_size, hids, w_size):
+        super(ParamW, self).__init__()
+        self.mlp = MLP(input_rnn_hid_size, hids + [w_size * 2], nn.ReLU)
+        self.col_widths = [w_size, w_size]
+
+    def forward(self, input_rnn_hid):
+        x = self.mlp(input_rnn_hid)
+        cols = split_at(x, self.col_widths)
+        mean = cols[0]
         sd = softplus(cols[1])
         return mean, sd
