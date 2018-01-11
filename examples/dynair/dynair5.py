@@ -107,7 +107,7 @@ class DynAIR(nn.Module):
         self.input_mlp = nn.Sequential(MLP(self.num_chan * self.image_size**2, [500, self.input_embed_size], nn.ReLU), nn.Tanh())
         self.input_rnn = InputRNN(self.input_embed_size, self.input_rnn_hid_size)
 
-        # Predicting params of w:
+        # Predicting params of z:
         self.initial_state = InitialState(self.input_rnn_hid_size, [50], self.z_size)
         self.combine = Combine5(self.input_rnn_hid_size, [50], self.z_size, use_combiner_skip_conns)
         #self.combine = Combine(self.input_rnn_hid_size, self.z_size)
