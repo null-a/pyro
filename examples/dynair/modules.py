@@ -98,13 +98,13 @@ class BasicTransition2(nn.Module):
         # sd
         # Init. to about 0.1 (after softplus)
         sd0 = torch.ones(z_size) * -2.25
+        if use_cuda:
+            sd0 = sd0.cuda()
+
         if opt_sd:
             self._sd = nn.Parameter(sd0)
         else:
             self._sd = Variable(sd0, requires_grad=False)
-
-        if use_cuda:
-            self._sd = self._sd.cuda()
 
     def sd(self):
         return softplus(self._sd)
