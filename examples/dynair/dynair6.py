@@ -478,7 +478,7 @@ def run_svi(X, args):
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
             progress_plot.add(i*len(batches) + j, elbo)
 
-        ix = 54
+        ix = 15
         n = 1
 
         if (i+1) % 1 == 0:
