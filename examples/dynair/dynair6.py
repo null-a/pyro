@@ -521,6 +521,10 @@ def run_svi(X, args):
 
         # print(dynair.transition.lin.weight.data)
 
+        if (i+1) % 50 == 0:
+            print('Saving parameters...')
+            torch.save(dynair.state_dict(), 'dynair6.pytorch')
+
 
 
 
