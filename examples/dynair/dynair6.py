@@ -337,6 +337,12 @@ class DynAIR(nn.Module):
         assert len(zs) == self.seq_length
         assert all(z.size() == (batch_size, self.z_size) for z in zs)
 
+        # The input (`batch`) is in reverse time order, but `zs` is in
+        # forward time order. We reverse the `zs` here to ensure that
+        # `zs` and `batch` when extracting windows. (I think this a
+        # bug in previous implementations.)
+        zs = list(reversed(zs))
+
         z_wheres = [z[:, 0:self.z_where_size] for z in zs]
         batch_trans = batch.transpose(0, 1)
         x_att = torch.stack([self.image_to_window(z_where, frame)
