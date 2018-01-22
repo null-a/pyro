@@ -40,19 +40,10 @@ class DynAIR(nn.Module):
         self.z_size = 4
         self.w_size = 3 # x,y position and scale
 
-        # Network config:
-        # Model
-
-        # Guide
-        #self.extractor_arch = [200, 200]
-        #self.encode_arch = [200,200]
-        #self.combiner_arch = []
-
 
         bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
         self.bkg = torch.cat((bkg_rgb, bkg_alpha))
-
 
 
         # Priors:
@@ -76,12 +67,8 @@ class DynAIR(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        #self.encoder_arch = []
-        #self.decoder_arch = []
 
         # Parameters.
-        # ...
-
         self.guide_z_init = nn.Parameter(torch.zeros(self.z_size)) # TODO: rand. init?
         self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
 
@@ -91,12 +78,8 @@ class DynAIR(nn.Module):
 
         self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size)
         self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size)
-        #self.extractor = None
-        #self.encode = None # Maybe use multi-layer RNN instead/as well.
-        #self.combiner = None
 
         # Model modules:
-
         self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
         self.decode = nn.Sequential(
             mod.MLP(self.z_size,
@@ -338,34 +321,16 @@ def over(a, b):
     return torch.cat((rgb, alpha), 1)
 
 
-class Plot():
-    def __init__(self, vis):
-        self.win = None
-        self.vis = vis
-
-    def add(self, x, y):
-        if self.win is None:
-            self.win = self.vis.line(X=np.array([x]), Y=np.array([y]))
-        else:
-            self.vis.line(X=np.array([x]), Y=np.array([y]), win=self.win, update='append')
 
 def run_svi(X, args):
     vis = visdom.Visdom()
-    progress_plot = Plot(visdom.Visdom(env='progress'))
-    dynair = DynAIR(use_combiner_skip_conns=not args.no_skip,
-                    use_transition_in_guide=not args.no_trans_in_guide,
-                    use_linear_transition=args.use_linear_transition,
-                    optimize_transition_sd=args.optimize_transition_sd,
-                    use_cuda=args.cuda)
+
+    dynair = DynAIR(use_cuda=args.cuda)
 
     batches = X.chunk(40)
 
-    def per_param_optim_args(module_name, param_name, tags):
-        return {'lr': 1e-1 if param_name == 'bkg_rgb' else 1e-4}
-
     svi = SVI(dynair.model, dynair.guide,
-              #optim.Adam(dict(lr=1e-4)),
-              optim.Adam(per_param_optim_args),
+              optim.Adam(dict(lr=1e-4)),
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
@@ -473,10 +438,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
-    parser.add_argument('--no-skip', action='store_true', default=False, help='No skip connections in combiner net.')
-    parser.add_argument('--no-trans-in-guide', action='store_true', default=False, help='Do not use model transition in guide.')
-    parser.add_argument('--use-linear-transition', action='store_true', default=False, help='Use linear transition.')
-    parser.add_argument('--optimize-transition-sd', action='store_true', default=False, help='Optimize transition sd.')
     args = parser.parse_args()
     print(args)
 
