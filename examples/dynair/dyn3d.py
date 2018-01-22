@@ -106,9 +106,8 @@ class DynAIR(nn.Module):
         ws = [w]
         frames = [frame_mean]
 
-        # Recall, that the data are in reverse time order.
         if do_likelihood:
-            self.likelihood(0, frame_mean, batch[:, -1])
+            self.likelihood(0, frame_mean, batch[:, 0])
 
         # TODO: iarange here (or somewhere)
         for t in range(1, self.seq_length):
@@ -118,7 +117,7 @@ class DynAIR(nn.Module):
             ws.append(w)
             frames.append(frame_mean)
             if do_likelihood:
-                self.likelihood(t, frame_mean, batch[:, -(t + 1)])
+                self.likelihood(t, frame_mean, batch[:, t])
 
         return frames, ws, zs
 
@@ -359,7 +358,7 @@ def run_svi(X, args):
 
             for k in range(n):
                 out = overlay_window_outlines(dynair, frames[k], zs[k, :, 0:2])
-                vis.images(list(reversed(frames_to_rgb_list(X[ix+k].cpu()))), nrow=7)
+                vis.images(frames_to_rgb_list(X[ix+k].cpu()), nrow=7)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
 
