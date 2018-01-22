@@ -69,3 +69,43 @@ class Transition(nn.Module):
         w_sd = softplus(self._w_sd).expand_as(w_mean)
 
         return z_mean, z_sd, w_mean, w_sd
+
+
+# TODO: What would make a good network arch. for this task. (i.e.
+# Locating an object given a hint about where to look and what to look
+# for.)
+class ParamW(nn.Module):
+    def __init__(self, hids, x_size, w_size, z_size):
+        super(ParamW, self).__init__()
+        in_size = x_size + w_size + z_size
+        self.col_widths = [w_size, w_size]
+        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, x, w_prev, z_prev):
+        x_flat = x.view(x.size(0), -1)
+        out = self.mlp(torch.cat((x_flat, w_prev, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+# TODO: Similarly, what should this look like. Re-visit DMM for
+# inspiration?
+
+# One thought is that we might compute a representation the window
+# contents before trying to combine this with the previous state.
+
+class ParamZ(nn.Module):
+    def __init__(self, hids, w_size, window_size, z_size):
+        super(ParamZ, self).__init__()
+        in_size = w_size + window_size + z_size
+        self.col_widths = [z_size, z_size]
+        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, w, windows, z_prev):
+        windows_flat = windows.view(windows.size(0), -1)
+        out = self.mlp(torch.cat((w, windows_flat, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        z_mean = cols[0]
+        z_sd = softplus(cols[1])
+        return z_mean, z_sd

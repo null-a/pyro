@@ -46,7 +46,6 @@ class DynAIR(nn.Module):
         # Guide
         #self.extractor_arch = [200, 200]
         #self.encode_arch = [200,200]
-        #self.input_rnn_hid_size = 100
         #self.combiner_arch = []
 
 
@@ -83,14 +82,18 @@ class DynAIR(nn.Module):
         # Parameters.
         # ...
 
+        self.z_init = nn.Parameter(torch.zeros(self.z_size)) # TODO: rand. init?
+        self.w_init = nn.Parameter(torch.zeros(self.w_size))
+
         # Modules
 
         # Guide modules:
 
-        self.extractor = None
-        self.encode = None # Maybe use multi-layer RNN instead/as well.
-        self.input_rnn = None
-        self.combiner = None
+        self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size)
+        self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size)
+        #self.extractor = None
+        #self.encode = None # Maybe use multi-layer RNN instead/as well.
+        #self.combiner = None
 
         # Model modules:
 
@@ -203,110 +206,41 @@ class DynAIR(nn.Module):
         # TODO: iarange (here, or elsewhere) (I'm assuming batch will
         # be the first dim in order to support this.)
 
-        # Assume input videos already have frames in reverse time
-        # order.
         batch_size = batch.size(0)
         assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
 
+        zs = []
+        ws = []
 
-        input_rnn_h = self.guide_run_input_rnn(batch)
-        w = self.guide_w(input_rnn_h)
+        z = batch_expand(self.z_init, batch_size)
+        w = batch_expand(self.w_init, batch_size)
 
-        zs = self.guide_zs(input_rnn_h)
+        for t in range(self.seq_length):
+            x = batch[:, t]
+            w = self.guide_w(t, x, w, z)
+            windows = self.image_to_window(w, x)
+            z = self.guide_z(t, w, windows, z)
 
-        y = self.guide_y(batch, zs, w)
-
-        return zs, y, w
-
-    def guide_run_input_rnn(self, batch):
-        # Run the input RNN over the input batch. (In reverse time
-        # order.)
-        batch_size = batch.size(0)
-        assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
-
-        flat_batch = batch.view(-1, self.num_chan * self.image_size ** 2)
-        input_embed = self.input_mlp(flat_batch)
-        rnn_input = input_embed.view(batch_size, self.seq_length, -1)
-        input_rnn_h = self.input_rnn(rnn_input)
-
-        return input_rnn_h
-
-    def guide_w(self, input_rnn_h):
-        # Compute params from final (t=0) RNN hidden state.
-        w_mean, w_sd = self.w_param(input_rnn_h[:, -1])
-        return pyro.sample('w', dist.normal, w_mean, w_sd)
-
-    def guide_zs(self, input_rnn_h):
-
-        # I'm assuming the zs are conditionally independent of w
-        # (given x), but this isn't the case in the true posterior
-        # factorization. I'm guessing it will be OK in this model.
-
-        # Initialise z_{-1} from RNN state
-        z = self.guide_z_0(input_rnn_h[:, -1])
-        zs = [z]
-
-        for t in range (1, self.seq_length):
-            # print(t)
-            # print(z.size())
-            # Reminder: input_rnn_h is in reverse time order.
-            z = self.guide_z(t, input_rnn_h[:, self.seq_length - (t + 1)], z)
+            ws.append(w)
             zs.append(z)
 
-        return zs
+        return ws, zs
 
-    def guide_z_0(self, rnn_hid):
-        z_mean, z_sd = self.initial_state(rnn_hid)
-        z = pyro.sample('z_0', dist.normal, z_mean, z_sd)
-        return z
+    def guide_w(self, t, batch, w_prev, z_prev):
+        w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
+        return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
-    def guide_z(self, t, rnn_hid, z_prev):
-        batch_size = z_prev.size(0)
-        # TODO: Here we (optionally) make use of the model transition
-        # in the guide, though we only use the mean. This is probably
-        # fine for BasicTransition since it has a fixed noise
-        # distribution. But for TransitionDNN we might want to
-        # incorporate the uncertainty too?
-        z_pre, _ = self.transition(z_prev) if self.use_transition_in_guide else (z_prev, None)
-        z_mean, z_sd = self.combine(rnn_hid, z_pre)
-        z = pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
-        return z
+    def guide_z(self, t, w, windows, z_prev):
+        z_mean, z_sd = self.z_param(w, windows, z_prev)
+        return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
-    def guide_y(self, batch, zs, w):
-        batch_size = batch.size(0)
-        assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
-        assert len(zs) == self.seq_length
-        assert all(z.size() == (batch_size, self.z_size) for z in zs)
 
-        # The input (`batch`) is in reverse time order, but `zs` is in
-        # forward time order. We reverse the `zs` here to ensure that
-        # `zs` and `batch` when extracting windows. (I think this a
-        # bug in previous implementations.)
-        zs = list(reversed(zs))
-
-        z_wheres = [z[:, 0:self.z_where_size] for z in zs]
-        batch_trans = batch.transpose(0, 1)
-        x_att = torch.stack([self.image_to_window(z_where, frame)
-                             for (z_where, frame) in zip(z_wheres, batch_trans)])
-
-        assert_size(x_att, (self.seq_length, batch_size, self.num_chan * self.window_size ** 2))
-
-        # Concat x_arr,zs,w_seq for input to RNN
-        # w.size() == (batch_size, w_size)
-        w_seq = torch.unsqueeze(w, 0).expand(self.seq_length, batch_size, self.w_size)
-        rnn_input = torch.cat((x_att, torch.stack(zs), w_seq), 2)
-
-        y_mean, y_sd = self.encode_rnn(rnn_input)
-        y = pyro.sample('y', dist.normal, y_mean, y_sd)
-        # print('y')
-        # print(y)
-        return y
-
-    def image_to_window(self, z_where, images):
-        assert z_where.size(0) == images.size(0), 'Batch size mismatch'
-        n = images.size(0)
+    def image_to_window(self, w, images):
+        n = w.size(0)
+        assert_size(w, (n, self.w_size))
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-        theta_inv = expand_z_where(*z_where_inv(z_where, self.window_scale))
+
+        theta_inv = expand_z_where(z_where_inv(w))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
         return grid_sample(images, grid).view(n, -1)
 
@@ -548,17 +482,17 @@ if __name__ == '__main__':
 
 
     # Test model by sampling:
-    dynair = DynAIR()
-    dummy_data = Variable(torch.ones(1, 14, 4, 32, 32))
-    frames, ws, zs = dynair.model(dummy_data, do_likelihood=False)
-    print(len(frames))
-    print(frames[0].size())
+    # dynair = DynAIR()
+    # dummy_data = Variable(torch.ones(1, 14, 4, 32, 32))
+    # frames, ws, zs = dynair.model(dummy_data, do_likelihood=False)
+    # print(len(frames))
+    # print(frames[0].size())
 
-    print(len(ws))
-    print(ws[0].size())
+    # print(len(ws))
+    # print(ws[0].size())
 
-    print(len(zs))
-    print(zs[0].size())
+    # print(len(zs))
+    # print(zs[0].size())
 # print(zs)
     # from matplotlib import pyplot as plt
     # for frame in frames:
@@ -570,9 +504,12 @@ if __name__ == '__main__':
 
     # Test guide:
     #(batch, seq, channel, w, h)
-    # dynair = DynAIR(True, False, False, True)
-    # data = Variable(torch.ones(1, 14, 4, 32, 32))
-    # dynair.guide(data)
+    dynair = DynAIR()
+    data = Variable(torch.ones(1, 14, 4, 32, 32))
+    ws, zs = dynair.guide(data)
+
+    print(torch.stack(ws))
+    print(torch.stack(zs))
 
     # X = load_data()
     # if args.cuda:
