@@ -340,7 +340,6 @@ def run_svi(X, args):
             loss = svi.step(batch)
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
-            progress_plot.add(i*len(batches) + j, elbo)
 
         ix = 15
         n = 1
