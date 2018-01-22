@@ -213,6 +213,7 @@ class DynAIR(nn.Module):
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
     def guide_z(self, t, w, x_att, z_prev):
+        # TODO: Try having z_param predict z_mean as z_prev + delta.
         z_mean, z_sd = self.z_param(w, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
