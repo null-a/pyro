@@ -88,7 +88,7 @@ class DynAIR(nn.Module):
 
         # Model modules:
 
-        self.transition = mod.Transition(self.w_size, self.z_size, 50, 50)
+        self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
         self.decode = nn.Sequential(
             mod.MLP(self.z_size,
                     [100, 100, self.num_chan * self.window_size**2],
@@ -106,12 +106,12 @@ class DynAIR(nn.Module):
 
         batch_size = batch.size(0)
 
-        w = self.model_sample_w_0(batch_size)
         z = self.model_sample_z_0(batch_size)
-        frame_mean = self.model_emission(w, z)
+        w = self.model_sample_w_0(batch_size)
+        frame_mean = self.model_emission(z, w)
 
-        ws = [w]
         zs = [z]
+        ws = [w]
         frames = [frame_mean]
 
         # Recall, that the data are in reverse time order.
@@ -120,10 +120,10 @@ class DynAIR(nn.Module):
 
         # TODO: iarange here (or somewhere)
         for t in range(1, self.seq_length):
-            w, z = self.model_transition(t, w, z)
-            frame_mean = self.model_emission(w, z)
-            ws.append(w)
+            z, w = self.model_transition(t, z, w)
+            frame_mean = self.model_emission(z, w)
             zs.append(z)
+            ws.append(w)
             frames.append(frame_mean)
             if do_likelihood:
                 self.likelihood(t, frame_mean, batch[:, -(t + 1)])
@@ -166,18 +166,18 @@ class DynAIR(nn.Module):
                            z_mean,
                            z_sd)
 
-    def model_transition(self, t, w, z):
+    def model_transition(self, t, z, w):
         batch_size = z.size(0)
-        assert_size(w, (batch_size, self.w_size))
         assert_size(z, (batch_size, self.z_size))
-        w_mean, w_sd, z_mean, z_sd = self.transition(w, z)
-        w = self.model_sample_w(t, w_mean, w_sd)
+        assert_size(w, (batch_size, self.w_size))
+        z_mean, z_sd, w_mean, w_sd = self.transition(z, w)
         z = self.model_sample_z(t, z_mean, z_sd)
-        return w, z
+        w = self.model_sample_w(t, w_mean, w_sd)
+        return z, w
 
-    def model_emission(self, w, z):
-        batch_size = w.size(0)
-        assert w.size(0) == z.size(0)
+    def model_emission(self, z, w):
+        batch_size = z.size(0)
+        assert z.size(0) == w.size(0)
         window_contents = self.decode(z)
         bkg = batch_expand(self.bkg, batch_size)
         return over(self.window_to_image(w, window_contents), bkg)

@@ -44,30 +44,28 @@ def split_at(t, widths):
 # A simple non-linear transition. With learnable (constant) sd.
 
 class Transition(nn.Module):
-    def __init__(self, w_size, z_size, w_hid_size, z_hid_size):
+    def __init__(self, z_size, w_size, z_hid_size, w_hid_size):
         super(Transition, self).__init__()
-        in_size = w_size + z_size
 
         # Means
-        self.w_mean_net = MLP(in_size, [w_hid_size, w_size], nn.ReLU)
-        self.z_mean_net = MLP(in_size, [z_hid_size, z_size], nn.ReLU)
+        self.z_mean_net = MLP(z_size, [z_hid_size, z_size], nn.ReLU)
+        self.w_mean_net = MLP(z_size + w_size, [w_hid_size, w_size], nn.ReLU)
 
         # SDs
         # Initialize to ~0.1 (after softplus).
-        self._w_sd = nn.Parameter(torch.ones(w_size) * -2.25)
         self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
+        self._w_sd = nn.Parameter(torch.ones(w_size) * -2.25)
 
-    def forward(self, w_prev, z_prev):
-        assert w_prev.size(0) == z_prev.size(0)
-        batch_size = w_prev.size(0)
+    def forward(self, z_prev, w_prev):
+        assert z_prev.size(0) == w_prev.size(0)
+        batch_size = z_prev.size(0)
 
-        wz = torch.cat((w_prev, z_prev), 1)
+        wz_prev = torch.cat((w_prev, z_prev), 1)
 
-        w_mean = self.w_mean_net(wz)
-        z_mean = self.z_mean_net(wz)
+        z_mean = self.z_mean_net(z_prev)
+        w_mean = self.w_mean_net(wz_prev)
 
-        w_sd = softplus(self._w_sd).expand_as(w_mean)
         z_sd = softplus(self._z_sd).expand_as(z_mean)
+        w_sd = softplus(self._w_sd).expand_as(w_mean)
 
-        return w_mean, w_sd, z_mean, z_sd
-
+        return z_mean, z_sd, w_mean, w_sd
