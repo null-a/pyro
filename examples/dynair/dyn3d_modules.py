@@ -96,15 +96,15 @@ class ParamW(nn.Module):
 # contents before trying to combine this with the previous state.
 
 class ParamZ(nn.Module):
-    def __init__(self, hids, w_size, window_size, z_size):
+    def __init__(self, hids, w_size, x_att_size, z_size):
         super(ParamZ, self).__init__()
-        in_size = w_size + window_size + z_size
+        in_size = w_size + x_att_size + z_size
         self.col_widths = [z_size, z_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, w, windows, z_prev):
-        windows_flat = windows.view(windows.size(0), -1)
-        out = self.mlp(torch.cat((w, windows_flat, z_prev), 1))
+    def forward(self, w, x_att, z_prev):
+        x_att_flat = x_att.view(x_att.size(0), -1)
+        out = self.mlp(torch.cat((w, x_att_flat, z_prev), 1))
         cols = split_at(out, self.col_widths)
         z_mean = cols[0]
         z_sd = softplus(cols[1])

@@ -187,9 +187,9 @@ class DynAIR(nn.Module):
     def model_emission(self, z, w):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
-        window_contents = self.decode(z)
+        x_att = self.decode(z)
         bkg = batch_expand(self.bkg, batch_size)
-        return over(self.window_to_image(w, window_contents), bkg)
+        return over(self.window_to_image(w, x_att), bkg)
 
 
 
@@ -218,8 +218,8 @@ class DynAIR(nn.Module):
         for t in range(self.seq_length):
             x = batch[:, t]
             w = self.guide_w(t, x, w, z)
-            windows = self.image_to_window(w, x)
-            z = self.guide_z(t, w, windows, z)
+            x_att = self.image_to_window(w, x)
+            z = self.guide_z(t, w, x_att, z)
 
             ws.append(w)
             zs.append(z)
@@ -230,8 +230,8 @@ class DynAIR(nn.Module):
         w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
-    def guide_z(self, t, w, windows, z_prev):
-        z_mean, z_sd = self.z_param(w, windows, z_prev)
+    def guide_z(self, t, w, x_att, z_prev):
+        z_mean, z_sd = self.z_param(w, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
 
