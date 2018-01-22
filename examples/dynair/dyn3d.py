@@ -58,9 +58,15 @@ class DynAIR(nn.Module):
 
         # Priors:
         # TODO: The prior should ensure that scale>0.
+
+        # TODO: Previously a prior over position + a transition
+        # initialised to the identity made for a seemingly sensible
+        # init. Can we do something similar here? (It seems kinda
+        # pointless trying to put information into the prior for the
+        # first step if the transition is free to do anything.)
+
         self.w_0_prior_mean = self.ng_zeros(self.w_size)
-        self.w_0_prior_sd = Variable(torch.Tensor([2, 2,       # position
-                                                   2]), # scale (TODO: what should this be?)
+        self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 2]),
                                      requires_grad=False)
         if use_cuda:
             self.z_0_prior_sd = self.z_0_prior_sd.cuda()
