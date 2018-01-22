@@ -82,8 +82,8 @@ class DynAIR(nn.Module):
         # Parameters.
         # ...
 
-        self.z_init = nn.Parameter(torch.zeros(self.z_size)) # TODO: rand. init?
-        self.w_init = nn.Parameter(torch.zeros(self.w_size))
+        self.guide_z_init = nn.Parameter(torch.zeros(self.z_size)) # TODO: rand. init?
+        self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
 
         # Modules
 
@@ -212,8 +212,8 @@ class DynAIR(nn.Module):
         zs = []
         ws = []
 
-        z = batch_expand(self.z_init, batch_size)
-        w = batch_expand(self.w_init, batch_size)
+        z = batch_expand(self.guide_z_init, batch_size)
+        w = batch_expand(self.guide_w_init, batch_size)
 
         for t in range(self.seq_length):
             x = batch[:, t]
