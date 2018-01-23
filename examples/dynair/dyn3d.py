@@ -62,10 +62,13 @@ class DynAIR(nn.Module):
 
 
         # Parameters.
-        self.guide_z_init = nn.Parameter(torch.zeros(self.z_size)) # TODO: rand. init?
+        self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
         self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
 
         # Modules
+
+        # TODO: Review all arch. of all modules. (Currently just using
+        # MLP so that I have something to test.)
 
         # Guide modules:
 
@@ -74,6 +77,7 @@ class DynAIR(nn.Module):
 
         # Model modules:
         self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
+        # TODO: Consider using init. that outputs black/transparent images.
         self.decode = nn.Sequential(
             mod.MLP(self.z_size,
                     [100, 100, self.num_chan * self.window_size**2],

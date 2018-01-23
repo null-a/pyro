@@ -92,7 +92,7 @@ class ParamW(nn.Module):
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
 
-# One thought is that we might compute a representation the window
+# One thought is that we might compute a representation of the window
 # contents before trying to combine this with the previous state.
 
 class ParamZ(nn.Module):
