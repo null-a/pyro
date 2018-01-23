@@ -397,7 +397,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_with_shade_and_bkg.npz')['X']
+    X_np = np.load('single_object_no_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
@@ -469,14 +469,14 @@ if __name__ == '__main__':
 
     # Test guide:
     #(batch, seq, channel, w, h)
-    dynair = DynAIR()
-    data = Variable(torch.ones(1, 14, 4, 32, 32))
-    ws, zs = dynair.guide(data)
+    # dynair = DynAIR()
+    # data = Variable(torch.ones(1, 14, 4, 32, 32))
+    # ws, zs = dynair.guide(data)
 
-    print(torch.stack(ws))
-    print(torch.stack(zs))
+    # print(torch.stack(ws))
+    # print(torch.stack(zs))
 
-    # X = load_data()
-    # if args.cuda:
-    #     X = X.cuda()
-    # run_svi(X, args)
+    X = load_data()
+    if args.cuda:
+        X = X.cuda()
+    run_svi(X, args)
