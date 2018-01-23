@@ -391,7 +391,7 @@ def run_svi(X, args):
 
         if (i+1) % 50 == 0:
             print('Saving parameters...')
-            torch.save(dynair.state_dict(), 'dynair6.pytorch')
+            torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
 
 
