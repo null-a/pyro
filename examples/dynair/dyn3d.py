@@ -342,46 +342,44 @@ def run_svi(X, args):
 
         ix = 15
         n = 1
+        test_batch = X[ix:ix+n]
 
         if (i+1) % 1 == 0:
 
-            # Show transition s.d.
-            #print(dynair.transition.sd())
-
             # TODO: Make reconstruct method.
-            trace = poutine.trace(dynair.guide).get_trace(X[ix:ix+n])
-            frames, zs = poutine.replay(dynair.model, trace)(X[ix:ix+n], do_likelihood=False)
+            trace = poutine.trace(dynair.guide).get_trace(test_batch)
+            frames_seq, ws_seq, _ = poutine.replay(dynair.model, trace)(test_batch, do_likelihood=False)
 
-            frames = latent_seq_to_tensor(frames)
-            zs = latent_seq_to_tensor(zs)
+            frames = latent_seq_to_tensor(frames_seq)
+            ws = latent_seq_to_tensor(ws_seq)
 
             for k in range(n):
-                out = overlay_window_outlines(dynair, frames[k], zs[k, :, 0:2])
-                vis.images(frames_to_rgb_list(X[ix+k].cpu()), nrow=7)
+                out = overlay_window_outlines(dynair, frames[k], ws[k])
+                vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=7)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
 
             # Test extrapolation.
             # TODO: Clean-up.
             ex = X[54:54+1]
-            zs, y, w = dynair.guide(ex)
-            bkg = dynair.model_generate_bkg(w)
+            ws, zs = dynair.guide(ex)
 
+            w = ws[-1]
             z = zs[-1]
-            frames = []
+            extrap_frames = []
+            extrap_ws = []
             extrap_zs = []
             for t in range(14):
-                #z = dynair.model_transition(14 + t, z)
-                z, _ = dynair.transition(z)
-                frame_mean = dynair.model_emission(w, y, z, bkg)
-                frames.append(frame_mean)
+                z, w = dynair.model_transition(14 + t, z, w)
+                frame_mean = dynair.model_emission(z, w)
+                extrap_frames.append(frame_mean)
+                extrap_ws.append(w)
                 extrap_zs.append(z)
-            extrap_frames = latent_seq_to_tensor(frames)
-            extrap_zs = latent_seq_to_tensor(extrap_zs)
-            out = overlay_window_outlines(dynair, extrap_frames[0], extrap_zs[0, :, 0:2])
+            extrap_frames = latent_seq_to_tensor(extrap_frames)
+            extrap_ws = latent_seq_to_tensor(extrap_ws)
+            out = overlay_window_outlines(dynair, extrap_frames[0], extrap_ws[0])
             vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
 
-        # print(dynair.transition.lin.weight.data)
 
         if (i+1) % 50 == 0:
             print('Saving parameters...')
