@@ -52,7 +52,7 @@ class DynAIR(nn.Module):
         self.w_0_prior_sd = Variable(torch.Tensor([0.3, 1, 1]),
                                      requires_grad=False)
         if use_cuda:
-            self.z_0_prior_sd = self.z_0_prior_sd.cuda()
+            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
 
 
         self.z_0_prior_mean = self.ng_zeros(self.z_size)
