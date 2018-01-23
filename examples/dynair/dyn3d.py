@@ -248,6 +248,8 @@ class DynAIR(nn.Module):
             t = t.cuda()
         return t
 
+    def params_with_nan(self):
+        return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
 def batch_expand(t, b):
     return t.expand((b,) + t.size())
@@ -341,6 +343,8 @@ def run_svi(X, args):
 
         for j, batch in enumerate(batches):
             loss = svi.step(batch)
+            nan_params = list(dynair.params_with_nan())
+            assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
 
