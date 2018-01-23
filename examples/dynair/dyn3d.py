@@ -219,8 +219,8 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-
-        theta_inv = expand_z_where(z_where_inv(w))
+        z_where = w_to_z_where(w)
+        theta_inv = expand_z_where(z_where_inv(z_where))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
         return grid_sample(images, grid).view(n, -1)
 
@@ -228,8 +228,8 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(windows, (n, self.num_chan * self.window_size**2))
-
-        theta = expand_z_where(w)
+        z_where = w_to_z_where(w)
+        theta = expand_z_where(z_where)
         assert_size(theta, (n, 2, 3))
         grid = affine_grid(theta, torch.Size((n, self.num_chan, self.image_size, self.image_size)))
         # first arg to grid sample should be (n, c, in_w, in_h)
@@ -262,23 +262,27 @@ expansion_indices = torch.LongTensor([1, 0, 2, 0, 1, 3])
 def expand_z_where(z_where):
     # Take a batch of three-vectors, and massages them into a batch of
     # 2x3 matrices with elements like so:
-    # [softplus^{-1}(s),x,y] -> [[s,0,x],
-    #                            [0,s,y]]
+    # [s,x,y] -> [[s,0,x],
+    #             [0,s,y]]
     n = z_where.size(0)
     assert_size(z_where, (n, 3))
-    # Unsquish the `scale`. The offset is one part of ensuring the
-    # prior/initial transition are somewhat sensible. (Also see the
-    # prior over w and the initialization of the transition
-    # themselves.)
-    scale = softplus(z_where[:, 0:1] + 2)
-    xy = z_where[:, 1:]
-    out = torch.cat((ng_zeros([1, 1]).type_as(z_where).expand(n, 1), scale, xy), 1)
+    out = torch.cat((ng_zeros([1, 1]).type_as(z_where).expand(n, 1), z_where), 1)
     ix = Variable(expansion_indices)
     if z_where.is_cuda:
         ix = ix.cuda()
     out = torch.index_select(out, 1, ix)
     out = out.view(n, 2, 3)
     return out
+
+def w_to_z_where(w):
+    # Unsquish the `scale` component of w.
+    # (The offset here is one part of ensuring the prior & initial transition
+    # are somewhat sensible. Also see the prior over w and the
+    # initialization of the transition themselves.)
+    scale = softplus(w[:, 0:1] + 2)
+    xy = w[:, 1:]
+    return torch.cat((scale, xy), 1)
+
 
 # An alternative to this would be to add the "missing" bottom row to
 # theta, and then use `torch.inverse`.
