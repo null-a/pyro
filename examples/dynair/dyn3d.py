@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.functional import affine_grid, grid_sample, sigmoid
+from torch.nn.functional import affine_grid, grid_sample, sigmoid, softplus
 from torch.autograd import Variable
 
 import numpy as np
@@ -38,7 +38,7 @@ class DynAIR(nn.Module):
         self.window_size = 16
 
         self.z_size = 4
-        self.w_size = 3 # x,y position and scale
+        self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
 
         bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
@@ -47,16 +47,9 @@ class DynAIR(nn.Module):
 
 
         # Priors:
-        # TODO: The prior should ensure that scale>0.
-
-        # TODO: Previously a prior over position + a transition
-        # initialised to the identity made for a seemingly sensible
-        # init. Can we do something similar here? (It seems kinda
-        # pointless trying to put information into the prior for the
-        # first step if the transition is free to do anything.)
 
         self.w_0_prior_mean = self.ng_zeros(self.w_size)
-        self.w_0_prior_sd = Variable(torch.Tensor([2, 2, 2]),
+        self.w_0_prior_sd = Variable(torch.Tensor([0.3, 1, 1]),
                                      requires_grad=False)
         if use_cuda:
             self.z_0_prior_sd = self.z_0_prior_sd.cuda()
@@ -263,11 +256,17 @@ expansion_indices = torch.LongTensor([1, 0, 2, 0, 1, 3])
 def expand_z_where(z_where):
     # Take a batch of three-vectors, and massages them into a batch of
     # 2x3 matrices with elements like so:
-    # [s,x,y] -> [[s,0,x],
-    #             [0,s,y]]
+    # [softplus^{-1}(s),x,y] -> [[s,0,x],
+    #                            [0,s,y]]
     n = z_where.size(0)
     assert_size(z_where, (n, 3))
-    out = torch.cat((ng_zeros([1, 1]).type_as(z_where).expand(n, 1), z_where), 1)
+    # Unsquish the `scale`. The offset is one part of ensuring the
+    # prior/initial transition are somewhat sensible. (Also see the
+    # prior over w and the initialization of the transition
+    # themselves.)
+    scale = softplus(z_where[:, 0:1] + 2)
+    xy = z_where[:, 1:]
+    out = torch.cat((ng_zeros([1, 1]).type_as(z_where).expand(n, 1), scale, xy), 1)
     ix = Variable(expansion_indices)
     if z_where.is_cuda:
         ix = ix.cuda()
