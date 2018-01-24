@@ -143,10 +143,10 @@ def sample_scene():
     # number of frames
     n = 14
 
-    bkg = checker_board(4)
-    #bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
+    #bkg = checker_board(4)
+    bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
 
-    shade = sample_shade()
+    #shade = sample_shade()
 
     # Sample objects
     num_objs = 1#np.random.randint(3) + 1
@@ -156,9 +156,9 @@ def sample_scene():
         objs.append(dict(
             xy1=xy1,
             xy2=xy2,
-            shape=np.random.randint(3),
-            color=np.random.randint(2),
-            rotation=np.random.randint(4) * 90#np.random.uniform(360)
+            shape=0,#np.random.randint(3),
+            color=0,#np.random.randint(2),
+            rotation=0#,np.random.randint(4) * 90#np.random.uniform(360)
         ))
     #print(objs)
 
@@ -173,7 +173,7 @@ def sample_scene():
             s = position(s, x, y)
             acc = Image.alpha_composite(acc, s)
 
-        acc = Image.alpha_composite(acc, shade)
+        #acc = Image.alpha_composite(acc, shade)
 
         frames.append(acc)
 
@@ -197,14 +197,14 @@ frames = sample_scene()
 save_seq(frames)
 
 # Convert a frame to correct array format for the model.
-#arr = img_to_arr(frames[0])
-#print(arr.shape)
+# arr = img_to_arr(frames[0])
+# print(arr.shape)
 
 # Using with `imshow` requires an additional `transpose(1, 2, 0)`.
-#plt.imshow(arr.transpose(1, 2, 0))
-#plt.show()
+# plt.imshow(arr.transpose(1, 2, 0))
+# plt.show()
 
 # Make a dataset
 # out = sample_dataset(1000)
 # print(out.shape)
-# np.savez_compressed('single_object_with_bkg.npz', X=out)
+# np.savez_compressed('single_object_one_class_no_bkg.npz', X=out)

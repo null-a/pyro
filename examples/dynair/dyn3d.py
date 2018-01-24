@@ -401,7 +401,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_no_bkg.npz')['X']
+    X_np = np.load('single_object_one_class_no_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
