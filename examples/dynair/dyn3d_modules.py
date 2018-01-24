@@ -99,16 +99,16 @@ class ParamW(nn.Module):
 # contents before trying to combine this with the previous state.
 
 class ParamZ(nn.Module):
-    def __init__(self, hids, w_size, x_att_size, z_size, use_skip):
+    def __init__(self, hids, w_rnn_hid_size, x_att_size, z_size, use_skip):
         super(ParamZ, self).__init__()
-        in_size = w_size + x_att_size + z_size
+        in_size = w_rnn_hid_size + x_att_size + z_size
         self.use_skip = use_skip
         self.col_widths = [z_size, z_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, w, x_att, z_prev):
+    def forward(self, w_rnn_hid, x_att, z_prev):
         x_att_flat = x_att.view(x_att.size(0), -1)
-        out = self.mlp(torch.cat((w, x_att_flat, z_prev), 1))
+        out = self.mlp(torch.cat((w_rnn_hid, x_att_flat, z_prev), 1))
         cols = split_at(out, self.col_widths)
         z_mean = z_prev + cols[0] if self.use_skip else cols[0]
         z_sd = softplus(cols[1])
