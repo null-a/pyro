@@ -82,7 +82,9 @@ class ParamW(nn.Module):
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
     def forward(self, x, w_prev, z_prev):
-        x_flat = x.view(x.size(0), -1)
+        # This use of contiguous is necessary for cpu/gpu with PyTorch
+        # 0.3. From 0.4 it no longer appears necessary.
+        x_flat = x.contiguous().view(x.size(0), -1)
         out = self.mlp(torch.cat((x_flat, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
