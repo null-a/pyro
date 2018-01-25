@@ -342,7 +342,7 @@ def run_svi(X, args):
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
-    for i in range(1000):
+    for i in range(500):
 
         for j, batch in enumerate(batches):
             loss = svi.step(batch)
