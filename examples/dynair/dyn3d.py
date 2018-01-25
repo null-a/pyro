@@ -71,7 +71,7 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
-        use_skip = True # Use skip/identity connections when guiding w/z?
+        use_skip = False # Use skip/identity connections when guiding w/z?
         self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
         self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size, use_skip)
 
