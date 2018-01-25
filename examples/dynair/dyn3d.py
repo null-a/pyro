@@ -384,7 +384,7 @@ def run_svi(X, args):
 
             # Test extrapolation.
             # TODO: Clean-up.
-            ex = X[54:54+1]
+            ex = X[ix:ix+1]
             ws, zs = dynair.guide(ex)
 
             w = ws[-1]
