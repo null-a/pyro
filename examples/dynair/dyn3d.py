@@ -71,15 +71,8 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
-
-        # w RNN
-        self.guide_w_rnn_hid_size = 50
-        self.guide_w_rnn_hid_init = nn.Parameter(torch.zeros(self.guide_w_rnn_hid_size))
-        self.guide_w_rnn = nn.GRUCell(self.w_size, self.guide_w_rnn_hid_size)
-
-
-        use_skip = False # Use skip/identity connections when guiding w/z?
-        self.z_param = mod.ParamZ([50, 50], self.guide_w_rnn_hid_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
+        use_skip = True # Use skip/identity connections when guiding w/z?
+        self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
         self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size, use_skip)
 
         # Model modules:
@@ -201,14 +194,11 @@ class DynAIR(nn.Module):
         z = batch_expand(self.guide_z_init, batch_size)
         w = batch_expand(self.guide_w_init, batch_size)
 
-        w_rnn_hid = batch_expand(self.guide_w_rnn_hid_init, batch_size)
-
         for t in range(self.seq_length):
             x = batch[:, t]
             w = self.guide_w(t, x, w, z)
-            w_rnn_hid = self.guide_w_rnn(w, w_rnn_hid)
             x_att = self.image_to_window(w, x)
-            z = self.guide_z(t, w_rnn_hid, x_att, z)
+            z = self.guide_z(t, w, x_att, z)
 
             ws.append(w)
             zs.append(z)
@@ -219,8 +209,8 @@ class DynAIR(nn.Module):
         w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
-    def guide_z(self, t, w_rnn_hid, x_att, z_prev):
-        z_mean, z_sd = self.z_param(w_rnn_hid, x_att, z_prev)
+    def guide_z(self, t, w, x_att, z_prev):
+        z_mean, z_sd = self.z_param(w, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
 
