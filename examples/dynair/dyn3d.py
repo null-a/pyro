@@ -37,13 +37,13 @@ class DynAIR(nn.Module):
 
         self.window_size = 16
 
-        self.z_size = 4
+        self.z_size = 50
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
 
-        bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
-        bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
-        self.bkg = torch.cat((bkg_rgb, bkg_alpha))
+        # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
+        # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
+        # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
 
 
         # Priors:
@@ -65,13 +65,17 @@ class DynAIR(nn.Module):
         self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
         self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
 
+        self.bkg_rgb = nn.Parameter(torch.zeros(self.num_chan - 1, self.image_size, self.image_size))
+        self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
+
+
         # Modules
 
         # TODO: Review all arch. of all modules. (Currently just using
         # MLP so that I have something to test.)
 
         # Guide modules:
-        use_skip = False # Use skip/identity connections when guiding w/z?
+        use_skip = True # Use skip/identity connections when guiding w/z?
         self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
         self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size, use_skip)
 
@@ -88,6 +92,10 @@ class DynAIR(nn.Module):
         # CUDA
         if use_cuda:
             self.cuda()
+
+
+    def background(self):
+        return torch.cat((sigmoid(self.bkg_rgb), self.bkg_alpha))
 
 
     # TODO: This do_likelihood business is unpleasant.
@@ -167,7 +175,7 @@ class DynAIR(nn.Module):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
         x_att = self.decode(z)
-        bkg = batch_expand(self.bkg, batch_size)
+        bkg = batch_expand(self.background(), batch_size)
         return over(self.window_to_image(w, x_att), bkg)
 
 
@@ -337,8 +345,12 @@ def run_svi(X, args):
 
     batches = X.chunk(40)
 
+    def per_param_optim_args(module_name, param_name, tags):
+        return {'lr': 1e-1 if param_name == 'bkg_rgb' else 1e-4}
+
     svi = SVI(dynair.model, dynair.guide,
-              optim.Adam(dict(lr=1e-4)),
+              #optim.Adam(dict(lr=1e-4)),
+              optim.Adam(per_param_optim_args),
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
@@ -351,7 +363,7 @@ def run_svi(X, args):
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
 
-        ix = 15
+        ix = 18
         n = 1
         test_batch = X[ix:ix+n]
 
@@ -400,7 +412,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_one_class_no_bkg.npz')['X']
+    X_np = np.load('single_object_one_class_with_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
