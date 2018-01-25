@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from matplotlib import pyplot as plt
 from PIL import Image, ImageDraw, ImageFilter
@@ -111,6 +112,17 @@ def sample_end_points(n):
     else:
         #print('reject')
         return sample_end_points(n)
+
+# Object start somewhere in frame and move towards to center of the frame.
+
+# def sample_end_points():
+#     theta = np.random.uniform() * 2 * np.pi
+#     h = np.random.uniform() * SIZE / 2
+#     x = math.cos(theta) * h
+#     y = math.sin(theta) * h
+#     o = SIZE/2
+#     return (x + o, y + o), (o, o)
+
 
 def sample_shade():
     img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
