@@ -1,3 +1,4 @@
+import glob
 import math
 import numpy as np
 from matplotlib import pyplot as plt
@@ -115,13 +116,13 @@ def sample_end_points(n):
 
 # Object start somewhere in frame and move towards to center of the frame.
 
-# def sample_end_points():
-#     theta = np.random.uniform() * 2 * np.pi
-#     h = np.random.uniform() * SIZE / 2
-#     x = math.cos(theta) * h
-#     y = math.sin(theta) * h
-#     o = SIZE/2
-#     return (x + o, y + o), (o, o)
+def sample_end_points():
+    theta = np.random.uniform() * 2 * np.pi
+    h = np.random.uniform() * SIZE / 2
+    x = math.cos(theta) * h
+    y = math.sin(theta) * h
+    o = SIZE/2
+    return (x + o, y + o), (o, o)
 
 
 def sample_shade():
@@ -149,14 +150,33 @@ def sample_shade():
 
     return img
 
+def sample_natural_scene_bkg(size):
+    # I'm using some images from here:
+    # http://cvcl.mit.edu/database.htm
+    # So this assumes images are 256x256 JPGs.
+    fns = glob.glob('/Users/paul/Downloads/bkg/*.jpg')
+    n = len(fns)
+    im = Image.open(fns[np.random.randint(n)])
+    assert im.size == (256, 256)
+
+    # Crop a (256 - t) sized image out of the full image to help avoid
+    # duplicating images.
+    t = 64
+    x = np.random.randint(t)
+    y = np.random.randint(t)
+
+    cropped = im.crop((x,y,x+256-t,y+256-t)).resize((size, size)).convert('RGBA')
+    #arr = img_to_arr(cropped)
+    return cropped
 
 def sample_scene():
 
     # number of frames
     n = 14
 
+    bkg = sample_natural_scene_bkg(SIZE)
     #bkg = checker_board(4)
-    bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
+    #bkg = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 255))
 
     #shade = sample_shade()
 
@@ -164,7 +184,7 @@ def sample_scene():
     num_objs = 1#np.random.randint(3) + 1
     objs = []
     for i in range(num_objs):
-        xy1, xy2 = sample_end_points(n)
+        xy1, xy2 = sample_end_points()
         objs.append(dict(
             xy1=xy1,
             xy2=xy2,
@@ -219,4 +239,4 @@ save_seq(frames)
 # Make a dataset
 # out = sample_dataset(1000)
 # print(out.shape)
-# np.savez_compressed('single_object_one_class_no_bkg.npz', X=out)
+# np.savez_compressed('single_object_one_class_with_nat_bkg.npz', X=out)
