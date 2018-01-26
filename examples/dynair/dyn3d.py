@@ -350,7 +350,7 @@ def run_svi(X, args):
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
-    for i in range(1000):
+    for i in range(5000):
 
         for j, batch in enumerate(batches):
             loss = svi.step(batch)
@@ -408,7 +408,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_one_class_with_bkg.npz')['X']
+    X_np = np.load('single_object_one_class_with_nat_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
