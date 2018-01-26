@@ -75,10 +75,9 @@ class Transition(nn.Module):
 # Locating an object given a hint about where to look and what to look
 # for.)
 class ParamW(nn.Module):
-    def __init__(self, hids, x_size, w_size, z_size, use_skip):
+    def __init__(self, hids, x_size, w_size, z_size):
         super(ParamW, self).__init__()
         in_size = x_size + w_size + z_size
-        self.use_skip = use_skip
         self.col_widths = [w_size, w_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
@@ -88,7 +87,7 @@ class ParamW(nn.Module):
         x_flat = x.contiguous().view(x.size(0), -1)
         out = self.mlp(torch.cat((x_flat, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
-        w_mean = w_prev + cols[0] if self.use_skip else cols[0]
+        w_mean = cols[0]
         w_sd = softplus(cols[1])
         return w_mean, w_sd
 
@@ -99,17 +98,44 @@ class ParamW(nn.Module):
 # contents before trying to combine this with the previous state.
 
 class ParamZ(nn.Module):
-    def __init__(self, hids, w_size, x_att_size, z_size, use_skip):
+    def __init__(self, x_hids, x_att_hids, hids, w_size, x_size, x_att_size, z_size):
         super(ParamZ, self).__init__()
-        in_size = w_size + x_att_size + z_size
-        self.use_skip = use_skip
         self.col_widths = [z_size, z_size]
+        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
+        self.x_att_mlp = MLP(x_att_size, x_att_hids, nn.ReLU, True)
+        in_size = w_size + x_hids[-1] + x_att_hids[-1] + z_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, w, x_att, z_prev):
+    def forward(self, w, x, x_att, z_prev):
+        x_flat = x.view(x.size(0), -1)
         x_att_flat = x_att.view(x_att.size(0), -1)
-        out = self.mlp(torch.cat((w, x_att_flat, z_prev), 1))
+        x_h = self.x_mlp(x_flat)
+        x_att_h = self.x_att_mlp(x_att_flat)
+        out = self.mlp(torch.cat((w, x_h, x_att_h, z_prev), 1))
         cols = split_at(out, self.col_widths)
-        z_mean = z_prev + cols[0] if self.use_skip else cols[0]
+        z_mean = cols[0]
         z_sd = softplus(cols[1])
         return z_mean, z_sd
+
+
+
+class DecodeObj(nn.Module):
+    def __init__(self, hids, z_size, num_chan, window_size):
+        super(DecodeObj, self).__init__()
+        self.mlp = MLP(z_size, hids + [num_chan * window_size**2], nn.ReLU)
+
+    def forward(self, z):
+        return sigmoid(self.mlp(z))
+
+
+class DecodeBkg(nn.Module):
+    def __init__(self, hids, z_size, num_chan, image_size):
+        super(DecodeBkg, self).__init__()
+        self.num_chan = num_chan
+        self.image_size = image_size
+        self.mlp = MLP(z_size, hids + [num_chan * image_size**2], nn.ReLU)
+
+    def forward(self, z):
+        batch_size = z.size(0)
+        out_flat = sigmoid(self.mlp(z))
+        return out_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)

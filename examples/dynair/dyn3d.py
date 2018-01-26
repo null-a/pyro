@@ -40,6 +40,9 @@ class DynAIR(nn.Module):
         self.z_size = 50
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
+        self.x_size = self.num_chan * self.image_size**2
+        self.x_att_size = self.num_chan * self.window_size**2
+
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -75,27 +78,22 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
-        use_skip = True # Use skip/identity connections when guiding w/z?
-        self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
-        self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size, use_skip)
+        self.z_param = mod.ParamZ([100, 100], [50], [50], self.w_size, self.x_size, self.x_att_size, self.z_size)
+        self.w_param = mod.ParamW([50, 50], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
-        self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
         # TODO: Consider using init. that outputs black/transparent images.
-        self.decode = nn.Sequential(
-            mod.MLP(self.z_size,
-                    [100, 100, self.num_chan * self.window_size**2],
-                    nn.ReLU),
-            nn.Sigmoid())
+        self.decode_obj = mod.DecodeObj([20, 20], self.z_size, self.num_chan, self.window_size)
+        self.decode_bkg = mod.DecodeBkg([50, 50], self.z_size, self.num_chan, self.image_size)
+
+        self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
+
 
 
         # CUDA
         if use_cuda:
             self.cuda()
 
-
-    def background(self):
-        return torch.cat((sigmoid(self.bkg_rgb), self.bkg_alpha))
 
 
     # TODO: This do_likelihood business is unpleasant.
@@ -174,8 +172,10 @@ class DynAIR(nn.Module):
     def model_emission(self, z, w):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
-        x_att = self.decode(z)
-        bkg = batch_expand(self.background(), batch_size)
+        # Note that neither of these currently depend on w, but doing
+        # so may be useful in future.
+        x_att = self.decode_obj(z)
+        bkg = self.decode_bkg(z)
         return over(self.window_to_image(w, x_att), bkg)
 
 
@@ -206,7 +206,7 @@ class DynAIR(nn.Module):
             x = batch[:, t]
             w = self.guide_w(t, x, w, z)
             x_att = self.image_to_window(w, x)
-            z = self.guide_z(t, w, x_att, z)
+            z = self.guide_z(t, w, x, x_att, z)
 
             ws.append(w)
             zs.append(z)
@@ -217,8 +217,8 @@ class DynAIR(nn.Module):
         w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
-    def guide_z(self, t, w, x_att, z_prev):
-        z_mean, z_sd = self.z_param(w, x_att, z_prev)
+    def guide_z(self, t, w, x, x_att, z_prev):
+        z_mean, z_sd = self.z_param(w, x, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
 
@@ -234,7 +234,7 @@ class DynAIR(nn.Module):
     def window_to_image(self, w, windows):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
-        assert_size(windows, (n, self.num_chan * self.window_size**2))
+        assert_size(windows, (n, self.x_att_size))
         z_where = w_to_z_where(w)
         theta = expand_z_where(z_where)
         assert_size(theta, (n, 2, 3))
@@ -345,12 +345,8 @@ def run_svi(X, args):
 
     batches = X.chunk(40)
 
-    def per_param_optim_args(module_name, param_name, tags):
-        return {'lr': 1e-1 if param_name == 'bkg_rgb' else 1e-4}
-
     svi = SVI(dynair.model, dynair.guide,
-              #optim.Adam(dict(lr=1e-4)),
-              optim.Adam(per_param_optim_args),
+              optim.Adam(dict(lr=1e-4)),
               loss='ELBO')
               # trace_graph=True) # No discrete things, yet.
 
