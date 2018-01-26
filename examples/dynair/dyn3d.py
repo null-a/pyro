@@ -37,7 +37,7 @@ class DynAIR(nn.Module):
 
         self.window_size = 16
 
-        self.z_size = 4
+        self.z_size = 50
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
 
@@ -75,8 +75,9 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
-        self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size)
-        self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size)
+        use_skip = True # Use skip/identity connections when guiding w/z?
+        self.z_param = mod.ParamZ([50, 50], self.w_size, self.num_chan * self.window_size**2, self.z_size, use_skip)
+        self.w_param = mod.ParamW([50, 50], self.num_chan * self.image_size**2, self.w_size, self.z_size, use_skip)
 
         # Model modules:
         self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
@@ -203,9 +204,9 @@ class DynAIR(nn.Module):
 
         for t in range(self.seq_length):
             x = batch[:, t]
-            w, w_delta = self.guide_w(t, x, w, z)
+            w = self.guide_w(t, x, w, z)
             x_att = self.image_to_window(w, x)
-            z = self.guide_z(t, w_delta, x_att, z)
+            z = self.guide_z(t, w, x_att, z)
 
             ws.append(w)
             zs.append(z)
@@ -213,10 +214,8 @@ class DynAIR(nn.Module):
         return ws, zs
 
     def guide_w(self, t, batch, w_prev, z_prev):
-        w_delta, w_sd = self.w_param(batch, w_prev, z_prev)
-        w_mean = w_prev + w_delta
-        w = pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
-        return w, w_delta
+        w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
+        return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
     def guide_z(self, t, w, x_att, z_prev):
         z_mean, z_sd = self.z_param(w, x_att, z_prev)
