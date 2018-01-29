@@ -44,7 +44,7 @@ class DynAIR(nn.Module):
         self.window_scale = self.image_size / self.window_size
 
         self.z_size = 4
-        self.w_size = 5 # TODO: How big? Few necessary in principle. Prior doesn't lend itself to obviosu repr?
+        self.w_size = 50 # Bump up for natural bkg.
         self.y_size = 20
         self.z_where_size = 2
 
@@ -64,8 +64,8 @@ class DynAIR(nn.Module):
         self.w_prior_mean = self.ng_zeros(self.w_size)
         self.w_prior_sd = self.ng_ones(self.w_size)
 
-        self.input_embed_size = 50
-        self.input_rnn_hid_size = 100
+        self.input_embed_size = 200
+        self.input_rnn_hid_size = 200
         self.encode_rnn_hid_size = 100
 
         self.decoder_hidden_layers = [50] # TODO: This might need enlarging?
@@ -484,7 +484,7 @@ def run_svi(X, args):
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
             progress_plot.add(i*len(batches) + j, elbo)
 
-        ix = 15
+        ix = 18
         n = 1
 
         if (i+1) % 1 == 0:
@@ -507,9 +507,11 @@ def run_svi(X, args):
 
             # Test extrapolation.
             # TODO: Clean-up.
-            ex = X[54:54+1]
+            ex = X[18:18+1]
             zs, y, w = dynair.guide(ex)
             bkg = dynair.model_generate_bkg(w)
+
+            vis.images(frames_to_rgb_list(bkg))
 
             z = zs[-1]
             frames = []
@@ -535,7 +537,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_with_shade_and_bkg.npz')['X']
+    X_np = np.load('single_object_one_class_with_nat_bkg.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
