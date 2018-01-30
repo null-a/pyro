@@ -117,6 +117,20 @@ class ParamZ(nn.Module):
         z_sd = softplus(cols[1])
         return z_mean, z_sd
 
+class ParamY(nn.Module):
+    def __init__(self, hids, x_size, y_size):
+        super(ParamY, self).__init__()
+        self.col_widths = [y_size, y_size]
+        self.mlp = MLP(x_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        x_flat = x.view(batch_size, -1)
+        out = self.mlp(x_flat)
+        cols = split_at(out, self.col_widths)
+        y_mean = cols[0]
+        y_sd = softplus(cols[1])
+        return y_mean, y_sd
 
 
 class DecodeObj(nn.Module):
@@ -129,13 +143,13 @@ class DecodeObj(nn.Module):
 
 
 class DecodeBkg(nn.Module):
-    def __init__(self, hids, z_size, num_chan, image_size):
+    def __init__(self, hids, y_size, num_chan, image_size):
         super(DecodeBkg, self).__init__()
         self.num_chan = num_chan
         self.image_size = image_size
-        self.mlp = MLP(z_size, hids + [num_chan * image_size**2], nn.ReLU)
+        self.mlp = MLP(y_size, hids + [(num_chan-1) * image_size**2], nn.ReLU)
 
-    def forward(self, z):
-        batch_size = z.size(0)
-        out_flat = sigmoid(self.mlp(z))
-        return out_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)
+    def forward(self, y):
+        batch_size = y.size(0)
+        out_flat = sigmoid(self.mlp(y))
+        return out_flat.view(batch_size, self.num_chan-1, self.image_size, self.image_size)

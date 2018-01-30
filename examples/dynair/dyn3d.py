@@ -37,6 +37,7 @@ class DynAIR(nn.Module):
 
         self.window_size = 16
 
+        self.y_size = 50
         self.z_size = 50
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
@@ -50,6 +51,9 @@ class DynAIR(nn.Module):
 
 
         # Priors:
+
+        self.y_prior_mean = self.ng_zeros(self.y_size)
+        self.y_prior_sd = self.ng_ones(self.y_size)
 
         self.w_0_prior_mean = self.ng_zeros(self.w_size)
         self.w_0_prior_sd = Variable(torch.Tensor([0.3, 1, 1]),
@@ -68,9 +72,8 @@ class DynAIR(nn.Module):
         self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
         self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
 
-        self.bkg_rgb = nn.Parameter(torch.zeros(self.num_chan - 1, self.image_size, self.image_size))
-        self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
+        self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
         # Modules
 
@@ -78,13 +81,14 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
+        self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [50], [50], self.w_size, self.x_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW([50, 50], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
         self.decode_obj = mod.DecodeObj([20, 20], self.z_size, self.num_chan, self.window_size)
-        self.decode_bkg = mod.DecodeBkg([50, 50], self.z_size, self.num_chan, self.image_size)
+        self.decode_bkg_rgb = mod.DecodeBkg([100, 100], self.y_size, self.num_chan, self.image_size)
 
         self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
 
@@ -101,9 +105,12 @@ class DynAIR(nn.Module):
 
         batch_size = batch.size(0)
 
+        y = self.model_sample_y(batch_size)
+        bkg = self.decode_bkg(y)
+
         z = self.model_sample_z_0(batch_size)
         w = self.model_sample_w_0(batch_size)
-        frame_mean = self.model_emission(z, w)
+        frame_mean = self.model_emission(z, w, bkg)
 
         zs = [z]
         ws = [w]
@@ -115,7 +122,7 @@ class DynAIR(nn.Module):
         # TODO: iarange here (or somewhere)
         for t in range(1, self.seq_length):
             z, w = self.model_transition(t, z, w)
-            frame_mean = self.model_emission(z, w)
+            frame_mean = self.model_emission(z, w, bkg)
             zs.append(z)
             ws.append(w)
             frames.append(frame_mean)
@@ -133,6 +140,13 @@ class DynAIR(nn.Module):
                     frame_mean,
                     frame_sd,
                     obs=obs)
+
+    def model_sample_y(self, batch_size):
+        return pyro.sample('y',
+                           dist.normal,
+                           self.y_prior_mean,
+                           self.y_prior_sd,
+                           batch_size=batch_size)
 
     def model_sample_w_0(self, batch_size):
         return pyro.sample('w_0',
@@ -169,15 +183,19 @@ class DynAIR(nn.Module):
         w = self.model_sample_w(t, w_mean, w_sd)
         return z, w
 
-    def model_emission(self, z, w):
+    def model_emission(self, z, w, bkg):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
         # Note that neither of these currently depend on w, but doing
         # so may be useful in future.
         x_att = self.decode_obj(z)
-        bkg = self.decode_bkg(z)
         return over(self.window_to_image(w, x_att), bkg)
 
+    def decode_bkg(self, y):
+        batch_size = y.size(0)
+        rgb = self.decode_bkg_rgb(y)
+        alpha = batch_expand(self.bkg_alpha, batch_size)
+        return torch.cat((rgb, alpha), 1)
 
 
     # ==GUIDE==================================================
@@ -196,6 +214,11 @@ class DynAIR(nn.Module):
         batch_size = batch.size(0)
         assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
 
+        # NOTE: Here we're guiding y based on the contents of the
+        # first frame only.
+        # TODO: Implement a better guide for y.
+        y = self.guide_y(batch[:, 0])
+
         zs = []
         ws = []
 
@@ -211,7 +234,11 @@ class DynAIR(nn.Module):
             ws.append(w)
             zs.append(z)
 
-        return ws, zs
+        return ws, zs, y
+
+    def guide_y(self, x0):
+        y_mean, y_sd = self.y_param(x0)
+        return pyro.sample('y', dist.normal, y_mean, y_sd)
 
     def guide_w(self, t, batch, w_prev, z_prev):
         w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
@@ -381,7 +408,9 @@ def run_svi(X, args):
             # Test extrapolation.
             # TODO: Clean-up.
             ex = X[ix:ix+1]
-            ws, zs = dynair.guide(ex)
+            ws, zs, y = dynair.guide(ex)
+
+            bkg = dynair.decode_bkg(y)
 
             w = ws[-1]
             z = zs[-1]
@@ -390,7 +419,7 @@ def run_svi(X, args):
             extrap_zs = []
             for t in range(14):
                 z, w = dynair.model_transition(14 + t, z, w)
-                frame_mean = dynair.model_emission(z, w)
+                frame_mean = dynair.model_emission(z, w, bkg)
                 extrap_frames.append(frame_mean)
                 extrap_ws.append(w)
                 extrap_zs.append(z)
@@ -469,7 +498,7 @@ if __name__ == '__main__':
 
     # print(len(zs))
     # print(zs[0].size())
-# print(zs)
+    # # print(zs)
     # from matplotlib import pyplot as plt
     # for frame in frames:
     #     print(frame[0].data.size())
@@ -482,10 +511,11 @@ if __name__ == '__main__':
     #(batch, seq, channel, w, h)
     # dynair = DynAIR()
     # data = Variable(torch.ones(1, 14, 4, 32, 32))
-    # ws, zs = dynair.guide(data)
+    # ws, zs, y = dynair.guide(data)
 
-    # print(torch.stack(ws))
-    # print(torch.stack(zs))
+    # # print(torch.stack(ws))
+    # # print(torch.stack(zs))
+    # print(y)
 
     X = load_data()
     if args.cuda:
