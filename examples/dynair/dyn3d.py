@@ -30,12 +30,12 @@ class DynAIR(nn.Module):
         # thing.
         self.use_cuda = use_cuda
 
-        self.seq_length = 14
+        self.seq_length = 20
 
-        self.image_size = 32
+        self.image_size = 50
         self.num_chan = 4
 
-        self.window_size = 16
+        self.window_size = 22
 
         self.y_size = 50
         self.z_size = 50
@@ -82,13 +82,13 @@ class DynAIR(nn.Module):
 
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([100, 100], [50], self.w_size, self.x_att_size, self.z_size)
-        self.w_param = mod.ParamW([50, 50], self.x_size, self.w_size, self.z_size)
+        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
+        self.w_param = mod.ParamW([200, 200], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
-        self.decode_obj = mod.DecodeObj([20, 20], self.z_size, self.num_chan, self.window_size)
-        self.decode_bkg_rgb = mod.DecodeBkg([100, 100], self.y_size, self.num_chan, self.image_size)
+        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size)
+        self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
 
@@ -313,7 +313,7 @@ def w_to_z_where(w):
     # (The offset here is one part of ensuring the prior & initial transition
     # are somewhat sensible. Also see the prior over w and the
     # initialization of the transition themselves.)
-    scale = softplus(w[:, 0:1] + 2)
+    scale = softplus(w[:, 0:1] + 3.5)
     xy = w[:, 1:]
     return torch.cat((scale, xy), 1)
 
@@ -370,7 +370,7 @@ def run_svi(X, args):
 
     dynair = DynAIR(use_cuda=args.cuda)
 
-    batches = X.chunk(40)
+    batches = X.chunk(20)
 
     svi = SVI(dynair.model, dynair.guide,
               optim.Adam(dict(lr=1e-4)),
@@ -386,7 +386,7 @@ def run_svi(X, args):
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
 
-        ix = 18
+        ix = 40
         n = 1
         test_batch = X[ix:ix+n]
 
@@ -437,7 +437,7 @@ def run_svi(X, args):
 
 
 def load_data():
-    X_np = np.load('single_object_one_class_with_nat_bkg.npz')['X']
+    X_np = np.load('cube.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
