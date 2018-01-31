@@ -82,7 +82,7 @@ class DynAIR(nn.Module):
 
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([100, 100], [50], [50], self.w_size, self.x_size, self.x_att_size, self.z_size)
+        self.z_param = mod.ParamZ([100, 100], [50], self.w_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW([50, 50], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
@@ -245,7 +245,7 @@ class DynAIR(nn.Module):
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
     def guide_z(self, t, w, x, x_att, z_prev):
-        z_mean, z_sd = self.z_param(w, x, x_att, z_prev)
+        z_mean, z_sd = self.z_param(w, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.normal, z_mean, z_sd)
 
 
