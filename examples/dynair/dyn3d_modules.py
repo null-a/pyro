@@ -75,17 +75,19 @@ class Transition(nn.Module):
 # Locating an object given a hint about where to look and what to look
 # for.)
 class ParamW(nn.Module):
-    def __init__(self, hids, x_size, w_size, z_size):
+    def __init__(self, x_hids, hids, x_size, w_size, z_size):
         super(ParamW, self).__init__()
-        in_size = x_size + w_size + z_size
         self.col_widths = [w_size, w_size]
+        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
+        in_size = x_hids[-1] + w_size + z_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
     def forward(self, x, w_prev, z_prev):
         # This use of contiguous is necessary for cpu/gpu with PyTorch
         # 0.3. From 0.4 it no longer appears necessary.
         x_flat = x.contiguous().view(x.size(0), -1)
-        out = self.mlp(torch.cat((x_flat, w_prev, z_prev), 1))
+        x_hid = self.x_mlp(x_flat)
+        out = self.mlp(torch.cat((x_hid, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])

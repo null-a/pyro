@@ -85,7 +85,7 @@ class DynAIR(nn.Module):
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.w_param = mod.ParamW([200, 200], self.x_size, self.w_size, self.z_size)
+        self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
