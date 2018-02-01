@@ -63,7 +63,7 @@ class Transition(nn.Module):
         wz_prev = torch.cat((w_prev, z_prev), 1)
 
         z_mean = self.z_mean_net(z_prev)
-        w_mean = self.w_mean_net(wz_prev)
+        w_mean = w_prev + self.w_mean_net(wz_prev)
 
         z_sd = softplus(self._z_sd).expand_as(z_mean)
         w_sd = softplus(self._w_sd).expand_as(w_mean)

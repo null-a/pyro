@@ -55,8 +55,10 @@ class DynAIR(nn.Module):
         self.y_prior_mean = self.ng_zeros(self.y_size)
         self.y_prior_sd = self.ng_ones(self.y_size)
 
+        # TODO: Using a (reparameterized) uniform would probably be
+        # better for the cubes data set.
         self.w_0_prior_mean = self.ng_zeros(self.w_size)
-        self.w_0_prior_sd = Variable(torch.Tensor([0.3, 1, 1]),
+        self.w_0_prior_sd = Variable(torch.Tensor([2, 4, 4]),
                                      requires_grad=False)
         if use_cuda:
             self.w_0_prior_sd = self.w_0_prior_sd.cuda()
@@ -109,7 +111,8 @@ class DynAIR(nn.Module):
         bkg = self.decode_bkg(y)
 
         z = self.model_sample_z_0(batch_size)
-        w = self.model_sample_w_0(batch_size)
+        w = self.model_sample_w_0(batch_size) + Variable(torch.Tensor([6,0,0]))
+
         frame_mean = self.model_emission(z, w, bkg)
 
         zs = [z]
@@ -310,12 +313,10 @@ def expand_z_where(z_where):
 
 def w_to_z_where(w):
     # Unsquish the `scale` component of w.
-    # (The offset here is one part of ensuring the prior & initial transition
-    # are somewhat sensible. Also see the prior over w and the
-    # initialization of the transition themselves.)
-    scale = softplus(w[:, 0:1] + 3.5)
+    scale = softplus(w[:, 0:1])
     xy = w[:, 1:]
-    return torch.cat((scale, xy), 1)
+    out = torch.cat((scale, xy), 1)
+    return out
 
 
 # An alternative to this would be to add the "missing" bottom row to
