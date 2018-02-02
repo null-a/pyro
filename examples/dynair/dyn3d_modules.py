@@ -54,7 +54,7 @@ class Transition(nn.Module):
         # SDs
         # Initialize to ~0.1 (after softplus).
         self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
-        self._w_sd = nn.Parameter(torch.ones(w_size) * -2.25)
+        self._w_sd = nn.Parameter(torch.zeros(w_size))
 
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)

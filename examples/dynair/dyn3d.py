@@ -57,10 +57,11 @@ class DynAIR(nn.Module):
 
         # TODO: Using a (reparameterized) uniform would probably be
         # better for the cubes data set.
-        self.w_0_prior_mean = self.ng_zeros(self.w_size)
-        self.w_0_prior_sd = Variable(torch.Tensor([2, 4, 4]),
+        self.w_0_prior_mean = Variable(torch.Tensor([3, 0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.8, 0.7, 0.7]),
                                      requires_grad=False)
         if use_cuda:
+            self.w_0_prior_mean = self.w_0_prior_mean.cuda()
             self.w_0_prior_sd = self.w_0_prior_sd.cuda()
 
 
@@ -111,7 +112,7 @@ class DynAIR(nn.Module):
         bkg = self.decode_bkg(y)
 
         z = self.model_sample_z_0(batch_size)
-        w = self.model_sample_w_0(batch_size) + Variable(torch.Tensor([6,0,0]))
+        w = self.model_sample_w_0(batch_size)
 
         frame_mean = self.model_emission(z, w, bkg)
 
@@ -311,7 +312,7 @@ def expand_z_where(z_where):
 def w_to_z_where(w):
     # Unsquish the `scale` component of w.
     scale = softplus(w[:, 0:1])
-    xy = w[:, 1:]
+    xy = w[:, 1:] * scale
     out = torch.cat((scale, xy), 1)
     return out
 
