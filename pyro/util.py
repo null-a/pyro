@@ -1,30 +1,19 @@
 from __future__ import absolute_import, division, print_function
 
 import functools
-import re
 import warnings
 
 import graphviz
 import numpy as np
-import torch
-from torch.autograd import Variable
-from torch.nn import Parameter
 
+import torch
+
+from pyro.distributions.util import broadcast_shape
 from pyro.poutine.poutine import _PYRO_STACK
 from pyro.poutine.util import site_is_subsample
-
-
-def parse_torch_version():
-    """
-    Parses `torch.__version__` into a semver-ish version tuple.
-    This is needed to handle subpatch `_n` parts outside of the semver spec.
-
-    :returns: a tuple `(major, minor, patch, extra_stuff)`
-    """
-    match = re.match(r"(\d\.\d\.\d)(.*)", torch.__version__)
-    major, minor, patch = map(int, match.group(1).split("."))
-    extra_stuff = match.group(2)
-    return major, minor, patch, extra_stuff
+from pyro.shim import is_volatile
+from torch.autograd import Variable
+from torch.nn import Parameter
 
 
 def detach_iterable(iterable):
@@ -142,7 +131,7 @@ def zero_grads(tensors):
     """
     for p in tensors:
         if p.grad is not None:
-            if p.grad.volatile:
+            if is_volatile(p.grad):
                 p.grad.data.zero_()
             else:
                 data = p.grad.data
@@ -218,7 +207,10 @@ def enum_extend(trace, msg, num_samples=None):
         num_samples = -1
 
     # Batched .enumerate_support() assumes batched values are independent.
-    batch_shape = msg["fn"].batch_shape(msg["value"], *msg["args"], **msg["kwargs"])
+    shape = broadcast_shape(msg["fn"].shape(*msg["args"], **msg["kwargs"]),
+                            msg["value"].size())
+    batch_dims = len(shape) - msg['fn'].event_dim(*msg["args"], **msg["kwargs"])
+    batch_shape = shape[:batch_dims]
     is_batched = any(size > 1 for size in batch_shape)
     inside_iarange = any(frame.vectorized for frame in msg["cond_indep_stack"])
     if is_batched and not inside_iarange:
@@ -369,8 +361,8 @@ def check_model_guide_match(model_trace, guide_trace):
         model_site = model_trace.nodes[name]
         guide_site = guide_trace.nodes[name]
         if hasattr(model_site["fn"], "shape") and hasattr(guide_site["fn"], "shape"):
-            model_shape = model_site["fn"].shape(None, *model_site["args"], **model_site["kwargs"])
-            guide_shape = guide_site["fn"].shape(None, *guide_site["args"], **guide_site["kwargs"])
+            model_shape = model_site["fn"].shape(*model_site["args"], **model_site["kwargs"])
+            guide_shape = guide_site["fn"].shape(*guide_site["args"], **guide_site["kwargs"])
             if model_shape != guide_shape:
                 raise ValueError("Model and guide dims disagree at site '{}': {} vs {}".format(
                     name, model_shape, guide_shape))

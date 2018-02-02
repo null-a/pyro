@@ -5,6 +5,57 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 
+def copy_docs_from(source_class, full_text=False):
+    """
+    Decorator to copy class and method docs from source to destin class.
+    """
+
+    def decorator(destin_class):
+        if not destin_class.__doc__:
+            destin_class.__doc__ = source_class.__doc__
+        for name in dir(destin_class):
+            if name.startswith('_'):
+                continue
+            destin_attr = getattr(destin_class, name)
+            destin_attr = getattr(destin_attr, '__func__', destin_attr)
+            source_attr = getattr(source_class, name, None)
+            source_doc = getattr(source_attr, '__doc__', None)
+            if source_doc and not getattr(destin_attr, '__doc__', None):
+                if full_text or source_doc.startswith('See '):
+                    destin_attr.__doc__ = source_doc
+                else:
+                    destin_attr.__doc__ = 'See :meth:`{}.{}.{}`'.format(
+                        source_class.__module__, source_class.__name__, source_attr.__name__)
+        return destin_class
+
+    return decorator
+
+
+def broadcast_shape(*shapes, **kwargs):
+    """
+    Similar to ``np.broadcast()`` but for shapes.
+    Equivalent to ``np.broadcast(*map(np.empty, shapes)).shape``.
+
+    :param tuple shapes: shapes of tensors.
+    :param bool strict: whether to use extend-but-not-resize broadcasting.
+    :returns: broadcasted shape
+    :rtype: tuple
+    :raises: ValueError
+    """
+    strict = kwargs.pop('strict', False)
+    reversed_shape = []
+    for shape in shapes:
+        for i, size in enumerate(reversed(shape)):
+            if i >= len(reversed_shape):
+                reversed_shape.append(size)
+            elif reversed_shape[i] == 1 and not strict:
+                reversed_shape[i] = size
+            elif reversed_shape[i] != size and (size != 1 or strict):
+                raise ValueError('shape mismatch: objects cannot be broadcast to a single shape: {}'.format(
+                    ' vs '.join(map(str, shapes))))
+    return tuple(reversed(reversed_shape))
+
+
 def log_gamma(xx):
     gamma_coeff = [
         76.18009172947146,
@@ -48,7 +99,7 @@ def move_to_same_host_as(source, destin):
     """
     Returns source or a copy of `source` such that `source.is_cuda == `destin.is_cuda`.
     """
-    return source.cuda() if destin.is_cuda else source.cpu()
+    return source.cuda(destin.get_device()) if destin.is_cuda else source.cpu()
 
 
 def torch_zeros_like(x):
@@ -104,7 +155,7 @@ def torch_multinomial(input, num_samples, replacement=False):
     Does not support keyword argument `out`.
     """
     if input.is_cuda:
-        return torch_multinomial(input.cpu(), num_samples, replacement).cuda()
+        return torch.multinomial(input.cpu(), num_samples, replacement).cuda(input.get_device())
     else:
         return torch.multinomial(input, num_samples, replacement)
 
@@ -176,3 +227,47 @@ def get_probs_and_logits(ps=None, logits=None, is_multidimensional=True):
         else:
             logits = torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return ps, logits
+
+
+def get_clamped_probs(ps=None, logits=None, is_multidimensional=True):
+    """
+    Clamp probabilities, given probability values or logits. Either ``ps`` or
+    ``logits`` should be specified, but not both.
+
+    :param ps: tensor of probabilities. Should be in the interval *[0, 1]*.
+        If, ``is_multidimensional = True``, then must be normalized along
+        axis -1.
+    :param logits: tensor of logit values.  For the multidimensional case,
+        the values, when exponentiated along the last dimension, must sum
+        to 1.
+    :param is_multidimensional: determines the computation of ps from logits,
+        and vice-versa. For the multi-dimensional case, logit values are
+        assumed to be log probabilities, whereas for the uni-dimensional case,
+        it specifically refers to log odds.
+    :return: clamped probabilities.
+    """
+    if (ps is None) == (logits is None):
+        raise ValueError("Got ps={}, logits={}. Either `ps` or `logits` must be specified, "
+                         "but not both.".format(ps, logits))
+    if ps is None:
+        ps = softmax(logits, -1) if is_multidimensional else F.sigmoid(logits)
+    eps = _get_clamping_buffer(ps)
+    ps = ps.clamp(min=eps, max=1 - eps)
+    if is_multidimensional:
+        ps /= ps.sum(-1, True)
+    return ps
+
+
+def matrix_triangular_solve_compat(b, A, upper=True):
+    """
+    Computes the solution to the linear equation AX = b,
+    where A is a triangular matrix.
+
+    :param b: A 1D or 2D tensor of size N or N x C.
+    :param A: A 2D tensor of size N X N.
+    :param upper: A flag if A is a upper triangular matrix or not.
+    """
+    if A.requires_grad or A.is_cuda:
+        return A.inverse().matmul(b)
+    else:
+        return b.trtrs(A, upper=upper)[0].view(b.size())

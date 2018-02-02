@@ -1,0 +1,12 @@
+.. automodule:: pyro.infer.mcmc.mcmc
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+HMC
+---
+
+.. automodule:: pyro.infer.mcmc.hmc
+    :members:
+    :undoc-members:
+    :show-inheritance:

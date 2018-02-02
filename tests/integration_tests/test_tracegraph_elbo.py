@@ -1,5 +1,8 @@
 from __future__ import absolute_import, division, print_function
 
+import logging
+from unittest import TestCase
+
 import numpy as np
 import pytest
 import torch
@@ -10,13 +13,15 @@ from torch.nn import Parameter
 import pyro
 import pyro.distributions as dist
 import pyro.optim as optim
+from pyro.distributions.testing import fakes
 from pyro.distributions.transformed_distribution import TransformedDistribution
 from pyro.infer import SVI
 from pyro.util import ng_ones, ng_zeros
-from tests.common import TestCase
+from tests.common import assert_equal
 from tests.distributions.test_transformed_distribution import AffineExp
 
 pytestmark = pytest.mark.stage("integration", "integration_batch_2")
+logger = logging.getLogger(__name__)
 
 
 def param_mse(name, target):
@@ -48,7 +53,6 @@ class NormalNormalTests(TestCase):
         self.analytic_log_sig_n = -0.5 * torch.log(self.analytic_lam_n)
         self.analytic_mu_n = self.sum_data * (self.lam / self.analytic_lam_n) +\
             self.mu0 * (self.lam0 / self.analytic_lam_n)
-        self.verbose = True
 
     def test_elbo_reparameterized(self):
         self.do_elbo_test(True, 1000)
@@ -58,14 +62,12 @@ class NormalNormalTests(TestCase):
         self.do_elbo_test(False, 5000)
 
     def do_elbo_test(self, reparameterized, n_steps):
-        if self.verbose:
-            print(" - - - - - DO NORMALNORMAL ELBO TEST  [reparameterized = %s] - - - - - " % reparameterized)
+        logger.info(" - - - - - DO NORMALNORMAL ELBO TEST  [reparameterized = %s] - - - - - " % reparameterized)
         pyro.clear_param_store()
+        normal = dist.normal if reparameterized else fakes.nonreparameterized_normal
 
         def model():
-            mu_latent = pyro.sample(
-                    "mu_latent",
-                    dist.Normal(self.mu0, torch.pow(self.lam0, -0.5), reparameterized=reparameterized))
+            mu_latent = pyro.sample("mu_latent", normal, self.mu0, torch.pow(self.lam0, -0.5))
             for i, x in enumerate(self.data):
                 pyro.observe("obs_%d" % i, dist.normal, x, mu_latent,
                              torch.pow(self.lam, -0.5))
@@ -78,8 +80,7 @@ class NormalNormalTests(TestCase):
                                    self.analytic_log_sig_n.data - 0.29 * torch.ones(2),
                                    requires_grad=True))
             sig_q = torch.exp(log_sig_q)
-            mu_latent = pyro.sample("mu_latent",
-                                    dist.Normal(mu_q, sig_q, reparameterized=reparameterized),
+            mu_latent = pyro.sample("mu_latent", normal, mu_q, sig_q,
                                     baseline=dict(use_decaying_avg_baseline=True))
             return mu_latent
 
@@ -91,11 +92,11 @@ class NormalNormalTests(TestCase):
 
             mu_error = param_mse("mu_q", self.analytic_mu_n)
             log_sig_error = param_mse("log_sig_q", self.analytic_log_sig_n)
-            if k % 250 == 0 and self.verbose:
-                print("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
+            if k % 250 == 0:
+                logger.debug("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
 
-        self.assertEqual(0.0, mu_error, prec=0.03)
-        self.assertEqual(0.0, log_sig_error, prec=0.03)
+        assert_equal(0.0, mu_error, prec=0.03)
+        assert_equal(0.0, log_sig_error, prec=0.03)
 
 
 class NormalNormalNormalTests(TestCase):
@@ -106,20 +107,14 @@ class NormalNormalNormalTests(TestCase):
         self.mu0 = Variable(torch.Tensor([0.0, 0.5]))   # prior mean
         # known precision of observation noise
         self.lam = Variable(torch.Tensor([6.0, 4.0]))
-        self.data = []
-        self.data.append(Variable(torch.Tensor([-0.1, 0.3])))
-        self.data.append(Variable(torch.Tensor([0.00, 0.4])))
-        self.data.append(Variable(torch.Tensor([0.20, 0.5])))
-        self.data.append(Variable(torch.Tensor([0.10, 0.7])))
-        self.n_data = Variable(torch.Tensor([len(self.data)]))
-        self.sum_data = self.data[0] + \
-            self.data[1] + self.data[2] + self.data[3]
-        self.analytic_lam_n = self.lam0 + \
-            self.n_data.expand_as(self.lam) * self.lam
+        self.data = Variable(torch.Tensor([[-0.1, 0.3],
+                                           [0.00, 0.4],
+                                           [0.20, 0.5],
+                                           [0.10, 0.7]]))
+        self.analytic_lam_n = self.lam0 + len(self.data) * self.lam
         self.analytic_log_sig_n = -0.5 * torch.log(self.analytic_lam_n)
-        self.analytic_mu_n = self.sum_data * (self.lam / self.analytic_lam_n) +\
+        self.analytic_mu_n = self.data.sum(0) * (self.lam / self.analytic_lam_n) +\
             self.mu0 * (self.lam0 / self.analytic_lam_n)
-        self.verbose = True
 
     def test_elbo_reparameterized(self):
         self.do_elbo_test(True, True, 5000, 0.02, 0.002, False, False)
@@ -137,11 +132,12 @@ class NormalNormalNormalTests(TestCase):
                           use_decaying_avg_baseline=False)
 
     def do_elbo_test(self, repa1, repa2, n_steps, prec, lr, use_nn_baseline, use_decaying_avg_baseline):
-        if self.verbose:
-            print(" - - - - - DO NORMALNORMALNORMAL ELBO TEST - - - - - -")
-            print("[reparameterized = %s, %s; nn_baseline = %s, decaying_baseline = %s]" %
-                  (repa1, repa2, use_nn_baseline, use_decaying_avg_baseline))
+        logger.info(" - - - - - DO NORMALNORMALNORMAL ELBO TEST - - - - - -")
+        logger.info("[reparameterized = %s, %s; nn_baseline = %s, decaying_baseline = %s]" %
+                    (repa1, repa2, use_nn_baseline, use_decaying_avg_baseline))
         pyro.clear_param_store()
+        normal1 = dist.normal if repa1 else fakes.nonreparameterized_normal
+        normal2 = dist.normal if repa2 else fakes.nonreparameterized_normal
 
         if use_nn_baseline:
 
@@ -161,15 +157,10 @@ class NormalNormalNormalTests(TestCase):
             mu_prime_baseline = None
 
         def model():
-            mu_latent_prime = pyro.sample(
-                    "mu_latent_prime",
-                    dist.Normal(self.mu0, torch.pow(self.lam0, -0.5), reparameterized=repa1))
-            mu_latent = pyro.sample(
-                    "mu_latent",
-                    dist.Normal(mu_latent_prime, torch.pow(self.lam0, -0.5), reparameterized=repa2))
-            for i, x in enumerate(self.data):
-                pyro.observe("obs_%d" % i, dist.normal, x, mu_latent,
-                             torch.pow(self.lam, -0.5))
+            mu_latent_prime = pyro.sample("mu_latent_prime", normal1, self.mu0, torch.pow(self.lam0, -0.5))
+            mu_latent = pyro.sample("mu_latent", normal2, mu_latent_prime, torch.pow(self.lam0, -0.5))
+            pyro.sample("obs", dist.normal, mu_latent, torch.pow(self.lam, -0.5),
+                        obs=self.data)
             return mu_latent
 
         # note that the exact posterior is not mean field!
@@ -187,14 +178,10 @@ class NormalNormalNormalTests(TestCase):
                                          Variable(-0.5 * torch.log(1.2 * self.lam0.data),
                                                   requires_grad=True))
             sig_q, sig_q_prime = torch.exp(log_sig_q), torch.exp(log_sig_q_prime)
-            mu_latent_dist = dist.Normal(mu_q, sig_q, reparameterized=repa2)
-            mu_latent = pyro.sample("mu_latent", mu_latent_dist,
+            mu_latent = pyro.sample("mu_latent", normal2, mu_q, sig_q,
                                     baseline=dict(use_decaying_avg_baseline=use_decaying_avg_baseline))
-            mu_latent_prime_dist = dist.Normal(kappa_q.expand_as(mu_latent) * mu_latent + mu_q_prime,
-                                               sig_q_prime,
-                                               reparameterized=repa1)
             pyro.sample("mu_latent_prime",
-                        mu_latent_prime_dist,
+                        normal1, kappa_q.expand_as(mu_latent) * mu_latent + mu_q_prime, sig_q_prime,
                         baseline=dict(nn_baseline=mu_prime_baseline,
                                       nn_baseline_input=mu_latent,
                                       use_decaying_avg_baseline=use_decaying_avg_baseline))
@@ -219,16 +206,16 @@ class NormalNormalNormalTests(TestCase):
             kappa_error = param_mse("kappa_q", 0.5 * ng_ones(1))
             log_sig_prime_error = param_mse("log_sig_q_prime", -0.5 * torch.log(2.0 * self.lam0))
 
-            if k % 500 == 0 and self.verbose:
-                print("errors:  %.4f, %.4f" % (mu_error, log_sig_error), end='')
-                print(", %.4f, %.4f" % (mu_prime_error, log_sig_prime_error), end='')
-                print(", %.4f" % kappa_error)
+            if k % 500 == 0:
+                logger.debug("errors:  %.4f, %.4f" % (mu_error, log_sig_error))
+                logger.debug(", %.4f, %.4f" % (mu_prime_error, log_sig_prime_error))
+                logger.debug(", %.4f" % kappa_error)
 
-        self.assertEqual(0.0, mu_error, prec=prec)
-        self.assertEqual(0.0, log_sig_error, prec=prec)
-        self.assertEqual(0.0, mu_prime_error, prec=prec)
-        self.assertEqual(0.0, log_sig_prime_error, prec=prec)
-        self.assertEqual(0.0, kappa_error, prec=prec)
+        assert_equal(0.0, mu_error, prec=prec)
+        assert_equal(0.0, log_sig_error, prec=prec)
+        assert_equal(0.0, mu_prime_error, prec=prec)
+        assert_equal(0.0, log_sig_prime_error, prec=prec)
+        assert_equal(0.0, kappa_error, prec=prec)
 
 
 class BernoulliBetaTests(TestCase):
@@ -237,31 +224,29 @@ class BernoulliBetaTests(TestCase):
         # beta prior hyperparameter
         self.alpha0 = Variable(torch.Tensor([1.0]))
         self.beta0 = Variable(torch.Tensor([1.0]))  # beta prior hyperparameter
-        self.data = []
-        self.data.append(Variable(torch.Tensor([0.0])))
-        self.data.append(Variable(torch.Tensor([1.0])))
-        self.data.append(Variable(torch.Tensor([1.0])))
-        self.data.append(Variable(torch.Tensor([1.0])))
+        self.data = Variable(torch.Tensor([[0.0], [1.0], [1.0], [1.0]]))
         self.n_data = len(self.data)
-        data_sum = self.data[0] + self.data[1] + self.data[2] + self.data[3]
+        data_sum = self.data.sum(0)
         self.alpha_n = self.alpha0 + data_sum  # posterior alpha
-        self.beta_n = self.beta0 - data_sum + \
-            Variable(torch.Tensor([self.n_data]))
-        # posterior beta
+        self.beta_n = self.beta0 - data_sum + Variable(torch.Tensor([self.n_data]))  # posterior beta
         self.log_alpha_n = torch.log(self.alpha_n)
         self.log_beta_n = torch.log(self.beta_n)
-        self.verbose = True
+
+    @pytest.mark.xfail(reason='poorly-tuned Adam params?')
+    def test_elbo_reparameterized(self):
+        self.do_elbo_test(True, 3000, 0.95, 0.0007)
 
     def test_elbo_nonreparameterized(self):
-        if self.verbose:
-            print(" - - - - - DO BERNOULLI-BETA ELBO TEST - - - - - ")
+        self.do_elbo_test(False, 3000, 0.95, 0.0007)
+
+    def do_elbo_test(self, reparameterized, n_steps, beta1, lr):
+        logger.info(" - - - - - DO BETA-BERNOULLI ELBO TEST [repa = %s] - - - - - " % reparameterized)
         pyro.clear_param_store()
+        beta = dist.beta if reparameterized else fakes.nonreparameterized_beta
 
         def model():
-            p_latent = pyro.sample("p_latent", dist.beta, self.alpha0, self.beta0)
-            for i, x in enumerate(self.data):
-                pyro.observe("obs_{}".format(i), dist.bernoulli, x,
-                             torch.pow(torch.pow(p_latent, 2.0), 0.5))
+            p_latent = pyro.sample("p_latent", beta, self.alpha0, self.beta0)
+            pyro.sample("obs", dist.bernoulli, p_latent, obs=self.data)
             return p_latent
 
         def guide():
@@ -270,26 +255,25 @@ class BernoulliBetaTests(TestCase):
             beta_q_log = pyro.param("beta_q_log",
                                     Variable(self.log_beta_n.data - 0.143, requires_grad=True))
             alpha_q, beta_q = torch.exp(alpha_q_log), torch.exp(beta_q_log)
-            p_latent = pyro.sample("p_latent", dist.beta, alpha_q, beta_q,
+            p_latent = pyro.sample("p_latent", beta, alpha_q, beta_q,
                                    baseline=dict(use_decaying_avg_baseline=True))
             return p_latent
 
-        adam = optim.Adam({"lr": .0007, "betas": (0.96, 0.999)})
+        adam = optim.Adam({"lr": lr, "betas": (beta1, 0.999)})
         svi = SVI(model, guide, adam, loss="ELBO", trace_graph=True)
 
-        for k in range(3000):
+        for k in range(n_steps):
             svi.step()
-
             alpha_error = param_abs_error("alpha_q_log", self.log_alpha_n)
             beta_error = param_abs_error("beta_q_log", self.log_beta_n)
+            if k % 500 == 0:
+                logger.debug("alpha_error, beta_error: %.4f, %.4f" % (alpha_error, beta_error))
 
-            if k % 500 == 0 and self.verbose:
-                print("alpha_error, beta_error: %.4f, %.4f" % (alpha_error, beta_error))
-
-        self.assertEqual(0.0, alpha_error, prec=0.03)
-        self.assertEqual(0.0, beta_error, prec=0.04)
+        assert_equal(0.0, alpha_error, prec=0.03)
+        assert_equal(0.0, beta_error, prec=0.04)
 
 
+@pytest.mark.skip('Reinstate once poisson is migrated to PyTorch - https://github.com/uber/pyro/issues/699')
 class PoissonGammaTests(TestCase):
     def setUp(self):
         # poisson-gamma model
@@ -297,28 +281,27 @@ class PoissonGammaTests(TestCase):
         self.alpha0 = Variable(torch.Tensor([1.0]))
         # gamma prior hyperparameter
         self.beta0 = Variable(torch.Tensor([1.0]))
-        self.data = []
-        self.data.append(Variable(torch.Tensor([1.0])))
-        self.data.append(Variable(torch.Tensor([2.0])))
-        self.data.append(Variable(torch.Tensor([3.0])))
-        self.n_data = len(self.data)
-        sum_data = self.data[0] + self.data[1] + self.data[2]
+        self.data = Variable(torch.Tensor([[1.0], [2.0], [3.0]]))
+        sum_data = self.data.sum(0)
         self.alpha_n = self.alpha0 + sum_data  # posterior alpha
-        self.beta_n = self.beta0 + \
-            Variable(torch.Tensor([self.n_data]))  # posterior beta
+        self.beta_n = self.beta0 + len(self.data)  # posterior beta
         self.log_alpha_n = torch.log(self.alpha_n)
         self.log_beta_n = torch.log(self.beta_n)
-        self.verbose = True
+
+    def test_elbo_reparameterized(self):
+        self.do_elbo_test(True, 8000, 0.95, 0.0007)
 
     def test_elbo_nonreparameterized(self):
-        if self.verbose:
-            print(" - - - - - DO POISSON-GAMMA ELBO TEST - - - - - ")
+        self.do_elbo_test(False, 8000, 0.95, 0.0007)
+
+    def do_elbo_test(self, reparameterized, n_steps, beta1, lr):
+        logger.info(" - - - - - DO POISSON-GAMMA ELBO TEST [repa = %s] - - - - - " % reparameterized)
         pyro.clear_param_store()
+        gamma = dist.gamma if reparameterized else fakes.nonreparameterized_gamma
 
         def model():
-            lambda_latent = pyro.sample("lambda_latent", dist.gamma, self.alpha0, self.beta0)
-            for i, x in enumerate(self.data):
-                pyro.observe("obs_{}".format(i), dist.poisson, x, lambda_latent)
+            lambda_latent = pyro.sample("lambda_latent", gamma, self.alpha0, self.beta0)
+            pyro.sample("obs", dist.poisson, lambda_latent, obs=self.data)
             return lambda_latent
 
         def guide():
@@ -335,21 +318,21 @@ class PoissonGammaTests(TestCase):
                     0.143,
                     requires_grad=True))
             alpha_q, beta_q = torch.exp(alpha_q_log), torch.exp(beta_q_log)
-            pyro.sample("lambda_latent", dist.gamma, alpha_q, beta_q,
+            pyro.sample("lambda_latent", gamma, alpha_q, beta_q,
                         baseline=dict(use_decaying_avg_baseline=True))
 
-        adam = optim.Adam({"lr": .0007, "betas": (0.95, 0.999)})
+        adam = optim.Adam({"lr": lr, "betas": (beta1, 0.999)})
         svi = SVI(model, guide, adam, loss="ELBO", trace_graph=True)
 
-        for k in range(7000):
+        for k in range(n_steps):
             svi.step()
             alpha_error = param_abs_error("alpha_q_log", self.log_alpha_n)
             beta_error = param_abs_error("beta_q_log", self.log_beta_n)
-            if k % 500 == 0 and self.verbose:
-                print("alpha_q_log_error, beta_q_log_error: %.4f, %.4f" % (alpha_error, beta_error))
+            if k % 500 == 0:
+                logger.debug("alpha_q_log_error, beta_q_log_error: %.4f, %.4f" % (alpha_error, beta_error))
 
-        self.assertEqual(0.0, alpha_error, prec=0.08)
-        self.assertEqual(0.0, beta_error, prec=0.08)
+        assert_equal(0.0, alpha_error, prec=0.08)
+        assert_equal(0.0, beta_error, prec=0.08)
 
 
 class ExponentialGammaTests(TestCase):
@@ -360,23 +343,27 @@ class ExponentialGammaTests(TestCase):
         # gamma prior hyperparameter
         self.beta0 = Variable(torch.Tensor([1.0]))
         self.n_data = 2
-        self.data = Variable(torch.Tensor([3.0, 2.0]))  # two observations
-        self.alpha_n = self.alpha0 + \
-            Variable(torch.Tensor([self.n_data]))  # posterior alpha
-        self.beta_n = self.beta0 + torch.sum(self.data)  # posterior beta
+        self.data = Variable(torch.Tensor([[3.0], [2.0]]))  # two observations
+        self.alpha_n = self.alpha0 + self.n_data  # posterior alpha
+        self.beta_n = self.beta0 + self.data.sum(0)  # posterior beta
         self.log_alpha_n = torch.log(self.alpha_n)
         self.log_beta_n = torch.log(self.beta_n)
-        self.verbose = True
+
+    @pytest.mark.xfail(reason='poorly-tuned Adam params?')
+    def test_elbo_reparameterized(self):
+        self.do_elbo_test(True, 8000, 0.95, 0.0007)
 
     def test_elbo_nonreparameterized(self):
-        if self.verbose:
-            print(" - - - - - DO EXPONENTIAL-GAMMA ELBO TEST - - - - - ")
+        self.do_elbo_test(False, 8000, 0.95, 0.0007)
+
+    def do_elbo_test(self, reparameterized, n_steps, beta1, lr):
+        logger.info(" - - - - - DO EXPONENTIAL-GAMMA ELBO TEST [repa = %s] - - - - - " % reparameterized)
         pyro.clear_param_store()
+        gamma = dist.gamma if reparameterized else fakes.nonreparameterized_gamma
 
         def model():
-            lambda_latent = pyro.sample("lambda_latent", dist.gamma, self.alpha0, self.beta0)
-            pyro.observe("obs0", dist.exponential, self.data[0], lambda_latent)
-            pyro.observe("obs1", dist.exponential, self.data[1], lambda_latent)
+            lambda_latent = pyro.sample("lambda_latent", gamma, self.alpha0, self.beta0)
+            pyro.sample("obs", dist.exponential, lambda_latent, obs=self.data)
             return lambda_latent
 
         def guide():
@@ -387,23 +374,21 @@ class ExponentialGammaTests(TestCase):
                 "beta_q_log",
                 Variable(self.log_beta_n.data - 0.143, requires_grad=True))
             alpha_q, beta_q = torch.exp(alpha_q_log), torch.exp(beta_q_log)
-            pyro.sample("lambda_latent", dist.gamma, alpha_q, beta_q,
+            pyro.sample("lambda_latent", gamma, alpha_q, beta_q,
                         baseline=dict(use_decaying_avg_baseline=True))
 
-        adam = optim.Adam({"lr": .0007, "betas": (0.95, 0.999)})
+        adam = optim.Adam({"lr": lr, "betas": (beta1, 0.999)})
         svi = SVI(model, guide, adam, loss="ELBO", trace_graph=True)
 
-        for k in range(8000):
+        for k in range(n_steps):
             svi.step()
-
             alpha_error = param_abs_error("alpha_q_log", self.log_alpha_n)
             beta_error = param_abs_error("beta_q_log", self.log_beta_n)
+            if k % 500 == 0:
+                logger.debug("alpha_error, beta_error: %.4f, %.4f" % (alpha_error, beta_error))
 
-            if k % 500 == 0 and self.verbose:
-                print("alpha_error, beta_error: %.4f, %.4f" % (alpha_error, beta_error))
-
-        self.assertEqual(0.0, alpha_error, prec=0.03)
-        self.assertEqual(0.0, beta_error, prec=0.03)
+        assert_equal(0.0, alpha_error, prec=0.03)
+        assert_equal(0.0, beta_error, prec=0.03)
 
 
 class LogNormalNormalGuide(nn.Module):
@@ -423,16 +408,12 @@ class LogNormalNormalTests(TestCase):
         self.tau0 = Variable(torch.Tensor([1.0]))
         # known precision for observation likelihood
         self.tau = Variable(torch.Tensor([2.5]))
-        self.n_data = 2
         self.data = Variable(torch.Tensor([[1.5], [2.2]]))  # two observations
-        self.tau_n = self.tau0 + \
-            Variable(torch.Tensor([self.n_data])) * self.tau  # posterior tau
-        mu_numerator = self.mu0 * self.tau0 + \
-            self.tau * torch.sum(torch.log(self.data))
+        self.tau_n = self.tau0 + len(self.data) * self.tau  # posterior tau
+        mu_numerator = self.mu0 * self.tau0 + self.tau * torch.log(self.data).sum(0)
         self.mu_n = mu_numerator / self.tau_n  # posterior mu
         self.log_mu_n = torch.log(self.mu_n)
         self.log_tau_n = torch.log(self.tau_n)
-        self.verbose = True
 
     def test_elbo_reparameterized(self):
         self.do_elbo_test(True, 7000, 0.95, 0.001)
@@ -441,26 +422,23 @@ class LogNormalNormalTests(TestCase):
         self.do_elbo_test(False, 7000, 0.95, 0.001)
 
     def do_elbo_test(self, reparameterized, n_steps, beta1, lr):
-        if self.verbose:
-            print(" - - - - - DO LOGNORMAL-NORMAL ELBO TEST [repa = %s] - - - - - " % reparameterized)
+        logger.info(" - - - - - DO LOGNORMAL-NORMAL ELBO TEST [repa = %s] - - - - - " % reparameterized)
         pyro.clear_param_store()
+        normal = dist.normal if reparameterized else fakes.nonreparameterized_normal
         pt_guide = LogNormalNormalGuide(self.log_mu_n.data + 0.17,
                                         self.log_tau_n.data - 0.143)
 
         def model():
-            mu_latent = pyro.sample("mu_latent", dist.normal,
-                                    self.mu0, torch.pow(self.tau0, -0.5))
+            mu_latent = pyro.sample("mu_latent", dist.normal, self.mu0, torch.pow(self.tau0, -0.5))
             sigma = torch.pow(self.tau, -0.5)
-            pyro.observe("obs0", dist.lognormal, self.data[0], mu_latent, sigma)
-            pyro.observe("obs1", dist.lognormal, self.data[1], mu_latent, sigma)
+            pyro.sample("obs", dist.lognormal, mu_latent, sigma, obs=self.data)
             return mu_latent
 
         def guide():
             pyro.module("mymodule", pt_guide)
             mu_q, tau_q = torch.exp(pt_guide.mu_q_log), torch.exp(pt_guide.tau_q_log)
             sigma = torch.pow(tau_q, -0.5)
-            pyro.sample("mu_latent",
-                        dist.Normal(mu_q, sigma, reparameterized=reparameterized),
+            pyro.sample("mu_latent", normal, mu_q, sigma,
                         baseline=dict(use_decaying_avg_baseline=True))
 
         adam = optim.Adam({"lr": lr, "betas": (beta1, 0.999)})
@@ -468,18 +446,16 @@ class LogNormalNormalTests(TestCase):
 
         for k in range(n_steps):
             svi.step()
-
             mu_error = param_abs_error("mymodule$$$mu_q_log", self.log_mu_n)
             tau_error = param_abs_error("mymodule$$$tau_q_log", self.log_tau_n)
-            if k % 500 == 0 and self.verbose:
-                print("mu_error, tau_error = %.4f, %.4f" % (mu_error, tau_error))
+            if k % 500 == 0:
+                logger.debug("mu_error, tau_error = %.4f, %.4f" % (mu_error, tau_error))
 
-        self.assertEqual(0.0, mu_error, prec=0.05)
-        self.assertEqual(0.0, tau_error, prec=0.05)
+        assert_equal(0.0, mu_error, prec=0.05)
+        assert_equal(0.0, tau_error, prec=0.05)
 
     def test_elbo_with_transformed_distribution(self):
-        if self.verbose:
-            print(" - - - - - DO LOGNORMAL-NORMAL ELBO TEST [uses TransformedDistribution] - - - - - ")
+        logger.info(" - - - - - DO LOGNORMAL-NORMAL ELBO TEST [uses TransformedDistribution] - - - - - ")
         pyro.clear_param_store()
 
         def model():
@@ -508,15 +484,13 @@ class LogNormalNormalTests(TestCase):
 
         for k in range(7000):
             svi.step()
-
             mu_error = param_abs_error("mu_q_log", self.log_mu_n)
             tau_error = param_abs_error("tau_q_log", self.log_tau_n)
+            if k % 500 == 0:
+                logger.debug("mu_error, tau_error = %.4f, %.4f" % (mu_error, tau_error))
 
-            if k % 500 == 0 and self.verbose:
-                print("mu_error, tau_error = %.4f, %.4f" % (mu_error, tau_error))
-
-        self.assertEqual(0.0, mu_error, prec=0.05)
-        self.assertEqual(0.0, tau_error, prec=0.05)
+        assert_equal(0.0, mu_error, prec=0.05)
+        assert_equal(0.0, tau_error, prec=0.05)
 
 
 @pytest.mark.init(rng_seed=0)
@@ -543,16 +517,13 @@ class RaoBlackwellizationTests(TestCase):
         self.analytic_log_sig_n = -0.5 * torch.log(self.analytic_lam_n)
         self.analytic_mu_n = self.sum_data * (self.lam / self.analytic_lam_n) +\
             self.mu0 * (self.lam0 / self.analytic_lam_n)
-        self.verbose = True
 
     # this tests rao-blackwellization in elbo for nested list map_datas
     def test_nested_list_map_data_in_elbo(self, n_steps=4000):
         pyro.clear_param_store()
 
         def model():
-            mu_latent = pyro.sample(
-                    "mu_latent",
-                    dist.Normal(self.mu0, torch.pow(self.lam0, -0.5), reparameterized=False))
+            mu_latent = pyro.sample("mu_latent", fakes.nonreparameterized_normal, self.mu0, torch.pow(self.lam0, -0.5))
 
             def obs_outer(i, x):
                 pyro.map_data("map_obs_inner_%d" % i, x, lambda _i, _x:
@@ -574,10 +545,8 @@ class RaoBlackwellizationTests(TestCase):
                                    self.analytic_log_sig_n.data - 0.27 * torch.ones(2),
                                    requires_grad=True))
             sig_q = torch.exp(log_sig_q)
-            mu_latent = pyro.sample(
-                    "mu_latent",
-                    dist.Normal(mu_q, sig_q, reparameterized=False),
-                    baseline=dict(use_decaying_avg_baseline=True))
+            mu_latent = pyro.sample("mu_latent", fakes.nonreparameterized_normal, mu_q, sig_q,
+                                    baseline=dict(use_decaying_avg_baseline=True))
 
             def obs_outer(i, x):
                 pyro.map_data("map_obs_inner_%d" % i, x, lambda _i, _x:
@@ -601,14 +570,13 @@ class RaoBlackwellizationTests(TestCase):
 
         for k in range(n_steps):
             svi.step()
-
             mu_error = param_mse("mu_q", self.analytic_mu_n)
             log_sig_error = param_mse("log_sig_q", self.analytic_log_sig_n)
-            if k % 500 == 0 and self.verbose:
-                print("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
+            if k % 500 == 0:
+                logger.debug("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
 
-        self.assertEqual(0.0, mu_error, prec=0.04)
-        self.assertEqual(0.0, log_sig_error, prec=0.04)
+        assert_equal(0.0, mu_error, prec=0.04)
+        assert_equal(0.0, log_sig_error, prec=0.04)
 
     # this tests rao-blackwellization and baselines for a vectorized map_data
     # inside of a list map_data with superfluous random variables to complexify the
@@ -624,18 +592,19 @@ class RaoBlackwellizationTests(TestCase):
                 self.data_tensor[3 * _out + _in, :] = self.data[_out][_in]
 
         def model():
-            mu_latent = pyro.sample(
-                    "mu_latent",
-                    dist.Normal(self.mu0, torch.pow(self.lam0, -0.5), reparameterized=False))
+            mu_latent = pyro.sample("mu_latent", fakes.nonreparameterized_normal,
+                                    self.mu0,
+                                    torch.pow(self.lam0, -0.5))
 
             def obs_inner(i, _i, _x):
                 for k in range(n_superfluous_top):
                     pyro.sample("z_%d_%d" % (i, k),
-                                dist.Normal(ng_zeros(4 - i, 1), ng_ones(4 - i, 1), reparameterized=False))
-                pyro.observe("obs_%d" % i, dist.normal, _x, mu_latent, torch.pow(self.lam, -0.5))
+                                fakes.nonreparameterized_normal, ng_zeros(4 - i), ng_ones(4 - i))
+                pyro.observe("obs_%d" % i, dist.normal, _x, mu_latent, torch.pow(self.lam, -0.5),
+                             extra_event_dims=1)
                 for k in range(n_superfluous_top, n_superfluous_top + n_superfluous_bottom):
                     pyro.sample("z_%d_%d" % (i, k),
-                                dist.Normal(ng_zeros(4 - i, 1), ng_ones(4 - i, 1), reparameterized=False))
+                                fakes.nonreparameterized_normal, ng_zeros(4 - i), ng_ones(4 - i))
 
             def obs_outer(i, x):
                 pyro.map_data("map_obs_inner_%d" % i, x, lambda _i, _x:
@@ -662,18 +631,20 @@ class RaoBlackwellizationTests(TestCase):
             trivial_baseline = pyro.module("mu_baseline", pt_mu_baseline, tags="baseline")
             baseline_value = trivial_baseline(ng_ones(1))
             mu_latent = pyro.sample("mu_latent",
-                                    dist.Normal(mu_q, sig_q, reparameterized=False),
+                                    fakes.nonreparameterized_normal, mu_q, sig_q,
                                     baseline=dict(baseline_value=baseline_value))
 
             def obs_inner(i, _i, _x):
                 for k in range(n_superfluous_top + n_superfluous_bottom):
                     z_baseline = pyro.module("z_baseline_%d_%d" % (i, k),
                                              pt_superfluous_baselines[3 * k + i], tags="baseline")
-                    baseline_value = z_baseline(mu_latent.detach()).unsqueeze(-1)
+                    baseline_value = z_baseline(mu_latent.detach())
                     mean_i = pyro.param("mean_%d_%d" % (i, k),
-                                        Variable(0.5 * torch.ones(4 - i, 1), requires_grad=True))
+                                        Variable(0.5 * torch.ones(4 - i), requires_grad=True))
                     pyro.sample("z_%d_%d" % (i, k),
-                                dist.Normal(mean_i, ng_ones(4 - i, 1), reparameterized=False),
+                                fakes.nonreparameterized_normal,
+                                mean_i,
+                                ng_ones(4 - i),
                                 baseline=dict(baseline_value=baseline_value))
 
             def obs_outer(i, x):
@@ -710,12 +681,12 @@ class RaoBlackwellizationTests(TestCase):
                     superfluous_error = torch.max(torch.max(mean_0_error, mean_1_error), mean_2_error)
                     superfluous_errors.append(superfluous_error.data.cpu().numpy()[0])
 
-            if step % 500 == 0 and self.verbose:
-                print("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
+            if step % 500 == 0:
+                logger.debug("mu error, log(sigma) error:  %.4f, %.4f" % (mu_error, log_sig_error))
                 if n_superfluous_top > 0 or n_superfluous_bottom > 0:
-                    print("superfluous error: %.4f" % np.max(superfluous_errors))
+                    logger.debug("superfluous error: %.4f" % np.max(superfluous_errors))
 
-        self.assertEqual(0.0, mu_error, prec=0.04)
-        self.assertEqual(0.0, log_sig_error, prec=0.05)
+        assert_equal(0.0, mu_error, prec=0.04)
+        assert_equal(0.0, log_sig_error, prec=0.05)
         if n_superfluous_top > 0 or n_superfluous_bottom > 0:
-            self.assertEqual(0.0, np.max(superfluous_errors), prec=0.04)
+            assert_equal(0.0, np.max(superfluous_errors), prec=0.04)

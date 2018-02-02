@@ -9,9 +9,11 @@ from six import add_metaclass
 from torch.autograd import Variable
 
 from pyro.distributions.distribution import Distribution
+from pyro.distributions.util import copy_docs_from
 from pyro.nn import AutoRegressiveNN
 
 
+@copy_docs_from(Distribution)
 class TransformedDistribution(Distribution):
     """
     Transforms the base distribution by applying a sequence of `Bijector`s to it.
@@ -53,19 +55,16 @@ class TransformedDistribution(Distribution):
             next_input = y
         return next_input
 
-    def batch_shape(self, x=None, *args, **kwargs):
-        """
-        Ref: :py:meth:`pyro.distributions.distribution.Distribution.batch_shape`
-        """
-        return self.base_dist.batch_shape(x, *args, **kwargs)
+    def shape(self, *args, **kwargs):
+        return self.base_dist.shape(*args, **kwargs)
+
+    def batch_shape(self, *args, **kwargs):
+        return self.base_dist.batch_shape(*args, **kwargs)
 
     def event_shape(self, *args, **kwargs):
-        """
-        Ref: :py:meth:`pyro.distributions.distribution.Distribution.event_shape`
-        """
         return self.base_dist.event_shape(*args, **kwargs)
 
-    def log_pdf(self, y, *args, **kwargs):
+    def log_prob(self, y, *args, **kwargs):
         """
         :param y: a value sampled from the transformed distribution
         :type y: torch.autograd.Variable
@@ -77,23 +76,11 @@ class TransformedDistribution(Distribution):
         of the base distribution and the log det jacobian
         """
         value = y
-        log_pdf = 0.0
-        for bijector in reversed(self.bijectors):
-            log_pdf -= bijector.log_det_jacobian(value, *args, **kwargs)
-            value = bijector.inverse(value)
-        log_pdf += self.base_dist.log_pdf(value, *args, **kwargs)
-        return log_pdf
-
-    def batch_log_pdf(self, y, *args, **kwargs):
-        """
-        Ref: :py:meth:`pyro.distributions.distribution.Distribution.batch_log_pdf`
-        """
-        value = y
         log_det_jacobian = 0.0
         for bijector in reversed(self.bijectors):
             log_det_jacobian += bijector.batch_log_det_jacobian(value, *args, **kwargs)
             value = bijector.inverse(value)
-        base_log_pdf = self.base_dist.batch_log_pdf(value, *args, **kwargs)
+        base_log_pdf = self.base_dist.log_prob(value, *args, **kwargs)
         if not isinstance(log_det_jacobian, numbers.Number):
             log_det_jacobian = log_det_jacobian.contiguous().view(*base_log_pdf.size())
             assert log_det_jacobian.size() == base_log_pdf.size(), \
@@ -258,4 +245,4 @@ class InverseAutoregressiveFlow(Bijector):
         log_sigma = torch.log(sigma)
         if 'log_pdf_mask' in kwargs:
             log_sigma = log_sigma * kwargs['log_pdf_mask']
-        return log_sigma.sum(-1)
+        return log_sigma

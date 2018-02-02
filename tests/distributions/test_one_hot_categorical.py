@@ -1,12 +1,14 @@
 from __future__ import absolute_import, division, print_function
 
+from unittest import TestCase
+
 import numpy as np
 import pytest
 import torch
 from torch.autograd import Variable
 
 import pyro.distributions as dist
-from tests.common import TestCase, assert_equal
+from tests.common import assert_equal
 
 
 class TestOneHotCategorical(TestCase):
@@ -77,12 +79,6 @@ def ps(request):
     return request.param
 
 
-@pytest.fixture(params=[None, [3, 4, 5], ["a", "b", "c"]],
-                ids=["vs=None", "vs=list(num)", "vs=list(str)"])
-def vs(request):
-    return request.param
-
-
 def modify_params_using_dims(ps, dim):
     return Variable(torch.Tensor(wrap_nested(ps, dim-1)))
 
@@ -101,9 +97,9 @@ def test_sample_dims(dim, ps):
 
 
 def test_batch_log_dims(dim, ps):
-    batch_pdf_shape = (3,) + (1,) * dim
+    batch_pdf_shape = (3,) + (1,) * (dim-1)
     expected_log_pdf = np.array(wrap_nested(list(np.log(ps)), dim-1)).reshape(*batch_pdf_shape)
     ps = modify_params_using_dims(ps, dim)
     support = dist.one_hot_categorical.enumerate_support(ps)
-    batch_log_pdf = dist.one_hot_categorical.batch_log_pdf(support, ps)
-    assert_equal(batch_log_pdf.data.cpu().numpy(), expected_log_pdf)
+    log_prob = dist.one_hot_categorical.log_prob(support, ps)
+    assert_equal(log_prob.data.cpu().numpy(), expected_log_pdf)

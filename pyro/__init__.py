@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 
 import contextlib
 import copy
+import logging
 import warnings
 from collections import OrderedDict
 from inspect import isclass
@@ -16,6 +17,9 @@ from pyro.poutine import _PYRO_STACK, condition, do  # noqa: F401
 from pyro.util import apply_stack, deep_getattr, get_tensor_data, ones, set_rng_seed, zeros  # noqa: F401
 
 __version__ = '0.1.2'
+
+# Default logger to prevent 'No handler found' warning.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
 def get_param_store():
@@ -127,9 +131,9 @@ class _Subsample(Distribution):
             result = Variable(torch.randperm(self.size)[:self.subsample_size])
         return result.cuda() if self.use_cuda else result
 
-    def batch_log_pdf(self, x):
+    def log_prob(self, x):
         # This is zero so that iarange can provide an unbiased estimate of
-        # the non-subsampled batch_log_pdf.
+        # the non-subsampled log_prob.
         result = Variable(torch.zeros(1))
         return result.cuda() if self.use_cuda else result
 
