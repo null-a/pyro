@@ -147,16 +147,14 @@ class DynAIR(nn.Module):
     def model_sample_y(self, batch_size):
         return pyro.sample('y',
                            dist.normal,
-                           self.y_prior_mean,
-                           self.y_prior_sd,
-                           batch_size=batch_size)
+                           self.y_prior_mean.expand(batch_size, -1),
+                           self.y_prior_sd.expand(batch_size, -1))
 
     def model_sample_w_0(self, batch_size):
         return pyro.sample('w_0',
                            dist.normal,
-                           self.w_0_prior_mean,
-                           self.w_0_prior_sd,
-                           batch_size=batch_size)
+                           self.w_0_prior_mean.expand(batch_size, -1),
+                           self.w_0_prior_sd.expand(batch_size, -1))
 
     def model_sample_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t),
@@ -167,9 +165,8 @@ class DynAIR(nn.Module):
     def model_sample_z_0(self, batch_size):
         return pyro.sample('z_0',
                            dist.normal,
-                           self.z_0_prior_mean,
-                           self.z_0_prior_sd,
-                           batch_size=batch_size)
+                           self.z_0_prior_mean.expand(batch_size, -1),
+                           self.z_0_prior_sd.expand(batch_size, -1))
 
     def model_sample_z(self, t, z_mean, z_sd):
         return pyro.sample('z_{}'.format(t),
