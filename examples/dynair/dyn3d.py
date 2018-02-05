@@ -286,6 +286,29 @@ class DynAIR(nn.Module):
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
+    def infer(self, batch, num_extra_frames=0):
+        trace = poutine.trace(self.guide).get_trace(batch)
+        frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
+        ws, zs, y = trace.nodes['_RETURN']['value']
+        bkg = self.decode_bkg(y)
+
+        extra_ws = []
+        extra_zs = []
+        extra_frames = []
+
+        w = ws[-1]
+        z = zs[-1]
+
+        for t in range(num_extra_frames):
+            z, w = self.model_transition(num_extra_frames + t, z, w)
+            frame_mean = self.model_emission(z, w, bkg)
+            extra_frames.append(frame_mean)
+            extra_ws.append(w)
+            extra_zs.append(z)
+
+        return frames, ws, extra_frames, extra_ws
+
+
 def batch_expand(t, b):
     return t.expand((b,) + t.size())
 
@@ -385,48 +408,20 @@ def run_svi(X, args):
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
             print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
 
-        ix = 40
-        n = 1
-        test_batch = X[ix:ix+n]
-
         if (i+1) % 1 == 0:
+            ix = 40
+            n = 1
+            test_batch = X[ix:ix+n]
 
-            # TODO: Make reconstruct method.
-            trace = poutine.trace(dynair.guide).get_trace(test_batch)
-            frames_seq, ws_seq, _ = poutine.replay(dynair.model, trace)(test_batch, do_likelihood=False)
-
-            frames = latent_seq_to_tensor(frames_seq)
-            ws = latent_seq_to_tensor(ws_seq)
+            frames, ws, extra_frames, extra_ws = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
 
             for k in range(n):
                 out = overlay_window_outlines(dynair, frames[k], ws[k])
-                vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=7)
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
+                vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=10)
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
-
-            # Test extrapolation.
-            # TODO: Clean-up.
-            ex = X[ix:ix+1]
-            ws, zs, y = dynair.guide(ex)
-
-            bkg = dynair.decode_bkg(y)
-
-            w = ws[-1]
-            z = zs[-1]
-            extrap_frames = []
-            extrap_ws = []
-            extrap_zs = []
-            for t in range(14):
-                z, w = dynair.model_transition(14 + t, z, w)
-                frame_mean = dynair.model_emission(z, w, bkg)
-                extrap_frames.append(frame_mean)
-                extrap_ws.append(w)
-                extrap_zs.append(z)
-            extrap_frames = latent_seq_to_tensor(extrap_frames)
-            extrap_ws = latent_seq_to_tensor(extrap_ws)
-            out = overlay_window_outlines(dynair, extrap_frames[0], extrap_ws[0])
-            vis.images(frames_to_rgb_list(out.cpu()), nrow=7)
-
+                out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
             print('Saving parameters...')
@@ -475,6 +470,16 @@ def latent_seq_to_tensor(arr):
     # model into a (batch, seq_len, rest...) tensor.
     return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1)
 
+def arr_to_img(nparr):
+    assert nparr.shape[0] == 4 # required for RGBA
+    shape = nparr.shape[1:]
+    return Image.frombuffer('RGBA', shape, (nparr.transpose((1,2,0)) * 255).astype(np.uint8).tostring(), 'raw', 'RGBA', 0, 1)
+
+def save_frames(frames, path_fmt_str, offset=0):
+    n = frames.shape[0]
+    assert_size(frames, (n, 4, frames.size(2), frames.size(3)))
+    for i in range(n):
+        arr_to_img(frames[i].data.numpy()).save(path_fmt_str.format(i + offset))
 
 
 if __name__ == '__main__':
@@ -520,3 +525,28 @@ if __name__ == '__main__':
     if args.cuda:
         X = X.cuda()
     run_svi(X, args)
+
+    # ====================
+    # Code to visualise latent variables and extrapolated frames.
+    #
+    # These can be turned into movies with something like this:
+    # ffmpeg -framerate 10 -i frame_%2d.png -r 25 out.mpg
+    #
+    # dynair = DynAIR(use_cuda=args.cuda)
+    # dynair.load_state_dict(torch.load('dyn3d.pytorch', map_location=lambda storage, loc: storage))
+
+    # vis = visdom.Visdom()
+    # ix = 40
+    # test_batch = X[ix:ix+1]
+
+    # frames, ws, extra_frames, extra_ws = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
+
+    # #out = frames[0]
+    # out = overlay_window_outlines(dynair, frames[0], ws[0])
+    # vis.images(frames_to_rgb_list(test_batch[0].cpu()), nrow=10)
+    # vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+    # #save_frames(out, 'path/to/frame_{:02d}.png')
+
+    # out = overlay_window_outlines(dynair, extra_frames[0], extra_ws[0])
+    # vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+    # #save_frames(out, 'path/to/frame_{:02d}.png', offset=20)
