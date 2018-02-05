@@ -74,6 +74,13 @@ class Transition(nn.Module):
 # TODO: What would make a good network arch. for this task. (i.e.
 # Locating an object given a hint about where to look and what to look
 # for.)
+
+# Perhaps we could reduce the resolution of x before putting it
+# through the network. Or if that looses useful precision, maybe we
+# could stack windows, having a first stage that uses a low-res input
+# to position the first window, from which we determine the position
+# more accurately.
+
 class ParamW(nn.Module):
     def __init__(self, x_hids, hids, x_size, w_size, z_size):
         super(ParamW, self).__init__()
@@ -95,9 +102,6 @@ class ParamW(nn.Module):
 
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
-
-# One thought is that we might compute a representation of the window
-# contents before trying to combine this with the previous state.
 
 class ParamZ(nn.Module):
     def __init__(self, x_att_hids, hids, w_size, x_att_size, z_size):
