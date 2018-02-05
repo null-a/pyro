@@ -367,6 +367,9 @@ def assert_size(t, expected_size):
 # opaque and we always composite an object on to the image so far.
 # image_so_far will always have opacity=1 I think, so we can probably
 # avoid representing that explicity and simplify the over computation.
+# We might also be able to drop the alpha channel from everywhere
+# except the window contents, adopting the convention that alpha=1
+# where omitted.
 
 # This assumes that the number of channels is 4.
 def over(a, b):
