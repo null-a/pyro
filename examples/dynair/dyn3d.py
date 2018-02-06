@@ -242,7 +242,7 @@ class DynAIR(nn.Module):
         return pyro.sample('y', dist.normal, y_mean, y_sd)
 
     def guide_w(self, t, batch, w_prev, z_prev):
-        w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
+        w_mean, w_sd = self.w_param(batch, w_prev if t>0 else None, z_prev if t>0 else None)
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
     def guide_z(self, t, w, x, x_att, z_prev):

@@ -87,14 +87,22 @@ class ParamW(nn.Module):
         self.col_widths = [w_size, w_size]
         self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
         in_size = x_hids[-1] + w_size + z_size
-        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+        # Combines output of x_mlp with samples from prev step.
+        self.combine_mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+        # Uses output of x_mlp only, for t=0.
+        self.init_mlp = MLP(x_hids[-1], hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, x, w_prev, z_prev):
+    def forward(self, x, w_prev=None, z_prev=None):
         # This use of contiguous is necessary for cpu/gpu with PyTorch
         # 0.3. From 0.4 it no longer appears necessary.
         x_flat = x.contiguous().view(x.size(0), -1)
         x_hid = self.x_mlp(x_flat)
-        out = self.mlp(torch.cat((x_hid, w_prev, z_prev), 1))
+        if w_prev is None and z_prev is None:
+            out = self.init_mlp(x_hid)
+        elif w_prev is not None and z_prev is not None:
+            out = self.combine_mlp(torch.cat((x_hid, w_prev, z_prev), 1))
+        else:
+            raise 'Expected one or neither of w_prev and z_prev.'
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])
