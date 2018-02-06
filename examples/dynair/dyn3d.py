@@ -93,9 +93,8 @@ class DynAIR(nn.Module):
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size)
         self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
-        self.transition = mod.Transition(self.z_size, self.w_size, 50, 50)
-
-
+        self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
+        self.z_transition = mod.ZTransition(self.z_size, 50)
 
         # CUDA
         if use_cuda:
@@ -175,11 +174,12 @@ class DynAIR(nn.Module):
                            z_mean,
                            z_sd)
 
-    def model_transition(self, t, z, w):
-        batch_size = z.size(0)
-        assert_size(z, (batch_size, self.z_size))
-        assert_size(w, (batch_size, self.w_size))
-        z_mean, z_sd, w_mean, w_sd = self.transition(z, w)
+    def model_transition(self, t, z_prev, w_prev):
+        batch_size = z_prev.size(0)
+        assert_size(z_prev, (batch_size, self.z_size))
+        assert_size(w_prev, (batch_size, self.w_size))
+        z_mean, z_sd = self.z_transition(z_prev)
+        w_mean, w_sd = self.w_transition(z_prev, w_prev)
         z = self.model_sample_z(t, z_mean, z_sd)
         w = self.model_sample_w(t, w_mean, w_sd)
         return z, w

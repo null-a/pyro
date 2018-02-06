@@ -43,32 +43,31 @@ def split_at(t, widths):
 
 # A simple non-linear transition. With learnable (constant) sd.
 
-class Transition(nn.Module):
-    def __init__(self, z_size, w_size, z_hid_size, w_hid_size):
-        super(Transition, self).__init__()
-
-        # Means
-        self.z_mean_net = MLP(z_size, [z_hid_size, z_size], nn.ReLU)
-        self.w_mean_net = MLP(z_size + w_size, [w_hid_size, w_size], nn.ReLU)
-
-        # SDs
-        # Initialize to ~0.1 (after softplus).
-        self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
+class WTransition(nn.Module):
+    def __init__(self, z_size, w_size, hid_size):
+        super(WTransition, self).__init__()
+        self.w_mean_net = MLP(z_size + w_size, [hid_size, w_size], nn.ReLU)
         self._w_sd = nn.Parameter(torch.zeros(w_size))
 
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)
-        batch_size = z_prev.size(0)
-
         wz_prev = torch.cat((w_prev, z_prev), 1)
-
-        z_mean = self.z_mean_net(z_prev)
         w_mean = w_prev + self.w_mean_net(wz_prev)
-
-        z_sd = softplus(self._z_sd).expand_as(z_mean)
         w_sd = softplus(self._w_sd).expand_as(w_mean)
+        return w_mean, w_sd
 
-        return z_mean, z_sd, w_mean, w_sd
+class ZTransition(nn.Module):
+    def __init__(self, z_size, hid_size):
+        super(ZTransition, self).__init__()
+        self.z_mean_net = MLP(z_size, [hid_size, z_size], nn.ReLU)
+        # Initialize to ~0.1 (after softplus).
+        self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
+
+    def forward(self, z_prev):
+        z_mean = self.z_mean_net(z_prev)
+        z_sd = softplus(self._z_sd).expand_as(z_mean)
+        return z_mean, z_sd
+
 
 
 # TODO: What would make a good network arch. for this task. (i.e.
