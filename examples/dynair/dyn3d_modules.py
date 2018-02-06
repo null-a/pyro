@@ -68,6 +68,24 @@ class ZTransition(nn.Module):
         z_sd = softplus(self._z_sd).expand_as(z_mean)
         return z_mean, z_sd
 
+class ZGatedTransition(nn.Module):
+    def __init__(self, z_size, g_hid, h_hid):
+        super(ZGatedTransition, self).__init__()
+        self.g_mlp = nn.Sequential(MLP(z_size, [g_hid, z_size], nn.ReLU),
+                                   nn.Sigmoid())
+        self.h_mlp = MLP(z_size, [h_hid, z_size], nn.ReLU)
+        self.mean_lm = nn.Linear(z_size, z_size)
+        self.sd_lm = nn.Linear(z_size, z_size)
+        nn.init.eye(self.mean_lm.weight)
+        nn.init.constant(self.mean_lm.bias, 0)
+
+    def forward(self, z_prev):
+        g = self.g_mlp(z_prev)
+        h = self.h_mlp(z_prev)
+        z_mean = (1 - g) * self.mean_lm(z_prev) + g * h
+        z_sd = softplus(self.sd_lm(relu(h)))
+        return z_mean, z_sd
+
 
 
 # TODO: What would make a good network arch. for this task. (i.e.

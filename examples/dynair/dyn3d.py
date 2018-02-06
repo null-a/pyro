@@ -95,6 +95,7 @@ class DynAIR(nn.Module):
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
+        #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
         # CUDA
         if use_cuda:
