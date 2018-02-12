@@ -93,9 +93,7 @@ class DynAIR(nn.Module):
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size)
         self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
-        #self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
-        self.w_emit = mod.EmitW(self.z_size, self.w_size, [50])
-
+        self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
@@ -114,7 +112,9 @@ class DynAIR(nn.Module):
         bkg = self.decode_bkg(y)
 
         z = self.model_sample_z_0(batch_size)
-        w, frame_mean = self.model_emission(0, z, bkg)
+        w = self.model_sample_w_0(batch_size)
+
+        frame_mean = self.model_emission(z, w, bkg)
 
         zs = [z]
         ws = [w]
@@ -125,8 +125,8 @@ class DynAIR(nn.Module):
 
         # TODO: iarange here (or somewhere)
         for t in range(1, self.seq_length):
-            z = self.model_transition(t, z)
-            w, frame_mean = self.model_emission(t, z, bkg)
+            z, w = self.model_transition(t, z, w)
+            frame_mean = self.model_emission(z, w, bkg)
             zs.append(z)
             ws.append(w)
             frames.append(frame_mean)
@@ -151,6 +151,12 @@ class DynAIR(nn.Module):
                            self.y_prior_mean.expand(batch_size, -1),
                            self.y_prior_sd.expand(batch_size, -1))
 
+    def model_sample_w_0(self, batch_size):
+        return pyro.sample('w_0',
+                           dist.normal,
+                           self.w_0_prior_mean.expand(batch_size, -1),
+                           self.w_0_prior_sd.expand(batch_size, -1))
+
     def model_sample_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t),
                            dist.normal,
@@ -169,22 +175,23 @@ class DynAIR(nn.Module):
                            z_mean,
                            z_sd)
 
-    def model_transition(self, t, z_prev):
+    def model_transition(self, t, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.z_size))
+        assert_size(w_prev, (batch_size, self.w_size))
         z_mean, z_sd = self.z_transition(z_prev)
+        w_mean, w_sd = self.w_transition(z_prev, w_prev)
         z = self.model_sample_z(t, z_mean, z_sd)
-        return z
+        w = self.model_sample_w(t, w_mean, w_sd)
+        return z, w
 
-    def model_emission(self, t, z, bkg):
+    def model_emission(self, z, w, bkg):
         batch_size = z.size(0)
+        assert z.size(0) == w.size(0)
         # Note that neither of these currently depend on w, but doing
         # so may be useful in future.
-        w_mean, w_sd = self.w_emit(z)
-        w = self.model_sample_w(t, w_mean, w_sd)
         x_att = self.decode_obj(z)
-        x_mean = over(self.window_to_image(w, x_att), bkg)
-        return w, x_mean
+        return over(self.window_to_image(w, x_att), bkg)
 
     def decode_bkg(self, y):
         batch_size = y.size(0)
@@ -218,11 +225,11 @@ class DynAIR(nn.Module):
         ws = []
 
         z = batch_expand(self.guide_z_init, batch_size)
-        #w = batch_expand(self.guide_w_init, batch_size)
+        w = batch_expand(self.guide_w_init, batch_size)
 
         for t in range(self.seq_length):
             x = batch[:, t]
-            w = self.guide_w(t, x, z)
+            w = self.guide_w(t, x, w, z)
             x_att = self.image_to_window(w, x)
             z = self.guide_z(t, w, x, x_att, z)
 
@@ -235,8 +242,8 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.normal, y_mean, y_sd)
 
-    def guide_w(self, t, batch, z_prev):
-        w_mean, w_sd = self.w_param(batch, z_prev)
+    def guide_w(self, t, batch, w_prev, z_prev):
+        w_mean, w_sd = self.w_param(batch, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.normal, w_mean, w_sd)
 
     def guide_z(self, t, w, x, x_att, z_prev):
@@ -294,8 +301,8 @@ class DynAIR(nn.Module):
         z = zs[-1]
 
         for t in range(num_extra_frames):
-            z = self.model_transition(num_extra_frames + t, z)
-            w, frame_mean = self.model_emission(num_extra_frames + t, z, bkg)
+            z, w = self.model_transition(num_extra_frames + t, z, w)
+            frame_mean = self.model_emission(z, w, bkg)
             extra_frames.append(frame_mean)
             extra_ws.append(w)
             extra_zs.append(z)
