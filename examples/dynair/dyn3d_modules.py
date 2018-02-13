@@ -159,7 +159,7 @@ class DecodeObj(nn.Module):
         self.mlp = MLP(z_size, hids + [num_chan * window_size**2], nn.ReLU)
 
     def forward(self, z):
-        return sigmoid(self.mlp(z) + 0.25)
+        return sigmoid(self.mlp(z))
 
 
 class DecodeBkg(nn.Module):
