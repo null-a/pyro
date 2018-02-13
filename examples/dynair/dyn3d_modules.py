@@ -152,6 +152,20 @@ class ParamY(nn.Module):
         y_sd = softplus(cols[1])
         return y_mean, y_sd
 
+class ParamI(nn.Module):
+    def __init__(self, x_hids, hids, x_size, i_size, w_size, z_size):
+        super(ParamI, self).__init__()
+        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
+        in_size = x_hids[-1] + i_size + w_size + z_size
+        self.mlp = MLP(in_size, hids + [i_size], nn.ReLU)
+
+    def forward(self, x, i_prev, w_prev, z_prev):
+        x_flat = x.contiguous().view(x.size(0), -1)
+        x_hid = self.x_mlp(x_flat)
+        out = self.mlp(torch.cat((x_hid, i_prev, w_prev, z_prev), 1))
+        ps = sigmoid(out)
+        return ps
+
 
 class DecodeObj(nn.Module):
     def __init__(self, hids, z_size, num_chan, window_size):
