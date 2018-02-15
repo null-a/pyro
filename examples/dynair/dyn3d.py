@@ -133,7 +133,10 @@ class DynAIR(nn.Module):
 
             for t in range(0, self.seq_length):
                 i = self.model_sample_i(t, i_prev)
-                z, w = self.model_transition(t, i, i_prev, z_prev, w_prev)
+
+                with poutine.scale(None, i.squeeze(-1)):
+                    z, w = self.model_transition(t, i, i_prev, z_prev, w_prev)
+
                 frame_mean = self.model_emission(i, z, w, bkg)
 
                 zs.append(z)
@@ -194,7 +197,6 @@ class DynAIR(nn.Module):
         w_mean = _if(i_prev, w_transition_mean, self.w_prior_mean)
         w_sd = _if(i_prev, w_transition_sd, self.w_prior_sd)
 
-        # TODO: Mask out i=0. Might happen in main model loop.
         z = self.model_sample_z(t, z_mean, z_sd)
         w = self.model_sample_w(t, w_mean, w_sd)
 
@@ -249,9 +251,11 @@ class DynAIR(nn.Module):
 
                 x = batch[:, t]
                 i = self.guide_i(t, x, i_prev, w_prev, z_prev)
-                w = self.guide_w(t, x, i, i_prev, w_prev, z_prev)
-                x_att = self.image_to_window(w, x)
-                z = self.guide_z(t, i, i_prev, w, x, x_att, z_prev)
+
+                with poutine.scale(None, i.squeeze(-1)):
+                    w = self.guide_w(t, x, i, i_prev, w_prev, z_prev)
+                    x_att = self.image_to_window(w, x)
+                    z = self.guide_z(t, i, i_prev, w, x, x_att, z_prev)
 
                 ii.append(i)
                 ws.append(w)
@@ -287,7 +291,6 @@ class DynAIR(nn.Module):
         # guide to condition on the previous hidden state. Otherwise,
         # an optimizable parameter is used in its place.
         # TODO: We could avoid repeatedly calling `batch_expand`.
-        # TODO: Mask out this choice for objects which are not present.
         w_prev_arg = _if(i_prev, w_prev, batch_expand(self.guide_w_init, batch_size))
         z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
         w_mean, w_sd = self.w_param(batch, w_prev_arg, z_prev_arg)
@@ -295,7 +298,6 @@ class DynAIR(nn.Module):
 
     # TODO: Remove unused argument `x`.
     def guide_z(self, t, i, i_prev, w, x, x_att, z_prev):
-        # TODO: Mask when object is not present.
         batch_size = i.size(0)
         z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
         z_mean, z_sd = self.z_param(w, x_att, z_prev_arg)
