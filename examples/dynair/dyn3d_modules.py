@@ -159,13 +159,19 @@ class ParamI(nn.Module):
         in_size = x_hids[-1] + i_size + w_size + z_size
         self.mlp = MLP(in_size, hids + [i_size], nn.ReLU)
 
-    def forward(self, x, i_prev, w_prev, z_prev):
-        x_flat = x.contiguous().view(x.size(0), -1)
+    def forward(self, x_flat, i_prev, w_prev, z_prev):
         x_hid = self.x_mlp(x_flat)
         out = self.mlp(torch.cat((x_hid, i_prev, w_prev, z_prev), 1))
         ps = sigmoid(out)
         return ps
 
+class Baseline(nn.Module):
+    def __init__(self, hids, x_size):
+        super(Baseline, self).__init__()
+        self.mlp = MLP(x_size, hids + [1], nn.ReLU)
+
+    def forward(self, x_flat):
+        return self.mlp(x_flat).squeeze(-1)
 
 class DecodeObj(nn.Module):
     def __init__(self, hids, z_size, num_chan, window_size):

@@ -95,6 +95,8 @@ class DynAIR(nn.Module):
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
 
+        self.baseline = mod.Baseline([500, 200], self.x_size)
+
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size)
@@ -275,13 +277,17 @@ class DynAIR(nn.Module):
         assert_size(w_prev, (batch_size, self.w_size))
         assert_size(z_prev, (batch_size, self.z_size))
 
+        x_flat = batch.contiguous().view(batch_size, -1)
+
         if self.is_i_step(t):
             w_prev_arg = _if(i_prev, w_prev, batch_expand(self.guide_w_init, batch_size))
             z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
-            ps = self.i_param(batch, i_prev, w_prev_arg, z_prev_arg)
+            ps = self.i_param(x_flat, i_prev, w_prev_arg, z_prev_arg)
 
             # TODO: Add data dependent baseline.
-            return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
+            return pyro.sample('i_{}'.format(t),
+                               dist.Bernoulli(ps, extra_event_dims=1),
+                               baseline=dict(nn_baseline=self.baseline, nn_baseline_input=x_flat))
         else:
             return i_prev
 
@@ -453,8 +459,12 @@ def run_svi(X, args):
 
     batches = X.chunk(20)
 
+    def per_param_optim_args(module_name, param_name, tags):
+        lr = 1e-2 if param_name.startswith('baseline') else 1e-4
+        return {'lr': lr}
+
     svi = SVI(dynair.model, dynair.guide,
-              optim.Adam(dict(lr=1e-4)),
+              optim.Adam(per_param_optim_args),
               loss='ELBO',
               trace_graph=True)
 
