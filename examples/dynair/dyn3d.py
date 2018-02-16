@@ -284,7 +284,6 @@ class DynAIR(nn.Module):
             z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
             ps = self.i_param(x_flat, i_prev, w_prev_arg, z_prev_arg)
 
-            # TODO: Add data dependent baseline.
             return pyro.sample('i_{}'.format(t),
                                dist.Bernoulli(ps, extra_event_dims=1),
                                baseline=dict(nn_baseline=self.baseline, nn_baseline_input=x_flat))
