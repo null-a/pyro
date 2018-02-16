@@ -46,7 +46,7 @@ class DynAIR(nn.Module):
         self.x_att_size = self.num_chan * self.window_size**2
 
         # Controls how often i is sampled.
-        self.i_period = 1 # >= 1
+        self.i_period = 4 # >= 1
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -55,8 +55,8 @@ class DynAIR(nn.Module):
 
         # Priors:
 
-        self.persist_prior_p = 0.9
-        self.create_prior_p = 0.5
+        self.persist_prior_p = 0.999999
+        self.create_prior_p = 0.999999
 
         self.y_prior_mean = self.ng_zeros(self.y_size)
         self.y_prior_sd = self.ng_ones(self.y_size)
