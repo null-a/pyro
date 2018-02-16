@@ -177,9 +177,10 @@ class Baseline(nn.Module):
         return self.mlp(one_hot)
 
 class DecodeObj(nn.Module):
-    def __init__(self, hids, z_size, num_chan, window_size):
+    def __init__(self, hids, z_size, num_chan, window_size, alpha_bias=0.):
         super(DecodeObj, self).__init__()
         self.mlp = MLP(z_size, hids + [num_chan * window_size**2], nn.ReLU)
+        self.mlp.seq[4].bias.data[(num_chan - 1) * window_size**2:] += alpha_bias
 
     def forward(self, z):
         return sigmoid(self.mlp(z))
