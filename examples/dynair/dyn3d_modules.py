@@ -174,6 +174,7 @@ class Baseline(nn.Module):
     def forward(self, cur_step):
         one_hot = Variable(torch.zeros(self.seq_length), requires_grad=False)
         one_hot[cur_step] = 1
+        one_hot = one_hot.type_as(self.mlp.weight)
         return self.mlp(one_hot)
 
 class DecodeObj(nn.Module):
