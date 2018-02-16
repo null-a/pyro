@@ -166,12 +166,15 @@ class ParamI(nn.Module):
         return ps
 
 class Baseline(nn.Module):
-    def __init__(self, hids, x_size):
+    def __init__(self, seq_length):
         super(Baseline, self).__init__()
-        self.mlp = MLP(x_size, hids + [1], nn.ReLU)
+        self.seq_length = seq_length
+        self.mlp = nn.Linear(seq_length, 1)
 
-    def forward(self, x_flat):
-        return self.mlp(x_flat).squeeze(-1)
+    def forward(self, cur_step):
+        one_hot = Variable(torch.zeros(self.seq_length), requires_grad=False)
+        one_hot[cur_step] = 1
+        return self.mlp(one_hot)
 
 class DecodeObj(nn.Module):
     def __init__(self, hids, z_size, num_chan, window_size):
