@@ -257,7 +257,7 @@ class DynAIR(nn.Module):
                 with poutine.scale(None, i.squeeze(-1)):
                     w = self.guide_w(t, x, i, i_prev, w_prev, z_prev)
                     x_att = self.image_to_window(w, x)
-                    z = self.guide_z(t, i, i_prev, w, x, x_att, z_prev)
+                    z = self.guide_z(t, i, i_prev, w, x_att, z_prev)
 
                 ii.append(i)
                 ws.append(w)
@@ -303,8 +303,7 @@ class DynAIR(nn.Module):
         w_mean, w_sd = self.w_param(batch, w_prev_arg, z_prev_arg)
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
-    # TODO: Remove unused argument `x`.
-    def guide_z(self, t, i, i_prev, w, x, x_att, z_prev):
+    def guide_z(self, t, i, i_prev, w, x_att, z_prev):
         batch_size = i.size(0)
         z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
         z_mean, z_sd = self.z_param(w, x_att, z_prev_arg)
