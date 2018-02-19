@@ -113,7 +113,7 @@ class DynAIR(nn.Module):
 
 
     # TODO: This do_likelihood business is unpleasant.
-    def model(self, batch, do_likelihood=True):
+    def model(self, batch, do_likelihood=True, **kwargs):
 
         batch_size = batch.size(0)
 
@@ -223,7 +223,7 @@ class DynAIR(nn.Module):
 
     # ==GUIDE==================================================
 
-    def guide(self, batch, *args):
+    def guide(self, batch, i_prob_min=None, **kwargs):
 
         # I'd rather register model/guide modules in their methods,
         # but this is easier.
@@ -252,7 +252,7 @@ class DynAIR(nn.Module):
             for t in range(self.seq_length):
 
                 x = batch[:, t]
-                i = self.guide_i(t, x, i_prev, w_prev, z_prev)
+                i = self.guide_i(t, x, i_prev, w_prev, z_prev, i_prob_min)
 
                 with poutine.scale(None, i.squeeze(-1)):
                     w = self.guide_w(t, x, i, i_prev, w_prev, z_prev)
@@ -271,7 +271,7 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, batch, i_prev, w_prev, z_prev):
+    def guide_i(self, t, batch, i_prev, w_prev, z_prev, i_prob_min):
         batch_size = batch.size(0)
         assert_size(i_prev, (batch_size, self.i_size))
         assert_size(w_prev, (batch_size, self.w_size))
@@ -283,6 +283,9 @@ class DynAIR(nn.Module):
             w_prev_arg = _if(i_prev, w_prev, batch_expand(self.guide_w_init, batch_size))
             z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
             ps = self.i_param(x_flat, i_prev, w_prev_arg, z_prev_arg)
+
+            if not i_prob_min is None:
+                ps = ps * (1.0 - i_prob_min) + i_prob_min
 
             baseline = self.baseline(t)
 
@@ -456,7 +459,8 @@ def run_svi(X, args):
 
     dynair = DynAIR(use_cuda=args.cuda)
 
-    batches = X.chunk(20)
+    num_batches = 20
+    batches = X.chunk(num_batches)
 
     def per_param_optim_args(module_name, param_name, tags):
         lr = 1e2 if param_name.startswith('baseline') else 1e-4
@@ -470,7 +474,7 @@ def run_svi(X, args):
     for i in range(5000):
 
         for j, batch in enumerate(batches):
-            loss = svi.step(batch)
+            loss = svi.step(batch, i_prob_min=i_prob_min_at(i*num_batches+j))
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
@@ -496,6 +500,22 @@ def run_svi(X, args):
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
 
+def i_prob_min_at(step):
+    i1 = 1000   # zero
+    i2 = 1000   # ramp up
+    i3 = 100000 # target
+    i4 = 1000   # ramp down
+    target = 0.1
+    if step < i1:
+        return 0.0
+    elif step < i1 + i2:
+        return  target * ((step - i1) / i2)
+    elif step < i1 + i2 + i3:
+        return target
+    elif step < i1 + i2 + i3 + i4:
+        return target * (1.0 - ((step - (i1 + i2 + i3)) / i4))
+    else:
+        return 0.0
 
 
 def load_data():
