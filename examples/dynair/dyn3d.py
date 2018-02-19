@@ -344,8 +344,8 @@ class DynAIR(nn.Module):
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
-    def infer(self, batch, num_extra_frames=0):
-        trace = poutine.trace(self.guide).get_trace(batch)
+    def infer(self, batch, num_extra_frames=0, i_prob_min=None):
+        trace = poutine.trace(self.guide).get_trace(batch, i_prob_min=i_prob_min)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
         ws, zs, y, ii = trace.nodes['_RETURN']['value']
         bkg = self.decode_bkg(y)
@@ -472,7 +472,8 @@ def run_svi(X, args):
     for i in range(5000):
 
         for j, batch in enumerate(batches):
-            loss = svi.step(batch, i_prob_min=i_prob_min_at(i*num_batches+j))
+            i_prob_min = i_prob_min_at(i*num_batches+j)
+            loss = svi.step(batch, i_prob_min=i_prob_min)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
@@ -483,7 +484,7 @@ def run_svi(X, args):
             n = 1
             test_batch = X[ix:ix+n]
 
-            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
+            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15, i_prob_min)]
 
             for k in range(n):
                 out = overlay_window_outlines_conditionally(dynair, frames[k], ws[k], ii[k])
