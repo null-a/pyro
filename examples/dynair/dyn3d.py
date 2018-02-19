@@ -159,6 +159,8 @@ class DynAIR(nn.Module):
 
     def model_sample_i(self, t, i_prev):
         if self.is_i_step(t):
+            # TODO: Persist probability ought to depend on the
+            # previous w and z.
             ps = _if(i_prev, self.persist_prior_p, self.create_prior_p)
             return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
         else:
