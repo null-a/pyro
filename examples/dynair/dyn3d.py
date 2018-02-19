@@ -45,9 +45,6 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
-        # Controls how often i is sampled.
-        self.i_period = 4 # >= 1
-
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
@@ -375,7 +372,8 @@ class DynAIR(nn.Module):
         return frames, ws, ii, extra_frames, extra_ws, extra_ii
 
     def is_i_step(self, t):
-        return t % self.i_period == 0
+        # Controls when i is sampled.
+        return (t % 4 == 0) or (t == (self.seq_length-1))
 
 
 def _if(cond, cons, alt):
