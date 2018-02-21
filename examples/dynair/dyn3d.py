@@ -76,8 +76,6 @@ class DynAIR(nn.Module):
 
         # Parameters.
         self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
-        self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
-
 
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
@@ -88,9 +86,8 @@ class DynAIR(nn.Module):
 
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.i_param = mod.ParamI([500, 200], [200], self.x_size, self.i_size, self.w_size, self.z_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
+        self.iw_param = mod.ParamIW([500, 200], [200], self.x_size, self.i_size, self.w_size, self.z_size)
 
         self.baseline = mod.Baseline(self.seq_length)
 
@@ -250,11 +247,16 @@ class DynAIR(nn.Module):
 
             for t in range(self.seq_length):
 
+                # This is a bit odd -- we always compute i_ps, and
+                # then ignore it when not sampling i for the current
+                # step.
                 x = batch[:, t]
-                i = self.guide_i(t, x, i_prev, w_prev, z_prev, i_prob_min)
+                i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
+
+                i = self.guide_i(t, i_ps, i_prev, i_prob_min)
 
                 with poutine.scale(None, i.squeeze(-1)):
-                    w = self.guide_w(t, x, i, i_prev, w_prev, z_prev)
+                    w = self.guide_w(t, w_mean, w_sd)
                     x_att = self.image_to_window(w, x)
                     z = self.guide_z(t, i, i_prev, w, x_att, z_prev)
 
@@ -270,18 +272,10 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, batch, i_prev, w_prev, z_prev, i_prob_min):
-        batch_size = batch.size(0)
-        assert_size(i_prev, (batch_size, self.i_size))
-        assert_size(w_prev, (batch_size, self.w_size))
-        assert_size(z_prev, (batch_size, self.z_size))
-
-        x_flat = batch.contiguous().view(batch_size, -1)
+    def guide_i(self, t, ps, i_prev, i_prob_min):
+        batch_size = ps.size(0)
 
         if self.is_i_step(t):
-            w_prev_arg = _if(i_prev, w_prev, batch_expand(self.guide_w_init, batch_size))
-            z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
-            ps = self.i_param(x_flat, i_prev, w_prev_arg, z_prev_arg)
 
             if not i_prob_min is None:
                 ps = ps * (1.0 - i_prob_min) + i_prob_min
@@ -294,15 +288,7 @@ class DynAIR(nn.Module):
         else:
             return i_prev
 
-    def guide_w(self, t, batch, i, i_prev, w_prev, z_prev):
-        batch_size = i.size(0)
-        # If the object was present at the last step, we allow the
-        # guide to condition on the previous hidden state. Otherwise,
-        # an optimizable parameter is used in its place.
-        # TODO: We could avoid repeatedly calling `batch_expand`.
-        w_prev_arg = _if(i_prev, w_prev, batch_expand(self.guide_w_init, batch_size))
-        z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
-        w_mean, w_sd = self.w_param(batch, w_prev_arg, z_prev_arg)
+    def guide_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
     def guide_z(self, t, i, i_prev, w, x_att, z_prev):

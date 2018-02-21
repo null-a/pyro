@@ -98,24 +98,33 @@ class ZGatedTransition(nn.Module):
 # to position the first window, from which we determine the position
 # more accurately.
 
-class ParamW(nn.Module):
-    def __init__(self, x_hids, hids, x_size, w_size, z_size):
-        super(ParamW, self).__init__()
-        self.col_widths = [w_size, w_size]
-        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
-        in_size = x_hids[-1] + w_size + z_size
+class ParamIW(nn.Module):
+    def __init__(self, embed_hids, hids, x_size, i_size, w_size, z_size):
+        super(ParamIW, self).__init__()
+        self.embed = MLP(x_size, embed_hids, nn.ReLU, True)
+        in_size = embed_hids[-1] + i_size + w_size + z_size
+        self.col_widths = [i_size, w_size, w_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+        self.w_init = nn.Parameter(torch.zeros(w_size))
+        self.z_init = nn.Parameter(torch.zeros(z_size))
 
-    def forward(self, x, w_prev, z_prev):
-        # This use of contiguous is necessary for cpu/gpu with PyTorch
-        # 0.3. From 0.4 it no longer appears necessary.
-        x_flat = x.contiguous().view(x.size(0), -1)
-        x_hid = self.x_mlp(x_flat)
-        out = self.mlp(torch.cat((x_hid, w_prev, z_prev), 1))
+    def forward(self, x, i_prev, w_prev, z_prev):
+        batch_size = x.size(0)
+        x_flat = x.contiguous().view(batch_size, -1)
+        x_embed = self.embed(x_flat)
+        w_prev_arg = _if(i_prev, w_prev, self.w_init.expand(batch_size, -1))
+        z_prev_arg = _if(i_prev, z_prev, self.z_init.expand(batch_size, -1))
+        out = self.mlp(torch.cat((x_embed, i_prev, w_prev_arg, z_prev_arg), 1))
         cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
+        i_ps = sigmoid(cols[0])
+        w_mean = cols[1]
+        w_sd = softplus(cols[2])
+        return i_ps, w_mean, w_sd
+
+def _if(cond, cons, alt):
+    return cond * cons + (1 - cond) * alt
+
+
 
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
@@ -152,18 +161,7 @@ class ParamY(nn.Module):
         y_sd = softplus(cols[1])
         return y_mean, y_sd
 
-class ParamI(nn.Module):
-    def __init__(self, x_hids, hids, x_size, i_size, w_size, z_size):
-        super(ParamI, self).__init__()
-        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
-        in_size = x_hids[-1] + i_size + w_size + z_size
-        self.mlp = MLP(in_size, hids + [i_size], nn.ReLU)
 
-    def forward(self, x_flat, i_prev, w_prev, z_prev):
-        x_hid = self.x_mlp(x_flat)
-        out = self.mlp(torch.cat((x_hid, i_prev, w_prev, z_prev), 1))
-        ps = sigmoid(out)
-        return ps
 
 class Baseline(nn.Module):
     def __init__(self, seq_length):
