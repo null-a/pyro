@@ -219,7 +219,7 @@ class DynAIR(nn.Module):
 
     # ==GUIDE==================================================
 
-    def guide(self, batch, i_prob_min=None, **kwargs):
+    def guide(self, batch, curr_opt_step=None, **kwargs):
 
         # I'd rather register model/guide modules in their methods,
         # but this is easier.
@@ -253,7 +253,7 @@ class DynAIR(nn.Module):
                 x = batch[:, t]
                 i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
 
-                i = self.guide_i(t, i_ps, i_prev, i_prob_min)
+                i = self.guide_i(t, i_ps, i_prev, curr_opt_step)
 
                 with poutine.scale(None, i.squeeze(-1)):
                     w = self.guide_w(t, w_mean, w_sd)
@@ -272,11 +272,12 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, ps, i_prev, i_prob_min):
+    def guide_i(self, t, ps, i_prev, curr_opt_step):
         batch_size = ps.size(0)
 
         if self.is_i_step(t):
 
+            i_prob_min = get_i_prob_min(t, curr_opt_step)
             if not i_prob_min is None:
                 ps = ps * (1.0 - i_prob_min) + i_prob_min
 
@@ -332,8 +333,8 @@ class DynAIR(nn.Module):
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
-    def infer(self, batch, num_extra_frames=0, i_prob_min=None):
-        trace = poutine.trace(self.guide).get_trace(batch, i_prob_min=i_prob_min)
+    def infer(self, batch, num_extra_frames=0, curr_opt_step=0):
+        trace = poutine.trace(self.guide).get_trace(batch, curr_opt_step=curr_opt_step)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
         ws, zs, y, ii = trace.nodes['_RETURN']['value']
         bkg = self.decode_bkg(y)
@@ -361,7 +362,7 @@ class DynAIR(nn.Module):
 
     def is_i_step(self, t):
         # Controls when i is sampled.
-        return (t % 4 == 0) or (t == (self.seq_length-1))
+        return (t % 4 == 0) or (t >= (self.seq_length-2))
 
 
 def _if(cond, cons, alt):
@@ -460,8 +461,7 @@ def run_svi(X, args):
     for i in range(5000):
 
         for j, batch in enumerate(batches):
-            i_prob_min = i_prob_min_at(i*num_batches+j)
-            loss = svi.step(batch, i_prob_min=i_prob_min)
+            loss = svi.step(batch, curr_opt_step=i*num_batches+j)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
@@ -472,7 +472,8 @@ def run_svi(X, args):
             n = 1
             test_batch = X[ix:ix+n]
 
-            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15, i_prob_min)]
+            curr_opt_step = (i+1) * num_batches
+            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15, curr_opt_step)]
 
             for k in range(n):
                 out = overlay_window_outlines_conditionally(dynair, frames[k], ws[k], ii[k])
@@ -487,14 +488,24 @@ def run_svi(X, args):
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
 
-def i_prob_min_at(step):
-    i1 = 1000   # zero
-    i2 = 1000   # ramp up
+def get_i_prob_min(frame, step):
+    # frame: position in the input sequence.
+    # step:  is the current optimisation step.
+    assert frame >= 0
+    assert step >= 0
+
+    if frame < 18:
+        return None
+
+    i1 = 50     # zero
+    i2 = 50     # ramp up
     i3 = 100000 # target
     i4 = 1000   # ramp down
-    target = 0.1
+
+    target = 0.5
+
     if step < i1:
-        return 0.0
+        return None
     elif step < i1 + i2:
         return  target * ((step - i1) / i2)
     elif step < i1 + i2 + i3:
