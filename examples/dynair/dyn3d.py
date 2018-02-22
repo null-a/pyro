@@ -247,6 +247,9 @@ class DynAIR(nn.Module):
 
             for t in range(self.seq_length):
 
+                # TODO: Would it be useful to pass i_prob_min into
+                # iw_param?
+
                 # This is a bit odd -- we always compute i_ps, and
                 # then ignore it when not sampling i for the current
                 # step.
