@@ -109,12 +109,12 @@ class ParamIW(nn.Module):
         self.mlp_prior = MLP(prior_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Object continuation MLP
-        cont_in_size = embed_hids[-1] + w_size + z_size
-        self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
+        # cont_in_size = embed_hids[-1] + w_size + z_size
+        # self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Dummy parameters. These won't ever move from zero.
-        self.w_init = nn.Parameter(torch.zeros(w_size))
-        self.z_init = nn.Parameter(torch.zeros(z_size))
+        # self.w_init = nn.Parameter(torch.zeros(w_size))
+        # self.z_init = nn.Parameter(torch.zeros(z_size))
 
     def forward(self, x, i_prev, w_prev, z_prev):
         batch_size = x.size(0)
@@ -125,12 +125,12 @@ class ParamIW(nn.Module):
         # data points in the batch. Try partitioning the batch and
         # applying conditionally.
         out_prior = self.mlp_prior(x_embed)
-        w_prev_arg = _if(i_prev, w_prev, self.w_init.expand(batch_size, -1))
-        z_prev_arg = _if(i_prev, z_prev, self.z_init.expand(batch_size, -1))
-        out_cont = self.mlp_cont(torch.cat((x_embed, w_prev_arg, z_prev_arg), 1))
-        out = _if(i_prev, out_cont, out_prior)
+        # w_prev_arg = self.w_init.expand(batch_size, -1)
+        # z_prev_arg = self.z_init.expand(batch_size, -1))
+        #out_cont = self.mlp_cont(x_embed, 1)
+        #out = _if(i_prev, out_cont, out_prior)
 
-        cols = split_at(out, self.col_widths)
+        cols = split_at(out_prior, self.col_widths)
         i_ps = sigmoid(cols[0])
         w_mean = cols[1]
         w_sd = softplus(cols[2])

@@ -57,9 +57,9 @@ def _compute_downstream_costs(model_trace, guide_trace,  #
             downstream_guide_cost_nodes[node].update(child_cost_nodes)
             if nodes_included_in_sum.isdisjoint(child_cost_nodes):  # avoid duplicates
                 if node_log_pdf_key == 'log_pdf':
-                    downstream_costs[node] += downstream_costs[child].sum()
+                    downstream_costs[node] += 0.1 * downstream_costs[child].sum()
                 else:
-                    downstream_costs[node] += downstream_costs[child]
+                    downstream_costs[node] += 0.1 * downstream_costs[child]
                 nodes_included_in_sum.update(child_cost_nodes)
         missing_downstream_costs = downstream_guide_cost_nodes[node] - nodes_included_in_sum
         # include terms we missed because we had to avoid duplicates
@@ -82,13 +82,14 @@ def _compute_downstream_costs(model_trace, guide_trace,  #
         # remove terms accounted for above
         children_in_model.difference_update(downstream_guide_cost_nodes[site])
         for child in children_in_model:
+            dist = parse_step(child) - parse_step(site)
             child_log_pdf_key = 'batch_log_pdf' if child in model_vec_md_nodes else 'log_pdf'
             site_log_pdf_key = 'batch_log_pdf' if site in guide_vec_md_nodes else 'log_pdf'
             assert (model_trace.nodes[child]["type"] == "sample")
             if site_log_pdf_key == 'log_pdf':
-                downstream_costs[site] += model_trace.nodes[child][child_log_pdf_key].sum()
+                downstream_costs[site] += (0.1 ** dist) * distmodel_trace.nodes[child][child_log_pdf_key].sum()
             else:
-                downstream_costs[site] += model_trace.nodes[child][child_log_pdf_key]
+                downstream_costs[site] += (0.1 ** dist) * model_trace.nodes[child][child_log_pdf_key]
 
     return downstream_costs
 
@@ -308,3 +309,7 @@ class TraceGraph_ELBO(object):
         if np.isnan(loss):
             warnings.warn('Encountered NAN loss')
         return weight * loss
+
+
+def parse_step(s):
+    return int(s.split('_')[-1])

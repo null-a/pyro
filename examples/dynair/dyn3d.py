@@ -365,7 +365,7 @@ class DynAIR(nn.Module):
 
     def is_i_step(self, t):
         # Controls when i is sampled.
-        return (t % 4 == 0) or (t >= (self.seq_length-2))
+        return True#(t % 4 == 0) or (t >= (self.seq_length-2))
 
 
 def _if(cond, cons, alt):
@@ -497,15 +497,15 @@ def get_i_prob_min(frame, step):
     assert frame >= 0
     assert step >= 0
 
-    if frame < 18:
-        return None
+    # if frame < 18:
+    #     return None
 
     i1 = 50     # zero
     i2 = 50     # ramp up
     i3 = 100000 # target
     i4 = 1000   # ramp down
 
-    target = 0.5
+    target = 0.1
 
     if step < i1:
         return None
