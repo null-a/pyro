@@ -87,7 +87,9 @@ class DynAIR(nn.Module):
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.iw_param = mod.ParamIW([500, 200], [200], self.x_size, self.i_size, self.w_size, self.z_size)
+
+        self.i_param = mod.ParamI([500, 200], self.x_size, self.i_size)
+        self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
 
         self.baseline = mod.Baseline(self.seq_length)
 
@@ -254,12 +256,12 @@ class DynAIR(nn.Module):
                 # then ignore it when not sampling i for the current
                 # step.
                 x = batch[:, t]
-                i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
+                x_flat = x.contiguous().view(batch_size, -1)
 
-                i = self.guide_i(t, i_ps, i_prev, curr_opt_step)
+                i = self.guide_i(t, x_flat, i_prev, curr_opt_step)
 
                 with poutine.scale(None, i.squeeze(-1)):
-                    w = self.guide_w(t, w_mean, w_sd)
+                    w = self.guide_w(t, x_flat, i_prev, w_prev, z_prev)
                     x_att = self.image_to_window(w, x)
                     z = self.guide_z(t, i, i_prev, w, x_att, z_prev)
 
@@ -275,10 +277,12 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, ps, i_prev, curr_opt_step):
-        batch_size = ps.size(0)
+    def guide_i(self, t, x_flat, i_prev, curr_opt_step):
+        batch_size = i_prev.size(0)
 
         if self.is_i_step(t):
+
+            ps = self.i_param(x_flat)
 
             i_prob_min = get_i_prob_min(t, curr_opt_step)
             if not i_prob_min is None:
@@ -292,7 +296,8 @@ class DynAIR(nn.Module):
         else:
             return i_prev
 
-    def guide_w(self, t, w_mean, w_sd):
+    def guide_w(self, t, x_flat, i_prev, w_prev, z_prev):
+        w_mean, w_sd = self.w_param(x_flat, i_prev, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
     def guide_z(self, t, i, i_prev, w, x_att, z_prev):
