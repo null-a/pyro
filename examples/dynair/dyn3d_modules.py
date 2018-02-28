@@ -109,7 +109,7 @@ class ParamIW(nn.Module):
         self.mlp_prior = MLP(prior_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Object continuation MLP
-        cont_in_size = embed_hids[-1] + w_size + z_size
+        cont_in_size = embed_hids[-1] + z_size
         self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Dummy parameters. These won't ever move from zero.
@@ -125,9 +125,9 @@ class ParamIW(nn.Module):
         # data points in the batch. Try partitioning the batch and
         # applying conditionally.
         out_prior = self.mlp_prior(x_embed)
-        w_prev_arg = _if(i_prev, w_prev, self.w_init.expand(batch_size, -1))
+        #w_prev_arg = _if(i_prev, w_prev, self.w_init.expand(batch_size, -1))
         z_prev_arg = _if(i_prev, z_prev, self.z_init.expand(batch_size, -1))
-        out_cont = self.mlp_cont(torch.cat((x_embed, w_prev_arg, z_prev_arg), 1))
+        out_cont = self.mlp_cont(torch.cat((x_embed, z_prev_arg), 1))
         out = _if(i_prev, out_cont, out_prior)
 
         cols = split_at(out, self.col_widths)
