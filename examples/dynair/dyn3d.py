@@ -557,7 +557,7 @@ def overlay_window_outlines(dynair, frame, z_where):
 def overlay_window_outlines_conditionally(dynair, frame, z_where, ii):
     batch_size = z_where.size(0)
     presence_mask = ii.view(-1, 1, 1, 1)
-    borders = batch_expand(Variable(torch.Tensor([-0.08, 0, 0])), batch_size)
+    borders = batch_expand(Variable(torch.Tensor([-0.08, 0, 0])), batch_size).type_as(ii)
     return over(draw_window_outline(dynair, borders) * presence_mask,
                 over(draw_window_outline(dynair, z_where) * presence_mask,
                      frame))
