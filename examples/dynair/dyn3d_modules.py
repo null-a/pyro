@@ -87,6 +87,15 @@ class ZGatedTransition(nn.Module):
         return z_mean, z_sd
 
 
+class ITransition(nn.Module):
+    def __init__(self, i_size, w_size, z_size, hid_size):
+        super(ITransition, self).__init__()
+        in_size = w_size + z_size
+        self.mlp = MLP(in_size, [hid_size, i_size], nn.ReLU)
+
+    def forward(self, w_prev, z_prev):
+        out = self.mlp(torch.cat((w_prev, z_prev), 1))
+        return sigmoid(out)
 
 # TODO: What would make a good network arch. for this task. (i.e.
 # Locating an object given a hint about where to look and what to look

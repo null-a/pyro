@@ -96,6 +96,7 @@ class DynAIR(nn.Module):
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, -3.0)
         self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
+        self.i_transition = mod.ITransition(self.i_size, self.w_size, self.z_size, 50)
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
@@ -128,7 +129,7 @@ class DynAIR(nn.Module):
             i_prev = self.ng_zeros(batch_size, self.i_size)
 
             for t in range(0, self.seq_length):
-                i = self.model_sample_i(t, i_prev)
+                i = self.model_sample_i(t, i_prev, w_prev, z_prev)
 
                 with poutine.scale(None, i.squeeze(-1)):
                     z, w = self.model_transition(t, i, i_prev, z_prev, w_prev)
@@ -154,11 +155,10 @@ class DynAIR(nn.Module):
                     dist.Normal(frame_mean, frame_sd, extra_event_dims=3),
                     obs=obs)
 
-    def model_sample_i(self, t, i_prev):
+    def model_sample_i(self, t, i_prev, w_prev, z_prev):
         if self.is_i_step(t):
-            # TODO: Persist probability ought to depend on the
-            # previous w and z.
-            ps = _if(i_prev, self.persist_prior_p, self.create_prior_p)
+            persist_p = self.i_transition(w_prev, z_prev)
+            ps = _if(i_prev, persist_p, self.create_prior_p)
             return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
         else:
             return i_prev
@@ -352,7 +352,7 @@ class DynAIR(nn.Module):
         i_prev = ii[-1]
 
         for t in range(num_extra_frames):
-            i = self.model_sample_i(num_extra_frames + t, i_prev)
+            i = self.model_sample_i(num_extra_frames + t, i_prev, w_prev, z_prev)
             z, w = self.model_transition(num_extra_frames + t, i, i_prev, z_prev, w_prev)
             frame_mean = self.model_emission(i, z, w, bkg)
             extra_frames.append(frame_mean)
