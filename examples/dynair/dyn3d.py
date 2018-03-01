@@ -468,7 +468,7 @@ def run_svi(X, args):
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
-            print('epoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo))
+            print('\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
 
         if (i+1) % 1 == 0:
             ix = 40
@@ -487,8 +487,10 @@ def run_svi(X, args):
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
-            print('Saving parameters...')
+            #print('Saving parameters...')
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
+
+    print('\nDone')
 
 
 def get_i_prob_min(frame, step):
