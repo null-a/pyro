@@ -449,8 +449,10 @@ def run_svi(X, args):
 
     dynair = DynAIR(use_cuda=args.cuda)
 
-    num_batches = 20
-    batches = X.chunk(num_batches)
+    # Don't train on the last batch.
+    num_batches = 39
+    all_batches = X.chunk(num_batches + 1)
+    batches = all_batches[0:-1]
 
     def per_param_optim_args(module_name, param_name, tags):
         lr = 1e2 if param_name.startswith('baseline') else 1e-4
@@ -472,8 +474,9 @@ def run_svi(X, args):
 
         if (i+1) % 1 == 0:
             ix = 40
-            n = 1
-            test_batch = X[ix:ix+n]
+            # Produce visualization for train & test data points.
+            test_batch = torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
+            n = test_batch.size(0)
 
             curr_opt_step = (i+1) * num_batches
             frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15, curr_opt_step)]
@@ -522,7 +525,7 @@ def get_i_prob_min(frame, step):
 
 
 def load_data():
-    X_np = np.load('cube.npz')['X']
+    X_np = np.load('cube2.npz')['X']
     #print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
