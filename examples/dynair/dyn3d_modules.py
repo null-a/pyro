@@ -88,16 +88,6 @@ class ZGatedTransition(nn.Module):
 
 
 
-class ParamI(nn.Module):
-    def __init__(self, hids, x_size, i_size):
-        super(ParamI, self).__init__()
-        self.mlp = MLP(x_size, hids + [i_size], nn.ReLU, True)
-
-    def forward(self, x_flat):
-        out = self.mlp(x_flat)
-        return sigmoid(out)
-
-
 # TODO: What would make a good network arch. for this task. (i.e.
 # Locating an object given a hint about where to look and what to look
 # for.)
@@ -108,44 +98,43 @@ class ParamI(nn.Module):
 # to position the first window, from which we determine the position
 # more accurately.
 
-class ParamW(nn.Module):
-    def __init__(self, embed_hids, hids, x_size, w_size, z_size):
-        super(ParamW, self).__init__()
+class ParamIW(nn.Module):
+    def __init__(self, embed_hids, hids, x_size, i_size, w_size, z_size):
+        super(ParamIW, self).__init__()
         self.embed = MLP(x_size, embed_hids, nn.ReLU, True)
-        self.col_widths = [w_size, w_size]
+        self.col_widths = [i_size, w_size, w_size]
 
         # Prior MLP
         prior_in_size = embed_hids[-1]
         self.mlp_prior = MLP(prior_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Object continuation MLP
-        cont_in_size = embed_hids[-1] + w_size + z_size
-        self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
+        # cont_in_size = embed_hids[-1] + w_size + z_size
+        # self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         # Dummy parameters. These won't ever move from zero.
-        self.w_init = nn.Parameter(torch.zeros(w_size))
-        self.z_init = nn.Parameter(torch.zeros(z_size))
+        # self.w_init = nn.Parameter(torch.zeros(w_size))
+        # self.z_init = nn.Parameter(torch.zeros(z_size))
 
-    def forward(self, x_flat, i_prev, w_prev, z_prev):
-        batch_size = x_flat.size(0)
-        #x_flat = x.contiguous().view(batch_size, -1)
+    def forward(self, x, i_prev, w_prev, z_prev):
+        batch_size = x.size(0)
+        x_flat = x.contiguous().view(batch_size, -1)
         x_embed = self.embed(x_flat)
 
         # TODO: Here we apply the prior and continuation nets to all
         # data points in the batch. Try partitioning the batch and
         # applying conditionally.
         out_prior = self.mlp_prior(x_embed)
+        # w_prev_arg = self.w_init.expand(batch_size, -1)
+        # z_prev_arg = self.z_init.expand(batch_size, -1))
+        #out_cont = self.mlp_cont(x_embed, 1)
+        #out = _if(i_prev, out_cont, out_prior)
 
-        w_prev_arg = _if(i_prev, w_prev, self.w_init.expand(batch_size, -1))
-        z_prev_arg = _if(i_prev, z_prev, self.z_init.expand(batch_size, -1))
-        out_cont = self.mlp_cont(torch.cat((x_embed, w_prev_arg, z_prev_arg), 1))
-
-        out = _if(i_prev, out_cont, out_prior)
-
-        cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
+        cols = split_at(out_prior, self.col_widths)
+        i_ps = sigmoid(cols[0])
+        w_mean = cols[1]
+        w_sd = softplus(cols[2])
+        return i_ps, w_mean, w_sd
 
 def _if(cond, cons, alt):
     return cond * cons + (1 - cond) * alt
