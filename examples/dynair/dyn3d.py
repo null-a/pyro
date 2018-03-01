@@ -468,7 +468,7 @@ def run_svi(X, args):
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
-            print('\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
+            print('\33[2K\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
 
         if (i+1) % 1 == 0:
             ix = 40
