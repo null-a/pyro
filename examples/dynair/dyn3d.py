@@ -503,23 +503,25 @@ def get_i_prob_min(frame, step):
     # if frame < 18:
     #     return None
 
-    i1 = 50     # zero
-    i2 = 50     # ramp up
-    i3 = 100000 # target
-    i4 = 1000   # ramp down
+    return None
 
-    target = 0.1
+    # i1 = 50     # zero
+    # i2 = 50     # ramp up
+    # i3 = 100000 # target
+    # i4 = 1000   # ramp down
 
-    if step < i1:
-        return None
-    elif step < i1 + i2:
-        return  target * ((step - i1) / i2)
-    elif step < i1 + i2 + i3:
-        return target
-    elif step < i1 + i2 + i3 + i4:
-        return target * (1.0 - ((step - (i1 + i2 + i3)) / i4))
-    else:
-        return 0.0
+    # target = 0.1
+
+    # if step < i1:
+    #     return None
+    # elif step < i1 + i2:
+    #     return  target * ((step - i1) / i2)
+    # elif step < i1 + i2 + i3:
+    #     return target
+    # elif step < i1 + i2 + i3 + i4:
+    #     return target * (1.0 - ((step - (i1 + i2 + i3)) / i4))
+    # else:
+    #     return 0.0
 
 
 def load_data():
