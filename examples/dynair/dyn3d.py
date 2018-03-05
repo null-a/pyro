@@ -51,7 +51,7 @@ class DynAIR(nn.Module):
 
 
         # Priors:
-        self.create_prior_p = 0.999999
+        self.create_prior_p = 0.5
 
         self.y_prior_mean = self.ng_zeros(self.y_size)
         self.y_prior_sd = self.ng_ones(self.y_size)
