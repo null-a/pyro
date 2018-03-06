@@ -282,6 +282,10 @@ class DynAIR(nn.Module):
             if not i_prob_min is None:
                 ps = ps * (1.0 - i_prob_min) + i_prob_min
 
+            # Squeeze.
+            m = 0.01
+            ps = ps * (1.- (2. * m)) + m
+
             baseline = self.baseline(t)
 
             return pyro.sample('i_{}'.format(t),
