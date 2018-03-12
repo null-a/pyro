@@ -108,45 +108,26 @@ class ITransition(nn.Module):
 # more accurately.
 
 class ParamIW(nn.Module):
-    def __init__(self, embed_hids, hids, x_size, i_size, w_size, z_size):
+    def __init__(self, embed_hids, hids, x_size, ctx_size, i_size, w_size):
         super(ParamIW, self).__init__()
         self.embed = MLP(x_size, embed_hids, nn.ReLU, True)
+        in_size = embed_hids[-1] + ctx_size
         self.col_widths = [i_size, w_size, w_size]
+        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-        # Prior MLP
-        prior_in_size = embed_hids[-1]
-        self.mlp_prior = MLP(prior_in_size, hids + [sum(self.col_widths)], nn.ReLU)
-
-        # Object continuation MLP
-        # cont_in_size = embed_hids[-1] + w_size + z_size
-        # self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
-
-        # Dummy parameters. These won't ever move from zero.
-        # self.w_init = nn.Parameter(torch.zeros(w_size))
-        # self.z_init = nn.Parameter(torch.zeros(z_size))
-
-    def forward(self, x, i_prev, w_prev, z_prev):
+    def forward(self, x, ctx):
         batch_size = x.size(0)
         x_flat = x.contiguous().view(batch_size, -1)
         x_embed = self.embed(x_flat)
-
-        # TODO: Here we apply the prior and continuation nets to all
-        # data points in the batch. Try partitioning the batch and
-        # applying conditionally.
-        out_prior = self.mlp_prior(x_embed)
-        # w_prev_arg = self.w_init.expand(batch_size, -1)
-        # z_prev_arg = self.z_init.expand(batch_size, -1))
-        #out_cont = self.mlp_cont(x_embed, 1)
-        #out = _if(i_prev, out_cont, out_prior)
-
-        cols = split_at(out_prior, self.col_widths)
+        out = self.mlp(torch.cat((x_embed, ctx), 1))
+        cols = split_at(out, self.col_widths)
         i_ps = sigmoid(cols[0])
         w_mean = cols[1]
         w_sd = softplus(cols[2])
         return i_ps, w_mean, w_sd
 
-def _if(cond, cons, alt):
-    return cond * cons + (1 - cond) * alt
+# def _if(cond, cons, alt):
+#     return cond * cons + (1 - cond) * alt
 
 
 
@@ -154,17 +135,17 @@ def _if(cond, cons, alt):
 # inspiration?
 
 class ParamZ(nn.Module):
-    def __init__(self, x_att_hids, hids, w_size, x_att_size, z_size):
+    def __init__(self, x_att_hids, hids, w_size, x_att_size, ctx_size, z_size):
         super(ParamZ, self).__init__()
         self.col_widths = [z_size, z_size]
         self.x_att_mlp = MLP(x_att_size, x_att_hids, nn.ReLU, True)
-        in_size = w_size + x_att_hids[-1] + z_size
+        in_size = w_size + x_att_hids[-1] + ctx_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, w, x_att, z_prev):
+    def forward(self, w, x_att, ctx):
         x_att_flat = x_att.view(x_att.size(0), -1)
         x_att_h = self.x_att_mlp(x_att_flat)
-        out = self.mlp(torch.cat((w, x_att_h, z_prev), 1))
+        out = self.mlp(torch.cat((w, x_att_h, ctx), 1))
         cols = split_at(out, self.col_widths)
         z_mean = cols[0]
         z_sd = softplus(cols[1])
@@ -185,6 +166,16 @@ class ParamY(nn.Module):
         y_sd = softplus(cols[1])
         return y_mean, y_sd
 
+
+class UpdateCtx(nn.Module):
+    def __init__(self, hids, ctx_size, i_size, w_size, z_size):
+        super(UpdateCtx, self).__init__()
+        in_size = ctx_size + i_size + w_size + z_size
+        self.mlp = MLP(in_size, hids + [ctx_size], nn.ReLU)
+
+    def forward(self, ctx, i, w, z):
+        out = self.mlp(torch.cat((ctx, i, w, z), 1))
+        return relu(out + ctx)
 
 
 class Baseline(nn.Module):
