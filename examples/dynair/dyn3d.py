@@ -217,7 +217,7 @@ class DynAIR(nn.Module):
 
     # ==GUIDE==================================================
 
-    def guide(self, batch, curr_opt_step=None, **kwargs):
+    def guide(self, batch, **kwargs):
 
         # I'd rather register model/guide modules in their methods,
         # but this is easier.
@@ -245,16 +245,13 @@ class DynAIR(nn.Module):
 
             for t in range(self.seq_length):
 
-                # TODO: Would it be useful to pass i_prob_min into
-                # iw_param?
-
                 # This is a bit odd -- we always compute i_ps, and
                 # then ignore it when not sampling i for the current
                 # step.
                 x = batch[:, t]
                 i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
 
-                i = self.guide_i(t, i_ps, i_prev, curr_opt_step)
+                i = self.guide_i(t, i_ps, i_prev)
 
                 with poutine.scale(None, i.squeeze(-1)):
                     w = self.guide_w(t, w_mean, w_sd)
@@ -273,17 +270,11 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, ps, i_prev, curr_opt_step):
+    def guide_i(self, t, ps, i_prev):
         batch_size = ps.size(0)
 
         if self.is_i_step(t):
-
-            i_prob_min = get_i_prob_min(t, curr_opt_step)
-            if not i_prob_min is None:
-                ps = ps * (1.0 - i_prob_min) + i_prob_min
-
             baseline = self.baseline(t)
-
             return pyro.sample('i_{}'.format(t),
                                dist.Bernoulli(ps, extra_event_dims=1),
                                baseline=dict(baseline_value=batch_expand(baseline, batch_size).squeeze(-1)))
@@ -334,8 +325,8 @@ class DynAIR(nn.Module):
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
-    def infer(self, batch, num_extra_frames=0, curr_opt_step=0):
-        trace = poutine.trace(self.guide).get_trace(batch, curr_opt_step=curr_opt_step)
+    def infer(self, batch, num_extra_frames=0):
+        trace = poutine.trace(self.guide).get_trace(batch)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
         ws, zs, y, ii = trace.nodes['_RETURN']['value']
         bkg = self.decode_bkg(y)
@@ -464,7 +455,7 @@ def run_svi(X, args):
     for i in range(5000):
 
         for j, batch in enumerate(batches):
-            loss = svi.step(batch, curr_opt_step=i*num_batches+j)
+            loss = svi.step(batch)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
@@ -476,8 +467,7 @@ def run_svi(X, args):
             test_batch = torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
             n = test_batch.size(0)
 
-            curr_opt_step = (i+1) * num_batches
-            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15, curr_opt_step)]
+            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
 
             for k in range(n):
                 out = overlay_window_outlines_conditionally(dynair, frames[k], ws[k], ii[k])
@@ -492,36 +482,6 @@ def run_svi(X, args):
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
     print('\nDone')
-
-
-def get_i_prob_min(frame, step):
-    # frame: position in the input sequence.
-    # step:  is the current optimisation step.
-    assert frame >= 0
-    assert step >= 0
-
-    # if frame < 18:
-    #     return None
-
-    return None
-
-    # i1 = 50     # zero
-    # i2 = 50     # ramp up
-    # i3 = 100000 # target
-    # i4 = 1000   # ramp down
-
-    # target = 0.1
-
-    # if step < i1:
-    #     return None
-    # elif step < i1 + i2:
-    #     return  target * ((step - i1) / i2)
-    # elif step < i1 + i2 + i3:
-    #     return target
-    # elif step < i1 + i2 + i3 + i4:
-    #     return target * (1.0 - ((step - (i1 + i2 + i3)) / i4))
-    # else:
-    #     return 0.0
 
 
 def load_data():
