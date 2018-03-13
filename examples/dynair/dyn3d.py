@@ -53,7 +53,7 @@ class DynAIR(nn.Module):
 
 
         # Priors:
-        self.create_prior_p = 0.5
+        # self.create_prior_p = 0.5
 
         self.y_prior_mean = self.ng_zeros(self.y_size)
         self.y_prior_sd = self.ng_ones(self.y_size)
@@ -94,7 +94,7 @@ class DynAIR(nn.Module):
 
         self.update_ctx = mod.UpdateCtx([100, 100], self.ctx_size, self.i_size, self.w_size, self.z_size)
 
-        self.baseline = mod.Baseline(self.seq_length)
+        #self.baseline = mod.Baseline(self.seq_length)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
@@ -131,15 +131,15 @@ class DynAIR(nn.Module):
             z_prev = self.ng_zeros(batch_size, self.z_size)
             w_prev = self.ng_zeros(batch_size, self.w_size)
 
-            i_prev = self.ng_zeros(batch_size, self.i_size)
+            #i_prev = self.ng_zeros(batch_size, self.i_size)
 
             for t in range(0, self.seq_length):
-                i = self.model_sample_i(t, i_prev, w_prev, z_prev)
+                #i = self.model_sample_i(t, i_prev, w_prev, z_prev)
 
-                with poutine.scale(None, i.squeeze(-1)):
-                    z, w = self.model_transition(t, i, i_prev, z_prev, w_prev)
+                #with poutine.scale(None, i.squeeze(-1)):
+                z, w = self.model_transition(t, z_prev, w_prev)
 
-                frame_mean = self.model_emission(i, z, w, bkg)
+                frame_mean = self.model_emission(z, w, bkg)
 
                 zs.append(z)
                 ws.append(w)
@@ -148,7 +148,7 @@ class DynAIR(nn.Module):
                 if do_likelihood:
                     self.likelihood(t, frame_mean, batch[:, t])
 
-                z_prev, w_prev, i_prev = z, w, i
+                z_prev, w_prev = z, w
 
         return frames, ws, zs
 
@@ -160,13 +160,13 @@ class DynAIR(nn.Module):
                     dist.Normal(frame_mean, frame_sd, extra_event_dims=3),
                     obs=obs)
 
-    def model_sample_i(self, t, i_prev, w_prev, z_prev):
-        if self.is_i_step(t):
-            persist_p = self.i_transition(w_prev, z_prev)
-            ps = _if(i_prev, persist_p, self.create_prior_p)
-            return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
-        else:
-            return i_prev
+    # def model_sample_i(self, t, i_prev, w_prev, z_prev):
+    #     if self.is_i_step(t):
+    #         persist_p = self.i_transition(w_prev, z_prev)
+    #         ps = _if(i_prev, persist_p, self.create_prior_p)
+    #         return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
+    #     else:
+    #         return i_prev
 
     def model_sample_y(self, batch_size):
         return pyro.sample('y', dist.Normal(self.y_prior_mean.expand(batch_size, -1),
@@ -181,9 +181,9 @@ class DynAIR(nn.Module):
         return pyro.sample('z_{}'.format(t),
                            dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
-    def model_transition(self, t, i, i_prev, z_prev, w_prev):
-        batch_size = i.size(0)
-        assert_size(i, (batch_size, self.i_size))
+    def model_transition(self, t, z_prev, w_prev):
+        batch_size = z_prev.size(0)
+        #assert_size(i, (batch_size, self.i_size))
         assert_size(z_prev, (batch_size, self.z_size))
         assert_size(w_prev, (batch_size, self.w_size))
 
@@ -192,27 +192,27 @@ class DynAIR(nn.Module):
         # Better yet, only apply the transition to present objects.
         # (Would slicing tensors negate any savings?) Something
         # similar applies to model_emission/spatial transformer stuff.
-        z_transition_mean, z_transition_sd = self.z_transition(z_prev)
-        w_transition_mean, w_transition_sd = self.w_transition(z_prev, w_prev)
+        z_mean, z_sd = self.z_transition(z_prev)
+        w_mean, w_sd = self.w_transition(z_prev, w_prev)
 
-        z_mean = _if(i_prev, z_transition_mean, self.z_prior_mean)
-        z_sd = _if(i_prev, z_transition_sd, self.z_prior_sd)
-        w_mean = _if(i_prev, w_transition_mean, self.w_prior_mean)
-        w_sd = _if(i_prev, w_transition_sd, self.w_prior_sd)
+        #z_mean = _if(i_prev, z_transition_mean, self.z_prior_mean)
+        #z_sd = _if(i_prev, z_transition_sd, self.z_prior_sd)
+        #w_mean = _if(i_prev, w_transition_mean, self.w_prior_mean)
+        #w_sd = _if(i_prev, w_transition_sd, self.w_prior_sd)
 
         z = self.model_sample_z(t, z_mean, z_sd)
         w = self.model_sample_w(t, w_mean, w_sd)
 
         return z, w
 
-    def model_emission(self, i, z, w, bkg):
+    def model_emission(self, z, w, bkg):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
         # Note that neither of these currently depend on w, but doing
         # so may be useful in future.
 
         # Zero out the contents of windows when the object is not present.
-        x_att = self.decode_obj(z) * i
+        x_att = self.decode_obj(z)# * i
         return over(self.window_to_image(w, x_att), bkg)
 
     def decode_bkg(self, y):
@@ -242,11 +242,11 @@ class DynAIR(nn.Module):
             # TODO: Implement a better guide for y.
             y = self.guide_y(batch[:, 0])
 
-            ii = []
+            #ii = []
             zs = []
             ws = []
 
-            i_prev = self.ng_zeros(batch_size, self.i_size)
+            #i_prev = self.ng_zeros(batch_size, self.i_size)
 
             ctx = batch_expand(self.ctx_init, batch_size)
 
@@ -256,48 +256,48 @@ class DynAIR(nn.Module):
                 # then ignore it when not sampling i for the current
                 # step.
                 x = batch[:, t]
-                i_ps, w_mean, w_sd = self.iw_param(x, ctx)
+                w_mean, w_sd = self.iw_param(x, ctx)
 
-                i = self.guide_i(t, i_ps, i_prev)
+                #i = self.guide_i(t, i_ps, i_prev)
 
-                with poutine.scale(None, i.squeeze(-1)):
-                    w = self.guide_w(t, w_mean, w_sd)
-                    x_att = self.image_to_window(w, x)
-                    z = self.guide_z(t, i, w, x_att, ctx)
+                #with poutine.scale(None, i.squeeze(-1)):
+                w = self.guide_w(t, w_mean, w_sd)
+                x_att = self.image_to_window(w, x)
+                z = self.guide_z(t, w, x_att, ctx)
 
                 # TODO: Are we throwing useful information away by
                 # only incorporating sampled values (and not the
                 # computed parameters) into the context?
-                ctx = self.update_ctx(ctx, i, w, z)
+                ctx = self.update_ctx(ctx, w, z)
 
-                ii.append(i)
+                #ii.append(i)
                 ws.append(w)
                 zs.append(z)
 
-                i_prev = i
+                #i_prev = i
 
-        return ws, zs, y, ii
+        return ws, zs, y
 
     def guide_y(self, x0):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, ps, i_prev):
-        batch_size = ps.size(0)
+    # def guide_i(self, t, ps, i_prev):
+    #     batch_size = ps.size(0)
 
-        if self.is_i_step(t):
-            baseline = self.baseline(t)
-            return pyro.sample('i_{}'.format(t),
-                               dist.Bernoulli(ps, extra_event_dims=1),
-                               baseline=dict(baseline_value=batch_expand(baseline, batch_size).squeeze(-1)))
-        else:
-            return i_prev
+    #     if self.is_i_step(t):
+    #         baseline = self.baseline(t)
+    #         return pyro.sample('i_{}'.format(t),
+    #                            dist.Bernoulli(ps, extra_event_dims=1),
+    #                            baseline=dict(baseline_value=batch_expand(baseline, batch_size).squeeze(-1)))
+    #     else:
+    #         return i_prev
 
     def guide_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
-    def guide_z(self, t, i, w, x_att, ctx):
-        batch_size = i.size(0)
+    def guide_z(self, t, w, x_att, ctx):
+        batch_size = w.size(0)
         z_mean, z_sd = self.z_param(w, x_att, ctx)
         return pyro.sample('z_{}'.format(t), dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
@@ -339,29 +339,29 @@ class DynAIR(nn.Module):
     def infer(self, batch, num_extra_frames=0):
         trace = poutine.trace(self.guide).get_trace(batch)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
-        ws, zs, y, ii = trace.nodes['_RETURN']['value']
+        ws, zs, y = trace.nodes['_RETURN']['value']
         bkg = self.decode_bkg(y)
 
         extra_ws = []
         extra_zs = []
-        extra_ii = []
+        #extra_ii = []
         extra_frames = []
 
         w_prev = ws[-1]
         z_prev = zs[-1]
-        i_prev = ii[-1]
+        #i_prev = ii[-1]
 
         for t in range(num_extra_frames):
-            i = self.model_sample_i(num_extra_frames + t, i_prev, w_prev, z_prev)
-            z, w = self.model_transition(num_extra_frames + t, i, i_prev, z_prev, w_prev)
-            frame_mean = self.model_emission(i, z, w, bkg)
+            #i = self.model_sample_i(num_extra_frames + t, i_prev, w_prev, z_prev)
+            z, w = self.model_transition(num_extra_frames + t, z_prev, w_prev)
+            frame_mean = self.model_emission(z, w, bkg)
             extra_frames.append(frame_mean)
-            extra_ii.append(i)
+            #extra_ii.append(i)
             extra_ws.append(w)
             extra_zs.append(z)
-            w_prev, z_prev, i_prev = w, z, i
+            w_prev, z_prev = w, z
 
-        return frames, ws, ii, extra_frames, extra_ws, extra_ii
+        return frames, ws, extra_frames, extra_ws
 
     def is_i_step(self, t):
         # Controls when i is sampled.
@@ -479,14 +479,14 @@ def run_svi(X, args):
             test_batch = torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
             n = test_batch.size(0)
 
-            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
+            frames, ws, extra_frames, extra_ws = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
 
             for k in range(n):
-                out = overlay_window_outlines_conditionally(dynair, frames[k], ws[k], ii[k])
+                out = overlay_window_outlines(dynair, frames[k], ws[k])
                 vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
-                out = overlay_window_outlines_conditionally(dynair, extra_frames[k], extra_ws[k], extra_ii[k])
+                out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
