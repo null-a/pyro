@@ -32,6 +32,8 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
+        self.num_obj = 3
+
         self.image_size = 50
         self.num_chan = 4
 
@@ -44,6 +46,7 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
+        self.x_embed_size = 200
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -72,9 +75,9 @@ class DynAIR(nn.Module):
 
 
         # Parameters.
-        self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
-        self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
-
+        self.guide_w_init_i = nn.Parameter(torch.zeros(self.w_size))
+        self.guide_z_init_i = nn.Parameter(torch.zeros(self.z_size))
+        self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
 
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
@@ -86,7 +89,9 @@ class DynAIR(nn.Module):
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
+        self.w_param = mod.ParamW(200, [], self.x_embed_size, self.w_size, self.z_size)
+        self.x_embed = mod.EmbedX([500], self.x_embed_size, self.x_size)
+
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
@@ -111,25 +116,23 @@ class DynAIR(nn.Module):
         y = self.model_sample_y(batch_size)
         bkg = self.decode_bkg(y)
 
-        z = self.model_sample_z_0(batch_size)
-        w = self.model_sample_w_0(batch_size)
+        frames = []
+        zs = mk_matrix(self.seq_length, self.num_obj)
+        ws = mk_matrix(self.seq_length, self.num_obj)
 
-        frame_mean = self.model_emission(z, w, bkg)
+        for t in range(self.seq_length):
+            for i in range(self.num_obj):
+                if t > 0:
+                    z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
+                else:
+                    z = self.model_sample_z_0(i, batch_size)
+                    w = self.model_sample_w_0(i, batch_size)
+                zs[t][i] = z
+                ws[t][i] = w
 
-        zs = [z]
-        ws = [w]
-        frames = [frame_mean]
-
-        if do_likelihood:
-            self.likelihood(0, frame_mean, batch[:, 0])
-
-        # TODO: iarange here (or somewhere)
-        for t in range(1, self.seq_length):
-            z, w = self.model_transition(t, z, w)
-            frame_mean = self.model_emission(z, w, bkg)
-            zs.append(z)
-            ws.append(w)
+            frame_mean = self.model_emission(zs[t], ws[t], bkg)
             frames.append(frame_mean)
+
             if do_likelihood:
                 self.likelihood(t, frame_mean, batch[:, t])
 
@@ -148,45 +151,47 @@ class DynAIR(nn.Module):
                                             self.y_prior_sd.expand(batch_size, -1),
                                             extra_event_dims=1))
 
-    def model_sample_w_0(self, batch_size):
-        return pyro.sample('w_0',
-                        dist.Normal(
-                            self.w_0_prior_mean.expand(batch_size, -1),
-                            self.w_0_prior_sd.expand(batch_size, -1),
-                            extra_event_dims=1))
+    def model_sample_w_0(self, i, batch_size):
+        return pyro.sample('w_0_{}'.format(i),
+                           dist.Normal(
+                               self.w_0_prior_mean.expand(batch_size, -1),
+                               self.w_0_prior_sd.expand(batch_size, -1),
+                               extra_event_dims=1))
 
-    def model_sample_w(self, t, w_mean, w_sd):
-        return pyro.sample('w_{}'.format(t),
+    def model_sample_w(self, t, i, w_mean, w_sd):
+        return pyro.sample('w_{}_{}'.format(t, i),
                            dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
-    def model_sample_z_0(self, batch_size):
-        return pyro.sample('z_0',
+    def model_sample_z_0(self, i, batch_size):
+        return pyro.sample('z_0_{}'.format(i),
                            dist.Normal(
                                self.z_0_prior_mean.expand(batch_size, -1),
                                self.z_0_prior_sd.expand(batch_size, -1),
                                extra_event_dims=1))
 
-    def model_sample_z(self, t, z_mean, z_sd):
-        return pyro.sample('z_{}'.format(t),
+    def model_sample_z(self, t, i, z_mean, z_sd):
+        return pyro.sample('z_{}_{}'.format(t, i),
                            dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
-    def model_transition(self, t, z_prev, w_prev):
+    def model_transition(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.z_size))
         assert_size(w_prev, (batch_size, self.w_size))
         z_mean, z_sd = self.z_transition(z_prev)
         w_mean, w_sd = self.w_transition(z_prev, w_prev)
-        z = self.model_sample_z(t, z_mean, z_sd)
-        w = self.model_sample_w(t, w_mean, w_sd)
+        z = self.model_sample_z(t, i, z_mean, z_sd)
+        w = self.model_sample_w(t, i, w_mean, w_sd)
         return z, w
 
-    def model_emission(self, z, w, bkg):
-        batch_size = z.size(0)
-        assert z.size(0) == w.size(0)
-        # Note that neither of these currently depend on w, but doing
-        # so may be useful in future.
-        x_att = self.decode_obj(z)
-        return over(self.window_to_image(w, x_att), bkg)
+    def model_emission(self, zs, ws, bkg):
+        #batch_size = z.size(0)
+        #assert z.size(0) == w.size(0)
+        acc = bkg
+        for z, w in zip(zs, ws):
+            assert z.size(0) == w.size(0)
+            x_att = self.decode_obj(z)
+            acc = over(self.window_to_image(w, x_att), acc)
+        return acc
 
     def decode_bkg(self, y):
         batch_size = y.size(0)
@@ -213,20 +218,33 @@ class DynAIR(nn.Module):
         # TODO: Implement a better guide for y.
         y = self.guide_y(batch[:, 0])
 
-        zs = []
-        ws = []
+        ws = mk_matrix(self.seq_length, self.num_obj)
+        zs = mk_matrix(self.seq_length, self.num_obj)
 
-        z = batch_expand(self.guide_z_init, batch_size)
-        w = batch_expand(self.guide_w_init, batch_size)
+        w_init_i = batch_expand(self.guide_w_init_i, batch_size)
+        z_init_i = batch_expand(self.guide_z_init_i, batch_size)
+        w_t_init = batch_expand(self.guide_w_t_init, batch_size)
 
         for t in range(self.seq_length):
-            x = batch[:, t]
-            w = self.guide_w(t, x, w, z)
-            x_att = self.image_to_window(w, x)
-            z = self.guide_z(t, w, x_att, z)
 
-            ws.append(w)
-            zs.append(z)
+            x = batch[:, t]
+            x_embed = self.x_embed(x)
+            rnn_hid_prev = None
+
+            for i in range(self.num_obj):
+
+                w_prev_i = ws[t-1][i] if t > 0 else w_init_i
+                z_prev_i = zs[t-1][i] if t > 0 else z_init_i
+                w_t_prev = ws[t][i-1] if i > 0 else w_t_init
+
+                w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+
+                x_att = self.image_to_window(w, x)
+                z = self.guide_z(t, i, w, x_att, z_prev_i)
+
+                ws[t][i] = w
+                zs[t][i] = z
+                rnn_hid_prev = rnn_hid
 
         return ws, zs, y
 
@@ -234,13 +252,14 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_w(self, t, x, w_prev, z_prev):
-        w_mean, w_sd = self.w_param(x, w_prev, z_prev)
-        return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
+    def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev):
+        w_mean, w_sd, rnn_hid = self.w_param(x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd, extra_event_dims=1))
+        return w, rnn_hid
 
-    def guide_z(self, t, w, x_att, z_prev):
-        z_mean, z_sd = self.z_param(w, x_att, z_prev)
-        return pyro.sample('z_{}'.format(t), dist.Normal(z_mean, z_sd, extra_event_dims=1))
+    def guide_z(self, t, i, w, x_att, z_prev_i):
+        z_mean, z_sd = self.z_param(w, x_att, z_prev_i)
+        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
     def image_to_window(self, w, images):
         n = w.size(0)
@@ -280,21 +299,27 @@ class DynAIR(nn.Module):
         trace = poutine.trace(self.guide).get_trace(batch)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
         ws, zs, y = trace.nodes['_RETURN']['value']
-        bkg = self.decode_bkg(y)
 
-        extra_ws = []
-        extra_zs = []
-        extra_frames = []
+        # TODO: Reinstate extrapolation code. (Re-use model code.)
 
-        w = ws[-1]
-        z = zs[-1]
+        #bkg = self.decode_bkg(y)
 
-        for t in range(num_extra_frames):
-            z, w = self.model_transition(num_extra_frames + t, z, w)
-            frame_mean = self.model_emission(z, w, bkg)
-            extra_frames.append(frame_mean)
-            extra_ws.append(w)
-            extra_zs.append(z)
+        # extra_ws = []
+        # extra_zs = []
+        # extra_frames = []
+
+        # w = ws[-1]
+        # z = zs[-1]
+
+        # for t in range(num_extra_frames):
+        #     z, w = self.model_transition(num_extra_frames + t, z, w)
+        #     frame_mean = self.model_emission(z, w, bkg)
+        #     extra_frames.append(frame_mean)
+        #     extra_ws.append(w)
+        #     extra_zs.append(z)
+
+        extra_frames = None
+        extra_ws = None
 
         return frames, ws, extra_frames, extra_ws
 
@@ -378,10 +403,11 @@ def run_svi(X, args):
 
     dynair = DynAIR(use_cuda=args.cuda)
 
+    # TODO: Revert to using mini-batches.
     # Don't train on the last batch.
-    num_batches = 39
-    all_batches = X.chunk(num_batches + 1)
-    batches = all_batches[0:-1]
+    num_batches = 1
+    #all_batches = X.chunk(num_batches + 1)
+    batches = [X]#all_batches[0:-1]
 
     def per_param_optim_args(module_name, param_name, tags):
         return {'lr': 1e-4}
@@ -403,18 +429,20 @@ def run_svi(X, args):
         if (i+1) % 1 == 0:
             ix = 40
             # Produce visualization for train & test data points.
-            test_batch = torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
+            test_batch = X[0:2] # torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
             n = test_batch.size(0)
 
-            frames, ws, extra_frames, extra_ws = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
+            frames, ws, extra_frames, extra_ws = dynair.infer(test_batch, 15)
+            frames = frames_to_tensor(frames)
+            ws = latents_to_tensor(ws)
 
             for k in range(n):
-                out = overlay_window_outlines(dynair, frames[k], ws[k])
+                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k])
                 vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
-                out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+                # out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
+                # vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
             print('Saving parameters...')
@@ -441,36 +469,44 @@ def img_to_arr(img):
     arr = np.fromstring(img.tobytes(), dtype=np.uint8)
     return arr.reshape(w * h, channels).T.reshape(channels, h, w)
 
-def draw_rect(size):
+def draw_rect(size, color):
     img = Image.new('RGBA', (size, size))
     draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 0, size - 1, size - 1], outline='white')
+    draw.rectangle([0, 0, size - 1, size - 1], outline=color)
     return torch.from_numpy(img_to_arr(img).astype(np.float32) / 255.0)
 
-def draw_window_outline(dynair, z_where):
+def draw_window_outline(dynair, z_where, color):
     n = z_where.size(0)
-    rect = draw_rect(dynair.window_size)
+    rect = draw_rect(dynair.window_size, color)
     if z_where.is_cuda:
         rect = rect.cuda()
     rect_batch = Variable(batch_expand(rect.contiguous().view(-1), n).contiguous())
     return dynair.window_to_image(z_where, rect_batch)
 
-def overlay_window_outlines(dynair, frame, z_where):
-    return over(draw_window_outline(dynair, z_where), frame)
+def overlay_window_outlines(dynair, frame, z_where, color):
+    return over(draw_window_outline(dynair, z_where, color), frame)
 
-def overlay_window_outlines_conditionally(dynair, frame, z_where, ii):
+def overlay_window_outlines_conditionally(dynair, frame, z_where, color, ii):
     batch_size = z_where.size(0)
     presence_mask = ii.view(-1, 1, 1, 1)
     borders = batch_expand(Variable(torch.Tensor([-0.08, 0, 0])), batch_size).type_as(ii)
-    return over(draw_window_outline(dynair, borders) * presence_mask,
-                over(draw_window_outline(dynair, z_where) * presence_mask,
+    return over(draw_window_outline(dynair, borders, color) * presence_mask,
+                over(draw_window_outline(dynair, z_where, color) * presence_mask,
                      frame))
 
+def overlay_multiple_window_outlines(dynair, frame, ws):
+    acc = frame
+    for i, w in enumerate(ws):
+        acc = overlay_window_outlines(dynair, acc, w, ['red', 'green', 'blue'][i % 3])
+    return acc
 
-def latent_seq_to_tensor(arr):
-    # Turn an array of latents (of length seq_len) returned by the
+def frames_to_tensor(arr):
+    # Turn an array of frames (of length seq_len) returned by the
     # model into a (batch, seq_len, rest...) tensor.
     return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1)
+
+def latents_to_tensor(xss):
+    return torch.stack([torch.stack(xs) for xs in xss]).transpose(2, 0)
 
 def arr_to_img(nparr):
     assert nparr.shape[0] == 4 # required for RGBA
@@ -482,6 +518,9 @@ def save_frames(frames, path_fmt_str, offset=0):
     assert_size(frames, (n, 4, frames.size(2), frames.size(3)))
     for i in range(n):
         arr_to_img(frames[i].data.numpy()).save(path_fmt_str.format(i + offset))
+
+def mk_matrix(m, n):
+    return [[None] * n for _ in range(m)]
 
 
 if __name__ == '__main__':
@@ -523,7 +562,9 @@ if __name__ == '__main__':
     # # print(torch.stack(zs))
     # print(y)
 
-    X = load_data()
+    #X = load_data()
+    X = Variable(torch.zeros(10, 20, 4, 50, 50))
+    nn.init.normal(X)
     if args.cuda:
         X = X.cuda()
     run_svi(X, args)

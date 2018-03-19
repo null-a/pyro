@@ -87,6 +87,18 @@ class ZGatedTransition(nn.Module):
         return z_mean, z_sd
 
 
+class EmbedX(nn.Module):
+    def __init__(self, hids, x_embed_size, x_size):
+        super(EmbedX, self).__init__()
+        self.mlp = MLP(x_size, hids + [x_embed_size], nn.ReLU)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        # This use of contiguous may not be necessary with PyTorch >=
+        # 0.4.
+        x_flat = x.contiguous().view(batch_size, -1)
+        return self.mlp(x_flat)
+
 
 # TODO: What would make a good network arch. for this task. (i.e.
 # Locating an object given a hint about where to look and what to look
@@ -99,23 +111,37 @@ class ZGatedTransition(nn.Module):
 # more accurately.
 
 class ParamW(nn.Module):
-    def __init__(self, x_hids, hids, x_size, w_size, z_size):
+    def __init__(self, rnn_hid_size, hids, x_embed_size, w_size, z_size):
         super(ParamW, self).__init__()
-        self.col_widths = [w_size, w_size]
-        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
-        in_size = x_hids[-1] + w_size + z_size
-        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, x, w_prev, z_prev):
-        # This use of contiguous is necessary for cpu/gpu with PyTorch
-        # 0.3. From 0.4 it no longer appears necessary.
-        x_flat = x.contiguous().view(x.size(0), -1)
-        x_hid = self.x_mlp(x_flat)
-        out = self.mlp(torch.cat((x_hid, w_prev, z_prev), 1))
+        rnn_input_size = x_embed_size + w_size * 2 + z_size
+        self.rnn = nn.RNNCell(rnn_input_size, rnn_hid_size)
+
+        self.col_widths = [w_size, w_size]
+        self.mlp = MLP(rnn_hid_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+        self.rnn_hid_init = nn.Parameter(torch.zeros(rnn_hid_size))
+        nn.init.normal(self.rnn_hid_init, std=0.01)
+
+
+    def forward(self, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev):
+        batch_size = x_embed.size(0)
+
+        inp = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev), 1)
+
+        if rnn_hid_prev is None:
+            hid_prev = self.rnn_hid_init.expand(batch_size, -1)
+        else:
+            hid_prev = rnn_hid_prev
+
+        hid = self.rnn(inp, hid_prev)
+
+        out = self.mlp(hid)
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])
-        return w_mean, w_sd
+
+        return w_mean, w_sd, hid
 
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
