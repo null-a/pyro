@@ -112,7 +112,7 @@ class ParamIW(nn.Module):
         super(ParamIW, self).__init__()
         self.embed = MLP(x_size, embed_hids, nn.ReLU, True)
         in_size = embed_hids[-1] + ctx_size
-        self.col_widths = [w_size, w_size]
+        self.col_widths = [i_size, w_size, w_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
     def forward(self, x, ctx):
@@ -121,10 +121,10 @@ class ParamIW(nn.Module):
         x_embed = self.embed(x_flat)
         out = self.mlp(torch.cat((x_embed, ctx), 1))
         cols = split_at(out, self.col_widths)
-        #i_ps = sigmoid(cols[0])
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
+        i_ps = sigmoid(cols[0])
+        w_mean = cols[1]
+        w_sd = softplus(cols[2])
+        return i_ps, w_mean, w_sd
 
 # def _if(cond, cons, alt):
 #     return cond * cons + (1 - cond) * alt
@@ -170,11 +170,11 @@ class ParamY(nn.Module):
 class UpdateCtx(nn.Module):
     def __init__(self, hids, ctx_size, i_size, w_size, z_size):
         super(UpdateCtx, self).__init__()
-        in_size = ctx_size + w_size + z_size
+        in_size = ctx_size + i_size + w_size + z_size
         self.mlp = MLP(in_size, hids + [ctx_size], nn.ReLU)
 
-    def forward(self, ctx, w, z):
-        out = self.mlp(torch.cat((ctx, w, z), 1))
+    def forward(self, ctx, i, w, z):
+        out = self.mlp(torch.cat((ctx, i, w, z), 1))
         return relu(out + ctx)
 
 
