@@ -37,7 +37,6 @@ class DynAIR(nn.Module):
 
         self.window_size = 22
 
-        self.i_size = 1
         self.y_size = 50
         self.z_size = 50
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
@@ -45,35 +44,37 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
+
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
 
 
         # Priors:
-        self.create_prior_p = 0.5
 
         self.y_prior_mean = self.ng_zeros(self.y_size)
         self.y_prior_sd = self.ng_ones(self.y_size)
 
         # TODO: Using a (reparameterized) uniform would probably be
         # better for the cubes data set.
-        self.w_prior_mean = Variable(torch.Tensor([np.log(0.3), 0, 0]))
-        self.w_prior_sd = Variable(torch.Tensor([0.02, 0.3, 0.3]),
-                                   requires_grad=False)
+        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.3), 0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.7, 0.7, 0.7]),
+                                     requires_grad=False)
         if use_cuda:
-            self.w_prior_mean = self.w_prior_mean.cuda()
-            self.w_prior_sd = self.w_prior_sd.cuda()
+            self.w_0_prior_mean = self.w_0_prior_mean.cuda()
+            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
 
 
-        self.z_prior_mean = self.ng_zeros(self.z_size)
-        self.z_prior_sd = self.ng_ones(self.z_size)
+        self.z_0_prior_mean = self.ng_zeros(self.z_size)
+        self.z_0_prior_sd = self.ng_ones(self.z_size)
 
         self.likelihood_sd = 0.3
 
 
         # Parameters.
         self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
+        self.guide_w_init = nn.Parameter(torch.zeros(self.w_size))
+
 
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
@@ -85,16 +86,13 @@ class DynAIR(nn.Module):
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.iw_param = mod.ParamIW([500, 200], [200], self.x_size, self.i_size, self.w_size, self.z_size)
-
-        self.baseline = mod.Baseline(self.seq_length)
+        self.w_param = mod.ParamW([500, 200], [200], self.x_size, self.w_size, self.z_size)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
-        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, -3.0)
+        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size)
         self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
-        self.i_transition = mod.ITransition(self.i_size, self.w_size, self.z_size, 50)
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
@@ -106,42 +104,34 @@ class DynAIR(nn.Module):
 
 
     # TODO: This do_likelihood business is unpleasant.
-    def model(self, batch, do_likelihood=True, **kwargs):
+    def model(self, batch, do_likelihood=True):
 
         batch_size = batch.size(0)
 
-        with pyro.iarange('data'):
+        y = self.model_sample_y(batch_size)
+        bkg = self.decode_bkg(y)
 
-            y = self.model_sample_y(batch_size)
-            bkg = self.decode_bkg(y)
+        z = self.model_sample_z_0(batch_size)
+        w = self.model_sample_w_0(batch_size)
 
-            zs = []
-            ws = []
-            frames = []
+        frame_mean = self.model_emission(z, w, bkg)
 
-            # Dummy values for z,w to which the transition can be applied.
-            # (The result of which will be discarded.)
-            z_prev = self.ng_zeros(batch_size, self.z_size)
-            w_prev = self.ng_zeros(batch_size, self.w_size)
+        zs = [z]
+        ws = [w]
+        frames = [frame_mean]
 
-            i_prev = self.ng_zeros(batch_size, self.i_size)
+        if do_likelihood:
+            self.likelihood(0, frame_mean, batch[:, 0])
 
-            for t in range(0, self.seq_length):
-                i = self.model_sample_i(t, i_prev, w_prev, z_prev)
-
-                with poutine.scale(None, i.squeeze(-1)):
-                    z, w = self.model_transition(t, i, i_prev, z_prev, w_prev)
-
-                frame_mean = self.model_emission(i, z, w, bkg)
-
-                zs.append(z)
-                ws.append(w)
-                frames.append(frame_mean)
-
-                if do_likelihood:
-                    self.likelihood(t, frame_mean, batch[:, t])
-
-                z_prev, w_prev, i_prev = z, w, i
+        # TODO: iarange here (or somewhere)
+        for t in range(1, self.seq_length):
+            z, w = self.model_transition(t, z, w)
+            frame_mean = self.model_emission(z, w, bkg)
+            zs.append(z)
+            ws.append(w)
+            frames.append(frame_mean)
+            if do_likelihood:
+                self.likelihood(t, frame_mean, batch[:, t])
 
         return frames, ws, zs
 
@@ -153,59 +143,49 @@ class DynAIR(nn.Module):
                     dist.Normal(frame_mean, frame_sd, extra_event_dims=3),
                     obs=obs)
 
-    def model_sample_i(self, t, i_prev, w_prev, z_prev):
-        if self.is_i_step(t):
-            persist_p = self.i_transition(w_prev, z_prev)
-            ps = _if(i_prev, persist_p, self.create_prior_p)
-            return pyro.sample('i_{}'.format(t), dist.Bernoulli(ps, extra_event_dims=1))
-        else:
-            return i_prev
-
     def model_sample_y(self, batch_size):
         return pyro.sample('y', dist.Normal(self.y_prior_mean.expand(batch_size, -1),
                                             self.y_prior_sd.expand(batch_size, -1),
                                             extra_event_dims=1))
 
+    def model_sample_w_0(self, batch_size):
+        return pyro.sample('w_0',
+                        dist.Normal(
+                            self.w_0_prior_mean.expand(batch_size, -1),
+                            self.w_0_prior_sd.expand(batch_size, -1),
+                            extra_event_dims=1))
+
     def model_sample_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t),
                            dist.Normal(w_mean, w_sd, extra_event_dims=1))
+
+    def model_sample_z_0(self, batch_size):
+        return pyro.sample('z_0',
+                           dist.Normal(
+                               self.z_0_prior_mean.expand(batch_size, -1),
+                               self.z_0_prior_sd.expand(batch_size, -1),
+                               extra_event_dims=1))
 
     def model_sample_z(self, t, z_mean, z_sd):
         return pyro.sample('z_{}'.format(t),
                            dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
-    def model_transition(self, t, i, i_prev, z_prev, w_prev):
-        batch_size = i.size(0)
-        assert_size(i, (batch_size, self.i_size))
+    def model_transition(self, t, z_prev, w_prev):
+        batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.z_size))
         assert_size(w_prev, (batch_size, self.w_size))
-
-        # TODO: Possible optimization -- avoid applying the transition
-        # when no objects are present. (e.g. At the first time step.)
-        # Better yet, only apply the transition to present objects.
-        # (Would slicing tensors negate any savings?) Something
-        # similar applies to model_emission/spatial transformer stuff.
-        z_transition_mean, z_transition_sd = self.z_transition(z_prev)
-        w_transition_mean, w_transition_sd = self.w_transition(z_prev, w_prev)
-
-        z_mean = _if(i_prev, z_transition_mean, self.z_prior_mean)
-        z_sd = _if(i_prev, z_transition_sd, self.z_prior_sd)
-        w_mean = _if(i_prev, w_transition_mean, self.w_prior_mean)
-        w_sd = _if(i_prev, w_transition_sd, self.w_prior_sd)
-
+        z_mean, z_sd = self.z_transition(z_prev)
+        w_mean, w_sd = self.w_transition(z_prev, w_prev)
         z = self.model_sample_z(t, z_mean, z_sd)
         w = self.model_sample_w(t, w_mean, w_sd)
-
         return z, w
 
-    def model_emission(self, i, z, w, bkg):
+    def model_emission(self, z, w, bkg):
         batch_size = z.size(0)
         assert z.size(0) == w.size(0)
         # Note that neither of these currently depend on w, but doing
         # so may be useful in future.
-
-        # Zero out the contents of windows when the object is not present.
-        x_att = self.decode_obj(z) * i
+        x_att = self.decode_obj(z)
         return over(self.window_to_image(w, x_att), bkg)
 
     def decode_bkg(self, y):
@@ -217,7 +197,7 @@ class DynAIR(nn.Module):
 
     # ==GUIDE==================================================
 
-    def guide(self, batch, **kwargs):
+    def guide(self, batch, *args):
 
         # I'd rather register model/guide modules in their methods,
         # but this is easier.
@@ -228,68 +208,39 @@ class DynAIR(nn.Module):
         batch_size = batch.size(0)
         assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
 
-        with pyro.iarange('data'):
+        # NOTE: Here we're guiding y based on the contents of the
+        # first frame only.
+        # TODO: Implement a better guide for y.
+        y = self.guide_y(batch[:, 0])
 
-            # NOTE: Here we're guiding y based on the contents of the
-            # first frame only.
-            # TODO: Implement a better guide for y.
-            y = self.guide_y(batch[:, 0])
+        zs = []
+        ws = []
 
-            ii = []
-            zs = []
-            ws = []
+        z = batch_expand(self.guide_z_init, batch_size)
+        w = batch_expand(self.guide_w_init, batch_size)
 
-            z_prev = self.ng_zeros(batch_size, self.z_size)
-            w_prev = self.ng_zeros(batch_size, self.w_size)
-            i_prev = self.ng_zeros(batch_size, self.i_size)
+        for t in range(self.seq_length):
+            x = batch[:, t]
+            w = self.guide_w(t, x, w, z)
+            x_att = self.image_to_window(w, x)
+            z = self.guide_z(t, w, x_att, z)
 
-            for t in range(self.seq_length):
+            ws.append(w)
+            zs.append(z)
 
-                # This is a bit odd -- we always compute i_ps, and
-                # then ignore it when not sampling i for the current
-                # step.
-                x = batch[:, t]
-                i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
-
-                i = self.guide_i(t, i_ps, i_prev)
-
-                with poutine.scale(None, i.squeeze(-1)):
-                    w = self.guide_w(t, w_mean, w_sd)
-                    x_att = self.image_to_window(w, x)
-                    z = self.guide_z(t, i, i_prev, w, x_att, z_prev)
-
-                ii.append(i)
-                ws.append(w)
-                zs.append(z)
-
-                z_prev, w_prev, i_prev = z, w, i
-
-        return ws, zs, y, ii
+        return ws, zs, y
 
     def guide_y(self, x0):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
 
-    def guide_i(self, t, ps, i_prev):
-        batch_size = ps.size(0)
-
-        if self.is_i_step(t):
-            baseline = self.baseline(t)
-            return pyro.sample('i_{}'.format(t),
-                               dist.Bernoulli(ps, extra_event_dims=1),
-                               baseline=dict(baseline_value=batch_expand(baseline, batch_size).squeeze(-1)))
-        else:
-            return i_prev
-
-    def guide_w(self, t, w_mean, w_sd):
+    def guide_w(self, t, x, w_prev, z_prev):
+        w_mean, w_sd = self.w_param(x, w_prev, z_prev)
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
-    def guide_z(self, t, i, i_prev, w, x_att, z_prev):
-        batch_size = i.size(0)
-        z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
-        z_mean, z_sd = self.z_param(w, x_att, z_prev_arg)
+    def guide_z(self, t, w, x_att, z_prev):
+        z_mean, z_sd = self.z_param(w, x_att, z_prev)
         return pyro.sample('z_{}'.format(t), dist.Normal(z_mean, z_sd, extra_event_dims=1))
-
 
     def image_to_window(self, w, images):
         n = w.size(0)
@@ -328,37 +279,25 @@ class DynAIR(nn.Module):
     def infer(self, batch, num_extra_frames=0):
         trace = poutine.trace(self.guide).get_trace(batch)
         frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
-        ws, zs, y, ii = trace.nodes['_RETURN']['value']
+        ws, zs, y = trace.nodes['_RETURN']['value']
         bkg = self.decode_bkg(y)
 
         extra_ws = []
         extra_zs = []
-        extra_ii = []
         extra_frames = []
 
-        w_prev = ws[-1]
-        z_prev = zs[-1]
-        i_prev = ii[-1]
+        w = ws[-1]
+        z = zs[-1]
 
         for t in range(num_extra_frames):
-            i = self.model_sample_i(num_extra_frames + t, i_prev, w_prev, z_prev)
-            z, w = self.model_transition(num_extra_frames + t, i, i_prev, z_prev, w_prev)
-            frame_mean = self.model_emission(i, z, w, bkg)
+            z, w = self.model_transition(num_extra_frames + t, z, w)
+            frame_mean = self.model_emission(z, w, bkg)
             extra_frames.append(frame_mean)
-            extra_ii.append(i)
             extra_ws.append(w)
             extra_zs.append(z)
-            w_prev, z_prev, i_prev = w, z, i
 
-        return frames, ws, ii, extra_frames, extra_ws, extra_ii
+        return frames, ws, extra_frames, extra_ws
 
-    def is_i_step(self, t):
-        # Controls when i is sampled.
-        return True#(t % 4 == 0) or (t >= (self.seq_length-2))
-
-
-def _if(cond, cons, alt):
-    return cond * cons + (1 - cond) * alt
 
 def batch_expand(t, b):
     return t.expand((b,) + t.size())
@@ -406,6 +345,7 @@ def assert_size(t, expected_size):
     assert actual_size == expected_size, 'Expected size {} but got {}.'.format(expected_size, tuple(actual_size))
 
 
+
 # TODO: I suspect this can be simplified if the background is always
 # opaque and we always composite an object on to the image so far.
 # image_so_far will always have opacity=1 I think, so we can probably
@@ -444,13 +384,12 @@ def run_svi(X, args):
     batches = all_batches[0:-1]
 
     def per_param_optim_args(module_name, param_name, tags):
-        lr = 1e2 if param_name.startswith('baseline') else 1e-4
-        return {'lr': lr}
+        return {'lr': 1e-4}
 
     svi = SVI(dynair.model, dynair.guide,
               optim.Adam(per_param_optim_args),
               loss='ELBO',
-              trace_graph=True)
+              trace_graph=False) # We don't have discrete choices.
 
     for i in range(5000):
 
@@ -467,21 +406,21 @@ def run_svi(X, args):
             test_batch = torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
             n = test_batch.size(0)
 
-            frames, ws, ii, extra_frames, extra_ws, extra_ii = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
+            frames, ws, extra_frames, extra_ws = [latent_seq_to_tensor(x) for x in dynair.infer(test_batch, 15)]
 
             for k in range(n):
-                out = overlay_window_outlines_conditionally(dynair, frames[k], ws[k], ii[k])
+                out = overlay_window_outlines(dynair, frames[k], ws[k])
                 vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
-                out = overlay_window_outlines_conditionally(dynair, extra_frames[k], extra_ws[k], extra_ii[k])
+                out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
-            #print('Saving parameters...')
+            print('Saving parameters...')
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
-    print('\nDone')
+
 
 
 def load_data():

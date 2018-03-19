@@ -87,15 +87,6 @@ class ZGatedTransition(nn.Module):
         return z_mean, z_sd
 
 
-class ITransition(nn.Module):
-    def __init__(self, i_size, w_size, z_size, hid_size):
-        super(ITransition, self).__init__()
-        in_size = w_size + z_size
-        self.mlp = MLP(in_size, [hid_size, i_size], nn.ReLU)
-
-    def forward(self, w_prev, z_prev):
-        out = self.mlp(torch.cat((w_prev, z_prev), 1))
-        return sigmoid(out)
 
 # TODO: What would make a good network arch. for this task. (i.e.
 # Locating an object given a hint about where to look and what to look
@@ -107,48 +98,24 @@ class ITransition(nn.Module):
 # to position the first window, from which we determine the position
 # more accurately.
 
-class ParamIW(nn.Module):
-    def __init__(self, embed_hids, hids, x_size, i_size, w_size, z_size):
-        super(ParamIW, self).__init__()
-        self.embed = MLP(x_size, embed_hids, nn.ReLU, True)
-        self.col_widths = [i_size, w_size, w_size]
+class ParamW(nn.Module):
+    def __init__(self, x_hids, hids, x_size, w_size, z_size):
+        super(ParamW, self).__init__()
+        self.col_widths = [w_size, w_size]
+        self.x_mlp = MLP(x_size, x_hids, nn.ReLU, True)
+        in_size = x_hids[-1] + w_size + z_size
+        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-        # Prior MLP
-        prior_in_size = embed_hids[-1]
-        self.mlp_prior = MLP(prior_in_size, hids + [sum(self.col_widths)], nn.ReLU)
-
-        # Object continuation MLP
-        # cont_in_size = embed_hids[-1] + w_size + z_size
-        # self.mlp_cont = MLP(cont_in_size, hids + [sum(self.col_widths)], nn.ReLU)
-
-        # Dummy parameters. These won't ever move from zero.
-        # self.w_init = nn.Parameter(torch.zeros(w_size))
-        # self.z_init = nn.Parameter(torch.zeros(z_size))
-
-    def forward(self, x, i_prev, w_prev, z_prev):
-        batch_size = x.size(0)
-        x_flat = x.contiguous().view(batch_size, -1)
-        x_embed = self.embed(x_flat)
-
-        # TODO: Here we apply the prior and continuation nets to all
-        # data points in the batch. Try partitioning the batch and
-        # applying conditionally.
-        out_prior = self.mlp_prior(x_embed)
-        # w_prev_arg = self.w_init.expand(batch_size, -1)
-        # z_prev_arg = self.z_init.expand(batch_size, -1))
-        #out_cont = self.mlp_cont(x_embed, 1)
-        #out = _if(i_prev, out_cont, out_prior)
-
-        cols = split_at(out_prior, self.col_widths)
-        i_ps = sigmoid(cols[0])
-        w_mean = cols[1]
-        w_sd = softplus(cols[2])
-        return i_ps, w_mean, w_sd
-
-def _if(cond, cons, alt):
-    return cond * cons + (1 - cond) * alt
-
-
+    def forward(self, x, w_prev, z_prev):
+        # This use of contiguous is necessary for cpu/gpu with PyTorch
+        # 0.3. From 0.4 it no longer appears necessary.
+        x_flat = x.contiguous().view(x.size(0), -1)
+        x_hid = self.x_mlp(x_flat)
+        out = self.mlp(torch.cat((x_hid, w_prev, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
 
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
@@ -186,24 +153,10 @@ class ParamY(nn.Module):
         return y_mean, y_sd
 
 
-
-class Baseline(nn.Module):
-    def __init__(self, seq_length):
-        super(Baseline, self).__init__()
-        self.seq_length = seq_length
-        self.mlp = nn.Linear(seq_length, 1)
-
-    def forward(self, cur_step):
-        one_hot = Variable(torch.zeros(self.seq_length), requires_grad=False)
-        one_hot[cur_step] = 1
-        one_hot = one_hot.type_as(self.mlp.weight)
-        return self.mlp(one_hot)
-
 class DecodeObj(nn.Module):
-    def __init__(self, hids, z_size, num_chan, window_size, alpha_bias=0.):
+    def __init__(self, hids, z_size, num_chan, window_size):
         super(DecodeObj, self).__init__()
         self.mlp = MLP(z_size, hids + [num_chan * window_size**2], nn.ReLU)
-        self.mlp.seq[4].bias.data[(num_chan - 1) * window_size**2:] += alpha_bias
 
     def forward(self, z):
         return sigmoid(self.mlp(z))
