@@ -45,8 +45,6 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
-        self.ctx_size = 50
-
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
@@ -75,10 +73,7 @@ class DynAIR(nn.Module):
 
 
         # Parameters.
-        self.ctx_init = nn.Parameter(torch.zeros(self.ctx_size))
-        nn.init.normal(self.ctx_init, std=0.01)
-
-        # self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
+        self.guide_z_init = nn.Parameter(torch.zeros(self.z_size))
 
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
@@ -89,10 +84,8 @@ class DynAIR(nn.Module):
 
         # Guide modules:
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.ctx_size, self.z_size)
-        self.iw_param = mod.ParamIW([500, 200], [200], self.x_size, self.ctx_size, self.i_size, self.w_size)
-
-        self.update_ctx = mod.UpdateCtx([100, 100], self.ctx_size, self.i_size, self.w_size, self.z_size)
+        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
+        self.iw_param = mod.ParamIW([500, 200], [200], self.x_size, self.i_size, self.w_size, self.z_size)
 
         self.baseline = mod.Baseline(self.seq_length)
 
@@ -246,9 +239,9 @@ class DynAIR(nn.Module):
             zs = []
             ws = []
 
+            z_prev = self.ng_zeros(batch_size, self.z_size)
+            w_prev = self.ng_zeros(batch_size, self.w_size)
             i_prev = self.ng_zeros(batch_size, self.i_size)
-
-            ctx = batch_expand(self.ctx_init, batch_size)
 
             for t in range(self.seq_length):
 
@@ -256,25 +249,20 @@ class DynAIR(nn.Module):
                 # then ignore it when not sampling i for the current
                 # step.
                 x = batch[:, t]
-                i_ps, w_mean, w_sd = self.iw_param(x, ctx)
+                i_ps, w_mean, w_sd = self.iw_param(x, i_prev, w_prev, z_prev)
 
                 i = self.guide_i(t, i_ps, i_prev)
 
                 with poutine.scale(None, i.squeeze(-1)):
                     w = self.guide_w(t, w_mean, w_sd)
                     x_att = self.image_to_window(w, x)
-                    z = self.guide_z(t, i, w, x_att, ctx)
-
-                # TODO: Are we throwing useful information away by
-                # only incorporating sampled values (and not the
-                # computed parameters) into the context?
-                ctx = self.update_ctx(ctx, i, w, z)
+                    z = self.guide_z(t, i, i_prev, w, x_att, z_prev)
 
                 ii.append(i)
                 ws.append(w)
                 zs.append(z)
 
-                i_prev = i
+                z_prev, w_prev, i_prev = z, w, i
 
         return ws, zs, y, ii
 
@@ -296,9 +284,10 @@ class DynAIR(nn.Module):
     def guide_w(self, t, w_mean, w_sd):
         return pyro.sample('w_{}'.format(t), dist.Normal(w_mean, w_sd, extra_event_dims=1))
 
-    def guide_z(self, t, i, w, x_att, ctx):
+    def guide_z(self, t, i, i_prev, w, x_att, z_prev):
         batch_size = i.size(0)
-        z_mean, z_sd = self.z_param(w, x_att, ctx)
+        z_prev_arg = _if(i_prev, z_prev, batch_expand(self.guide_z_init, batch_size))
+        z_mean, z_sd = self.z_param(w, x_att, z_prev_arg)
         return pyro.sample('z_{}'.format(t), dist.Normal(z_mean, z_sd, extra_event_dims=1))
 
 
@@ -365,8 +354,7 @@ class DynAIR(nn.Module):
 
     def is_i_step(self, t):
         # Controls when i is sampled.
-        #return (t % 4 == 0) or (t >= (self.seq_length-2))
-        return True
+        return True#(t % 4 == 0) or (t >= (self.seq_length-2))
 
 
 def _if(cond, cons, alt):
