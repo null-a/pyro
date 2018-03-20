@@ -30,7 +30,7 @@ class DynAIR(nn.Module):
         # thing.
         self.use_cuda = use_cuda
 
-        self.seq_length = 20
+        self.seq_length = 5
 
         self.max_obj_count = 3
 
@@ -114,7 +114,8 @@ class DynAIR(nn.Module):
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
 
-        y = self.model_sample_y(batch_size)
+        with poutine.scale(None, Variable(torch.ones(batch_size))):
+            y = self.model_sample_y(batch_size)
         bkg = self.decode_bkg(y)
 
         frames = []
@@ -549,9 +550,19 @@ if __name__ == '__main__':
 
     # Test model by sampling:
     # dynair = DynAIR()
-    # dummy_data = Variable(torch.ones(3, 20, 4, 50, 50))
+    # dummy_data = Variable(torch.ones(3, 5, 4, 50, 50))
     # obj_counts = torch.LongTensor([1, 2, 3])
     # frames, ws, zs = dynair.model(dummy_data, obj_counts, do_likelihood=False)
+
+    # Debugging log_pdf masking:
+    # trace = poutine.trace(dynair.model).get_trace(dummy_data, obj_counts)
+    # trace.log_pdf()
+    # for name, site in trace.nodes.items():
+    #     print(name)
+    #     if site['type'] == 'sample':
+    #         print(site['log_pdf'])
+
+
 
     # print(len(frames))
     # print(frames[0].size())
