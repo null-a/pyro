@@ -32,7 +32,7 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
-        self.max_obj_count = 3
+        self.max_obj_count = 1
 
         self.image_size = 50
         self.num_chan = 4
@@ -328,9 +328,9 @@ class DynAIR(nn.Module):
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
-    def infer(self, batch, num_extra_frames=0):
-        trace = poutine.trace(self.guide).get_trace(batch)
-        frames, _, _ = poutine.replay(self.model, trace)(batch, do_likelihood=False)
+    def infer(self, batch, obj_counts, num_extra_frames=0):
+        trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
+        frames, _, _ = poutine.replay(self.model, trace)(batch, obj_counts, do_likelihood=False)
         ws, zs, y = trace.nodes['_RETURN']['value']
 
         # TODO: Reinstate extrapolation code. (Re-use model code.)
@@ -431,16 +431,18 @@ def over(a, b):
 
 
 
-def run_svi(X, args):
-    vis = visdom.Visdom()
+def run_svi(data, args):
 
+    vis = visdom.Visdom()
     dynair = DynAIR(use_cuda=args.cuda)
 
-    # TODO: Revert to using mini-batches.
     # Don't train on the last batch.
-    num_batches = 1
-    #all_batches = X.chunk(num_batches + 1)
-    batches = [X]#all_batches[0:-1]
+    num_batches = 39
+    X, obj_counts = data
+    all_x_batches = X.chunk(num_batches + 1)
+    x_batches = all_x_batches[0:-1]
+    all_obj_counts_batches = obj_counts.chunk(num_batches + 1)
+    obj_counts_batches = all_obj_counts_batches[0:-1]
 
     def per_param_optim_args(module_name, param_name, tags):
         return {'lr': 1e-4}
@@ -452,26 +454,27 @@ def run_svi(X, args):
 
     for i in range(5000):
 
-        for j, batch in enumerate(batches):
-            loss = svi.step(batch)
+        for j, (x_batch, obj_counts_batch) in enumerate(zip(x_batches, obj_counts_batches)):
+            loss = svi.step(x_batch, obj_counts_batch)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
-            elbo = -loss / (dynair.seq_length * batch.size(0)) # elbo per datum, per frame
+            elbo = -loss / (dynair.seq_length * x_batch.size(0)) # elbo per datum, per frame
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
 
         if (i+1) % 1 == 0:
             ix = 40
             # Produce visualization for train & test data points.
-            test_batch = X[0:2] # torch.cat((X[ix:ix+1], all_batches[-1][0:1]))
-            n = test_batch.size(0)
+            test_x_batch = torch.cat((X[ix:ix+1], all_x_batches[-1][0:1]))
+            test_obj_counts_batch = torch.cat((obj_counts[ix:ix+1], all_obj_counts_batches[-1][0:1]))
+            n = test_x_batch.size(0)
 
-            frames, ws, extra_frames, extra_ws = dynair.infer(test_batch, 15)
+            frames, ws, extra_frames, extra_ws = dynair.infer(test_x_batch, test_obj_counts_batch, 15)
             frames = frames_to_tensor(frames)
             ws = latents_to_tensor(ws)
 
             for k in range(n):
-                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k])
-                vis.images(frames_to_rgb_list(test_batch[k].cpu()), nrow=10)
+                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], 1)
+                vis.images(frames_to_rgb_list(test_x_batch[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
                 # out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
@@ -490,7 +493,8 @@ def load_data():
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
-    return X
+    obj_counts = Variable(torch.ones(X.size(0)).long())
+    return X, obj_counts
 
 def frames_to_rgb_list(frames):
     return frames[:, 0:3].data.numpy().tolist()
@@ -618,12 +622,12 @@ if __name__ == '__main__':
     # # print(torch.stack(zs))
     # print(y)
 
-    #X = load_data()
-    X = Variable(torch.zeros(10, 20, 4, 50, 50))
-    nn.init.normal(X)
+    data = load_data()
+    # X = Variable(torch.zeros(1000, 20, 4, 50, 50))
+    # nn.init.normal(X)
     if args.cuda:
-        X = X.cuda()
-    run_svi(X, args)
+        data = tuple(x.cuda() for x in data)
+    run_svi(data, args)
 
     # ====================
     # Code to visualise latent variables and extrapolated frames.
