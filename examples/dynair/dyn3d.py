@@ -123,7 +123,7 @@ class DynAIR(nn.Module):
 
         for t in range(self.seq_length):
 
-            # To begin with, we'll sample max_obj_counts objects for
+            # To begin with, we'll sample max_obj_count objects for
             # all sequences, and throw out the extra objects. We can
             # consider refining this to avoid this unnecessary
             # sampling later.
