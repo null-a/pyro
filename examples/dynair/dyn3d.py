@@ -481,7 +481,7 @@ def run_svi(data, args):
                 # vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
-            print('Saving parameters...')
+            #print('Saving parameters...')
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
 
