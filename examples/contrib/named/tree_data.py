@@ -3,14 +3,12 @@ from __future__ import absolute_import, division, print_function
 import argparse
 
 import torch
-from torch.autograd import Variable
 
 import pyro
 import pyro.distributions as dist
 from pyro.contrib import named
 from pyro.infer import SVI
 from pyro.optim import Adam
-from pyro.util import ng_ones, ng_zeros
 
 # This is a linear mixed-effects model over arbitrary json-like data.
 # Data can be a number, a list of data, or a dict with data values.
@@ -24,25 +22,25 @@ from pyro.util import ng_ones, ng_zeros
 
 def model(data):
     latent = named.Object("latent")
-    latent.z.sample_(dist.normal, ng_zeros(1), ng_ones(1))
+    latent.z.sample_(dist.Normal(torch.zeros(1), torch.ones(1)))
     model_recurse(data, latent)
 
 
 def model_recurse(data, latent):
-    if isinstance(data, Variable):
-        latent.x.observe_(dist.normal, data, latent.z, ng_ones(1))
+    if torch.is_tensor(data):
+        latent.x.observe_(dist.Normal(latent.z, torch.ones(1)), data)
     elif isinstance(data, list):
-        latent.prior_sigma.param_(Variable(torch.ones(1), requires_grad=True))
+        latent.prior_sigma.param_(torch.ones(1, requires_grad=True))
         latent.list = named.List()
         for data_i in data:
             latent_i = latent.list.add()
-            latent_i.z.sample_(dist.normal, latent.z, latent.prior_sigma)
+            latent_i.z.sample_(dist.Normal(latent.z, latent.prior_sigma))
             model_recurse(data_i, latent_i)
     elif isinstance(data, dict):
-        latent.prior_sigma.param_(Variable(torch.ones(1), requires_grad=True))
+        latent.prior_sigma.param_(torch.ones(1, requires_grad=True))
         latent.dict = named.Dict()
         for key, value in data.items():
-            latent.dict[key].z.sample_(dist.normal, latent.z, latent.prior_sigma)
+            latent.dict[key].z.sample_(dist.Normal(latent.z, latent.prior_sigma))
             model_recurse(value, latent.dict[key])
     else:
         raise TypeError("Unsupported type {}".format(type(data)))
@@ -53,10 +51,10 @@ def guide(data):
 
 
 def guide_recurse(data, latent):
-    latent.post_mu.param_(Variable(torch.zeros(1), requires_grad=True))
-    latent.post_sigma.param_(Variable(torch.ones(1), requires_grad=True))
-    latent.z.sample_(dist.normal, latent.post_mu, latent.post_sigma)
-    if isinstance(data, Variable):
+    latent.post_mu.param_(torch.zeros(1, requires_grad=True))
+    latent.post_sigma.param_(torch.ones(1, requires_grad=True))
+    latent.z.sample_(dist.Normal(latent.post_mu, latent.post_sigma))
+    if torch.is_tensor(data):
         pass
     elif isinstance(data, list):
         latent.list = named.List()
@@ -75,7 +73,7 @@ def main(args):
     inference = SVI(model, guide, optim, loss="ELBO")
 
     # Data is an arbitrary json-like structure with tensors at leaves.
-    one = ng_ones(1)
+    one = torch.ones(1)
     data = {
         "foo": one,
         "bar": [0 * one, 1 * one, 2 * one],
@@ -96,7 +94,7 @@ def main(args):
 
     print('Parameters:')
     for name in sorted(pyro.get_param_store().get_all_param_names()):
-        print('{} = {}'.format(name, pyro.param(name).data.cpu().numpy()))
+        print('{} = {}'.format(name, pyro.param(name).detach().cpu().numpy()))
 
 
 if __name__ == '__main__':

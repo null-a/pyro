@@ -1,14 +1,12 @@
 from __future__ import absolute_import, division, print_function
 
 import torch
-from torch.autograd import Variable
 
-from pyro.distributions.distribution import Distribution
-from pyro.distributions.util import copy_docs_from, broadcast_shape
+from pyro.distributions.torch_distribution import TorchDistribution
+from pyro.distributions.util import broadcast_shape
 
 
-@copy_docs_from(Distribution)
-class Delta(Distribution):
+class Delta(TorchDistribution):
     """
     Degenerate discrete distribution (a single point).
 
@@ -16,23 +14,21 @@ class Delta(Distribution):
     its support. Delta distribution parameterized by a random choice should not
     be used with MCMC based inference, as doing so produces incorrect results.
 
-    :param torch.autograd.Variable v: The single support element.
+    :param torch.Tensor v: The single support element.
     """
-    enumerable = True
+    has_rsample = True
+    has_enumerate_support = True
+    event_shape = torch.Size()
 
     def __init__(self, v, *args, **kwargs):
         self.v = v
-        if not isinstance(self.v, Variable):
-            self.v = Variable(self.v)
         super(Delta, self).__init__(*args, **kwargs)
 
+    @property
     def batch_shape(self):
         return self.v.size()
 
-    def event_shape(self):
-        return torch.Size()
-
-    def sample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):
         shape = sample_shape + self.v.size()
         return self.v.expand(shape)
 
@@ -45,9 +41,17 @@ class Delta(Distribution):
         """
         Returns the delta distribution's support, as a tensor along the first dimension.
 
-        :param v: torch variable where each element of the tensor represents the point at
+        :param v: torch tensor where each element of the tensor represents the point at
             which the delta distribution is concentrated.
-        :return: torch variable enumerating the support of the delta distribution.
-        :rtype: torch.autograd.Variable.
+        :return: torch tensor enumerating the support of the delta distribution.
+        :rtype: torch.Tensor.
         """
-        return Variable(self.v.data.unsqueeze(0))
+        return torch.tensor(self.v.data.unsqueeze(0))
+
+    @property
+    def mean(self):
+        return self.v
+
+    @property
+    def variance(self):
+        return torch.zeros_like(self.v)

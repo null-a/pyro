@@ -1,85 +1,105 @@
 from __future__ import absolute_import, division, print_function
 
-from torch.autograd import Variable
-import torch.nn as nn
+import torch
+from torch.distributions import constraints
+from torch.nn import Parameter
 
 import pyro
 import pyro.distributions as dist
+from pyro.distributions.util import matrix_triangular_solve_compat
+
+from .model import Model
 
 
-class GPRegression(nn.Module):
+class GPRegression(Model):
     """
-    Gaussian Process regression module.
+    Gaussian Process Regression module.
 
-    :param torch.autograd.Variable X: A tensor of inputs.
-    :param torch.autograd.Variable y: A tensor of output data for training.
-    :param pyro.gp.kernels.Kernel kernel: A Pyro kernel object.
-    :param torch.Tensor noise: An optional noise tensor.
-    :param dict priors: A mapping from kernel parameter's names to priors.
+    References
+
+    [1] `Gaussian Processes for Machine Learning`,
+    Carl E. Rasmussen, Christopher K. I. Williams
+
+    :param torch.Tensor X: A 1D or 2D tensor of input data for training.
+    :param torch.Tensor y: A 1D or 2D tensor of output data for training.
+    :param pyro.contrib.gp.kernels.Kernel kernel: A Pyro kernel object.
+    :param torch.Tensor noise: An optional noise parameter.
     """
-    def __init__(self, X, y, kernel, noise=None, priors=None):
+    def __init__(self, X, y, kernel, noise=None):
         super(GPRegression, self).__init__()
-        self.X = X
-        self.y = y
-        self.input_dim = X.size(0)
+        self.set_data(X, y)
         self.kernel = kernel
-        # TODO: define noise as a Likelihood (another nn.Module beside kernel),
-        # then we can train/set prior to it
+
         if noise is None:
-            self.noise = Variable(X.data.new([1]))
-        else:
-            self.noise = Variable(noise)
-        self.priors = priors
-        if priors is None:
-            self.priors = {}
+            noise = self.X.data.new([1])
+        self.noise = Parameter(noise)
+        self.set_constraint("noise", constraints.positive)
 
     def model(self):
-        kernel_fn = pyro.random_module(self.kernel.name, self.kernel, self.priors)
-        kernel = kernel_fn()
-        K = kernel(self.X) + self.noise.repeat(self.input_dim).diag()
-        zero_loc = Variable(K.data.new([0]).expand(self.input_dim))
-        pyro.sample("f", dist.MultivariateNormal(zero_loc, K), obs=self.y)
+        self.set_mode("model")
+
+        kernel = self.kernel
+        noise = self.get_param("noise")
+
+        K = kernel(self.X) + noise.expand(self.X.size(0)).diag()
+        # correct event_shape for y
+        y_t = self.y.t() if self.y.dim() == 2 else self.y
+        zero_loc = y_t.new([0]).expand(y_t.size())
+        pyro.sample("y", dist.MultivariateNormal(zero_loc, K).reshape(
+            extra_event_dims=zero_loc.dim() - 1), obs=y_t)
 
     def guide(self):
-        guide_priors = {}
-        for p in self.priors:
-            p_MAP_name = pyro.param_with_module_name(self.kernel.name, p) + "_MAP"
-            # init params by their prior means
-            p_MAP = pyro.param(p_MAP_name, Variable(self.priors[p].analytic_mean().data.clone(),
-                                                    requires_grad=True))
-            guide_priors[p] = dist.Delta(p_MAP)
-        kernel_fn = pyro.random_module(self.kernel.name, self.kernel, guide_priors)
-        return kernel_fn()
+        self.set_mode("guide")
 
-    def forward(self, Z):
+        kernel = self.kernel
+        noise = self.get_param("noise")
+
+        return kernel, noise
+
+    def forward(self, Xnew, full_cov=False, noiseless=True):
+        r"""
+        Computes the parameters of :math:`p(y^*|Xnew) \sim N(\text{loc}, \text{cov})`
+        w.r.t. the new input :math:`Xnew`. In case output data is a 2D tensor of shape
+        :math:`N \times D`, :math:`loc` is also a 2D tensor of shape :math:`N \times D`.
+        Covariance matrix :math:`cov` is always a 2D tensor of shape :math:`N \times N`.
+
+        :param torch.Tensor Xnew: A 1D or 2D tensor.
+        :param bool full_cov: Predicts full covariance matrix or just its diagonal.
+        :param bool noiseless: Includes noise in the prediction or not.
+        :return: loc and covariance matrix of :math:`p(y^*|Xnew)`.
+        :rtype: torch.Tensor and torch.Tensor
         """
-        Compute the parameters of `p(y|Z) ~ N(loc, covariance_matrix)`
-            w.r.t. the new input Z.
+        self._check_Xnew_shape(Xnew, self.X)
 
-        :param torch.autograd.Variable Z: A 2D tensor.
-        :return: loc and covariance matrix of p(y|Z).
-        :rtype: torch.autograd.Variable and torch.autograd.Variable
-        """
-        if Z.dim() == 2 and self.X.size(1) != Z.size(1):
-            assert ValueError("Train data and test data should have the same feature sizes.")
-        if Z.dim() == 1:
-            Z = Z.unsqueeze(1)
-        kernel = self.guide()
-        K = kernel(self.X) + self.noise.repeat(self.input_dim).diag()
+        kernel, noise = self.guide()
 
-        K_xz = kernel(self.X, Z)
-        K_zx = K_xz.t()
-        K_zz = kernel(Z)
+        Kff = kernel(self.X)
+        Kff = Kff + noise.expand(Kff.size(0)).diag()
+        Kfs = kernel(self.X, Xnew)
+        Lff = Kff.potrf(upper=False)
 
-        # TODO Use torch.trtrs or torch.potrs when it supports cuda tensors
-        # and is differentiable.
-        # Refer to Gaussian processes for machine learning main gpr algorithm
-        # L = torch.potrf(K, upper=False)
-        # alpha = torch.potrs(L, self.y, upper=False)
+        y = self.y.unsqueeze(1) if self.y.dim() == 1 else self.y
+        pack = torch.cat((y, Kfs), dim=1)
+        Lffinv_pack = matrix_triangular_solve_compat(pack, Lff, upper=False)
+        Lffinv_y = Lffinv_pack[:, :y.size(1)].view(self.y.size())
+        # W = inv(Lff) @ Kfs
+        W = Lffinv_pack[:, y.size(1):]
 
-        K_inv = K.inverse()
-        alpha = K_inv.matmul(self.y)
-        loc = K_zx.matmul(alpha)
-        covariance_matrix = K_zz - K_zx.matmul(K_inv.matmul(K_xz))
+        # loc = Kfs.T @ inv(Kff) @ y
+        loc = W.t().matmul(Lffinv_y)
 
-        return loc, covariance_matrix
+        # cov = Kss - Ksf @ inv(Kff) @ Kfs
+        if full_cov:
+            Kss = kernel(Xnew)
+            if not noiseless:
+                Kss = Kss + noise.expand(Xnew.size(0)).diag()
+            Qss = W.t().matmul(W)
+            cov = Kss - Qss
+        else:
+            Kssdiag = kernel(Xnew, diag=True)
+            if not noiseless:
+                Kssdiag = Kssdiag + noise.expand(Xnew.size(0))
+            Qssdiag = (W ** 2).sum(dim=0)
+            cov = Kssdiag - Qssdiag
+
+        return loc, cov

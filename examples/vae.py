@@ -3,13 +3,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import visdom
-from torch.autograd import Variable
 
 import pyro
 import pyro.distributions as dist
 from pyro.infer import SVI
 from pyro.optim import Adam
-from pyro.util import ng_zeros, ng_ones
 from utils.vae_plots import plot_llk, mnist_test_tsne, plot_vae_samples
 from utils.mnist_cached import MNISTCached as MNIST
 from utils.mnist_cached import setup_data_loaders
@@ -87,43 +85,45 @@ class VAE(nn.Module):
     def model(self, x):
         # register PyTorch module `decoder` with Pyro
         pyro.module("decoder", self.decoder)
-        # setup hyperparameters for prior p(z)
-        # the type_as ensures we get cuda Tensors if x is on gpu
-        z_mu = ng_zeros([x.size(0), self.z_dim], type_as=x.data)
-        z_sigma = ng_ones([x.size(0), self.z_dim], type_as=x.data)
-        # sample from prior (value will be sampled by guide when computing the ELBO)
-        z = pyro.sample("latent", dist.normal, z_mu, z_sigma)
-        # decode the latent code z
-        mu_img = self.decoder.forward(z)
-        # score against actual images
-        pyro.sample("obs", dist.bernoulli, mu_img, obs=x.view(-1, 784))
+        with pyro.iarange("data", x.size(0)):
+            # setup hyperparameters for prior p(z)
+            # the type_as ensures we get cuda Tensors if x is on gpu
+            z_mu = torch.zeros([x.size(0), self.z_dim]).type_as(x)
+            z_sigma = torch.ones([x.size(0), self.z_dim]).type_as(x)
+            # sample from prior (value will be sampled by guide when computing the ELBO)
+            z = pyro.sample("latent", dist.Normal(z_mu, z_sigma).reshape(extra_event_dims=1))
+            # decode the latent code z
+            mu_img = self.decoder.forward(z)
+            # score against actual images
+            pyro.sample("obs", dist.Bernoulli(mu_img).reshape(extra_event_dims=1), obs=x.view(-1, 784))
 
     # define the guide (i.e. variational distribution) q(z|x)
     def guide(self, x):
         # register PyTorch module `encoder` with Pyro
         pyro.module("encoder", self.encoder)
-        # use the encoder to get the parameters used to define q(z|x)
-        z_mu, z_sigma = self.encoder.forward(x)
-        # sample the latent code z
-        pyro.sample("latent", dist.normal, z_mu, z_sigma)
+        with pyro.iarange("data", x.size(0)):
+            # use the encoder to get the parameters used to define q(z|x)
+            z_mu, z_sigma = self.encoder.forward(x)
+            # sample the latent code z
+            pyro.sample("latent", dist.Normal(z_mu, z_sigma).reshape(extra_event_dims=1))
 
     # define a helper function for reconstructing images
     def reconstruct_img(self, x):
         # encode image x
         z_mu, z_sigma = self.encoder(x)
         # sample in latent space
-        z = dist.normal(z_mu, z_sigma)
+        z = dist.Normal(z_mu, z_sigma).sample()
         # decode the image (note we don't sample in image space)
         mu_img = self.decoder(z)
         return mu_img
 
     def model_sample(self, batch_size=1):
         # sample the handwriting style from the constant prior distribution
-        prior_mu = Variable(torch.zeros([batch_size, self.z_dim]))
-        prior_sigma = Variable(torch.ones([batch_size, self.z_dim]))
-        zs = pyro.sample("z", dist.normal, prior_mu, prior_sigma)
+        prior_mu = torch.zeros([batch_size, self.z_dim])
+        prior_sigma = torch.ones([batch_size, self.z_dim])
+        zs = pyro.sample("z", dist.Normal(prior_mu, prior_sigma))
         mu = self.decoder.forward(zs)
-        xs = pyro.sample("sample", dist.bernoulli, mu)
+        xs = pyro.sample("sample", dist.Bernoulli(mu))
         return xs, mu
 
 
@@ -158,8 +158,6 @@ def main(args):
             # if on GPU put mini-batch into CUDA memory
             if args.cuda:
                 x = x.cuda()
-            # wrap the mini-batch in a PyTorch Variable
-            x = Variable(x)
             # do ELBO gradient and accumulate loss
             epoch_loss += svi.step(x)
 
@@ -177,8 +175,6 @@ def main(args):
                 # if on GPU put mini-batch into CUDA memory
                 if args.cuda:
                     x = x.cuda()
-                # wrap the mini-batch in a PyTorch Variable
-                x = Variable(x)
                 # compute ELBO estimate and accumulate loss
                 test_loss += svi.evaluate_loss(x)
 
@@ -191,9 +187,9 @@ def main(args):
                         for index in reco_indices:
                             test_img = x[index, :]
                             reco_img = vae.reconstruct_img(test_img)
-                            vis.image(test_img.contiguous().view(28, 28).data.cpu().numpy(),
+                            vis.image(test_img.contiguous().view(28, 28).detach().cpu().numpy(),
                                       opts={'caption': 'test image'})
-                            vis.image(reco_img.contiguous().view(28, 28).data.cpu().numpy(),
+                            vis.image(reco_img.contiguous().view(28, 28).detach().cpu().numpy(),
                                       opts={'caption': 'reconstructed image'})
 
             # report test diagnostics

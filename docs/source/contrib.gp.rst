@@ -9,6 +9,39 @@ See the `Gaussian Processes tutorial <http://pyro.ai/examples/gp.html>`_ for an 
     :show-inheritance:
     :member-order: bysource
 
+Models
+------
+
+.. automodule:: pyro.contrib.gp.models.model
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.models.gpr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.models.sgpr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.models.vgp
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.models.svgp
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 Kernels
 -------
 
@@ -18,16 +51,55 @@ Kernels
     :show-inheritance:
     :member-order: bysource
 
-.. automodule:: pyro.contrib.gp.kernels.rbf
+.. automodule:: pyro.contrib.gp.kernels.brownian
     :members:
     :undoc-members:
     :show-inheritance:
     :member-order: bysource
 
-Models
-------
+.. automodule:: pyro.contrib.gp.kernels.dot_product
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
 
-.. automodule:: pyro.contrib.gp.models.gpr
+.. automodule:: pyro.contrib.gp.kernels.isotropic
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.kernels.periodic
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.kernels.static
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+Likelihoods
+-----------
+
+.. automodule:: pyro.contrib.gp.likelihoods.likelihood
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.likelihoods.gaussian
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+Util
+____
+
+.. automodule:: pyro.contrib.gp.util
     :members:
     :undoc-members:
     :show-inheritance:

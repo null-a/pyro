@@ -1,23 +1,90 @@
 from __future__ import absolute_import, division, print_function
 
 import functools
+import numbers
+import random
 import warnings
 
 import graphviz
-import numpy as np
-
+from six.moves import zip_longest
 import torch
+from torch.nn import Parameter
 
-from pyro.distributions.util import broadcast_shape
+from pyro.params import _PYRO_PARAM_STORE
 from pyro.poutine.poutine import _PYRO_STACK
 from pyro.poutine.util import site_is_subsample
-from pyro.shim import is_volatile
-from torch.autograd import Variable
-from torch.nn import Parameter
+
+
+def validate_message(msg):
+    """
+    Asserts that the message has a valid format.
+    :returns: None
+    """
+    assert msg["type"] in ("sample", "param"), \
+        "{} is an invalid site type, how did that get there?".format(msg["type"])
+
+
+def default_process_message(msg):
+    """
+    Default method for processing messages in inference.
+    :param msg: a message to be processed
+    :returns: None
+    """
+    validate_message(msg)
+    if msg["type"] == "sample":
+        fn, args, kwargs = \
+            msg["fn"], msg["args"], msg["kwargs"]
+
+        # msg["done"] enforces the guarantee in the poutine execution model
+        # that a site's non-effectful primary computation should only be executed once:
+        # if the site already has a stored return value,
+        # don't reexecute the function at the site,
+        # and do any side effects using the stored return value.
+        if msg["done"]:
+            return msg
+
+        if msg["is_observed"]:
+            assert msg["value"] is not None
+            val = msg["value"]
+        else:
+            val = fn(*args, **kwargs)
+
+        # after fn has been called, update msg to prevent it from being called again.
+        msg["done"] = True
+        msg["value"] = val
+    elif msg["type"] == "param":
+        name, args, kwargs = \
+            msg["name"], msg["args"], msg["kwargs"]
+
+        # msg["done"] enforces the guarantee in the poutine execution model
+        # that a site's non-effectful primary computation should only be executed once:
+        # if the site already has a stored return value,
+        # don't reexecute the function at the site,
+        # and do any side effects using the stored return value.
+        if msg["done"]:
+            return msg
+
+        ret = _PYRO_PARAM_STORE.get_param(name, *args, **kwargs)
+
+        # after the param store has been queried, update msg["done"]
+        # to prevent it from being queried again.
+        msg["done"] = True
+        msg["value"] = ret
+    else:
+        assert False
+    return None
+
+
+def am_i_wrapped():
+    """
+    Checks whether the current computation is wrapped in a poutine.
+    :returns: bool
+    """
+    return len(_PYRO_STACK) > 0
 
 
 def detach_iterable(iterable):
-    if isinstance(iterable, Variable):
+    if torch.is_tensor(iterable):
         return iterable.detach()
     else:
         return [var.detach() for var in iterable]
@@ -33,12 +100,6 @@ def _dict_to_tuple(d):
         return tuple([(k, _dict_to_tuple(d[k])) for k in sorted(d.keys())])
     else:
         return d
-
-
-def get_tensor_data(t):
-    if isinstance(t, Variable):
-        return t.data
-    return t
 
 
 def memoize(fn):
@@ -60,13 +121,17 @@ def memoize(fn):
 
 def set_rng_seed(rng_seed):
     """
-    Sets seeds of torch, numpy, and torch.cuda (if available).
+    Sets seeds of torch and torch.cuda (if available).
     :param int rng_seed: The seed value.
     """
     torch.manual_seed(rng_seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(rng_seed)
-    np.random.seed(rng_seed)
+    random.seed(rng_seed)
+    try:
+        import numpy as np
+
+        np.random.seed(rng_seed)
+    except ImportError:
+        pass
 
 
 def ones(*args, **kwargs):
@@ -95,34 +160,45 @@ def ng_ones(*args, **kwargs):
     """
     :param torch.Tensor type_as: optional argument for tensor type
 
-    A convenience function for Variable(torch.ones(...), requires_grad=False)
+    A convenience function for torch.ones(..., requires_grad=False)
     """
     retype = kwargs.pop('type_as', None)
     p_tensor = torch.ones(*args, **kwargs)
-    return Variable(p_tensor if retype is None else p_tensor.type_as(retype), requires_grad=False)
+    return torch.tensor(p_tensor if retype is None else p_tensor.type_as(retype), requires_grad=False)
 
 
 def ng_zeros(*args, **kwargs):
     """
     :param torch.Tensor type_as: optional argument for tensor type
 
-    A convenience function for Variable(torch.ones(...), requires_grad=False)
+    A convenience function for torch.ones(..., requires_grad=False)
     """
     retype = kwargs.pop('type_as', None)
     p_tensor = torch.zeros(*args, **kwargs)
-    return Variable(p_tensor if retype is None else p_tensor.type_as(retype), requires_grad=False)
+    return torch.tensor(p_tensor if retype is None else p_tensor.type_as(retype), requires_grad=False)
 
 
-def log_sum_exp(vecs):
-    n = len(vecs.size())
-    if n == 1:
-        vecs = vecs.view(1, -1)
-    _, idx = torch.max(vecs, 1)
-    max_score = torch.index_select(vecs, 1, idx.view(-1))
-    ret = max_score + torch.log(torch.sum(torch.exp(vecs - max_score.expand_as(vecs))))
-    if n == 1:
-        return ret.view(-1)
-    return ret
+def is_nan(x):
+    """
+    A convenient function to check if a Tensor contains all nan; also works with numbers
+    """
+    if isinstance(x, numbers.Number):
+        return x != x
+    return (x != x).all()
+
+
+def is_inf(x):
+    """
+    A convenient function to check if a Tensor contains all inf; also works with numbers
+    """
+    if isinstance(x, numbers.Number):
+        return x == float('inf')
+    return (x == float('inf')).all()
+
+
+def log_sum_exp(tensor):
+    max_val = tensor.max(dim=-1)[0]
+    return max_val + (tensor - max_val.unsqueeze(-1)).exp().sum(dim=-1).log()
 
 
 def zero_grads(tensors):
@@ -131,11 +207,7 @@ def zero_grads(tensors):
     """
     for p in tensors:
         if p.grad is not None:
-            if is_volatile(p.grad):
-                p.grad.data.zero_()
-            else:
-                data = p.grad.data
-                p.grad = Variable(data.new().resize_as_(data).zero_())
+            p.grad = p.grad.new(p.shape).zero_()
 
 
 def apply_stack(initial_msg):
@@ -158,134 +230,28 @@ def apply_stack(initial_msg):
     # msg is used to pass information up and down the stack
     msg = initial_msg
 
-    # first, gather all information necessary to apply the stack to this site
-    for frame in reversed(stack):
-        msg = frame._prepare_site(msg)
-
+    counter = 0
     # go until time to stop?
     for frame in stack:
-        assert msg["type"] in ("sample", "param"), \
-            "{} is an invalid site type, how did that get there?".format(msg["type"])
+        validate_message(msg)
 
-        msg["value"] = getattr(frame, "_pyro_{}".format(msg["type"]))(msg)
+        counter = counter + 1
+
+        frame._process_message(msg)
 
         if msg["stop"]:
             break
 
-    return msg
+    default_process_message(msg)
 
+    for frame in reversed(stack[0:counter]):
+        frame._postprocess_message(msg)
 
-class NonlocalExit(Exception):
-    """
-    Exception for exiting nonlocally from poutine execution.
+    cont = msg["continuation"]
+    if cont is not None:
+        cont(msg)
 
-    Used by poutine.EscapePoutine to return site information.
-    """
-    def __init__(self, site, *args, **kwargs):
-        """
-        :param site: message at a pyro site
-
-        constructor.  Just stores the input site.
-        """
-        super(NonlocalExit, self).__init__(*args, **kwargs)
-        self.site = site
-
-
-def enum_extend(trace, msg, num_samples=None):
-    """
-    :param trace: a partial trace
-    :param msg: the message at a pyro primitive site
-    :param num_samples: maximum number of extended traces to return.
-    :returns: a list of traces, copies of input trace with one extra site
-
-    Utility function to copy and extend a trace with sites based on the input site
-    whose values are enumerated from the support of the input site's distribution.
-
-    Used for exact inference and integrating out discrete variables.
-    """
-    if num_samples is None:
-        num_samples = -1
-
-    # Batched .enumerate_support() assumes batched values are independent.
-    shape = broadcast_shape(msg["fn"].shape(*msg["args"], **msg["kwargs"]),
-                            msg["value"].size())
-    batch_dims = len(shape) - msg['fn'].event_dim(*msg["args"], **msg["kwargs"])
-    batch_shape = shape[:batch_dims]
-    is_batched = any(size > 1 for size in batch_shape)
-    inside_iarange = any(frame.vectorized for frame in msg["cond_indep_stack"])
-    if is_batched and not inside_iarange:
-        raise ValueError(
-                "Tried to enumerate a batched pyro.sample site '{}' outside of a pyro.iarange. "
-                "To fix, either enclose in a pyro.iarange, or avoid batching.".format(msg["name"]))
-
-    extended_traces = []
-    for i, s in enumerate(msg["fn"].enumerate_support(*msg["args"], **msg["kwargs"])):
-        if i > num_samples and num_samples >= 0:
-            break
-        msg_copy = msg.copy()
-        msg_copy.update(value=s)
-        tr_cp = trace.copy()
-        tr_cp.add_node(msg["name"], **msg_copy)
-        extended_traces.append(tr_cp)
-    return extended_traces
-
-
-def mc_extend(trace, msg, num_samples=None):
-    """
-    :param trace: a partial trace
-    :param msg: the message at a pyro primitive site
-    :param num_samples: maximum number of extended traces to return.
-    :returns: a list of traces, copies of input trace with one extra site
-
-    Utility function to copy and extend a trace with sites based on the input site
-    whose values are sampled from the input site's function.
-
-    Used for Monte Carlo marginalization of individual sample sites.
-    """
-    if num_samples is None:
-        num_samples = 1
-
-    extended_traces = []
-    for i in range(num_samples):
-        msg_copy = msg.copy()
-        msg_copy["value"] = msg_copy["fn"](*msg_copy["args"], **msg_copy["kwargs"])
-        tr_cp = trace.copy()
-        tr_cp.add_node(msg_copy["name"], **msg_copy)
-        extended_traces.append(tr_cp)
-    return extended_traces
-
-
-def discrete_escape(trace, msg):
-    """
-    :param trace: a partial trace
-    :param msg: the message at a pyro primitive site
-    :returns: boolean decision value
-
-    Utility function that checks if a sample site is discrete and not already in a trace.
-
-    Used by EscapePoutine to decide whether to do a nonlocal exit at a site.
-    Subroutine for integrating out discrete variables for variance reduction.
-    """
-    return (msg["type"] == "sample") and \
-        (not msg["is_observed"]) and \
-        (msg["name"] not in trace) and \
-        (getattr(msg["fn"], "enumerable", False))
-
-
-def all_escape(trace, msg):
-    """
-    :param trace: a partial trace
-    :param msg: the message at a pyro primitive site
-    :returns: boolean decision value
-
-    Utility function that checks if a site is not already in a trace.
-
-    Used by EscapePoutine to decide whether to do a nonlocal exit at a site.
-    Subroutine for approximately integrating out variables for variance reduction.
-    """
-    return (msg["type"] == "sample") and \
-        (not msg["is_observed"]) and \
-        (msg["name"] not in trace)
+    return None
 
 
 def save_visualization(trace, graph_output):
@@ -376,6 +342,48 @@ def check_model_guide_match(model_trace, guide_trace):
                      if type(site["fn"]).__name__ == "_Subsample")
     if not (guide_vars <= model_vars):
         warnings.warn("Found iarange statements in guide but not model: {}".format(guide_vars - model_vars))
+
+
+def check_site_shape(site, max_iarange_nesting):
+    actual_shape = list(site["batch_log_pdf"].shape)
+
+    # Compute expected shape.
+    expected_shape = []
+    for f in site["cond_indep_stack"]:
+        if f.dim is not None:
+            # Use the specified iarange dimension, which counts from the right.
+            assert f.dim < 0
+            if len(expected_shape) < -f.dim:
+                expected_shape = [None] * (-f.dim - len(expected_shape)) + expected_shape
+            if expected_shape[f.dim] is not None:
+                raise ValueError('\n  '.join([
+                    'at site "{}" within iarange("", dim={}), dim collision'.format(site["name"], f.name, f.dim),
+                    'Try setting dim arg in other iaranges.']))
+            expected_shape[f.dim] = f.size
+    expected_shape = [1 if e is None else e for e in expected_shape]
+
+    # Check for iarange stack overflow.
+    if len(expected_shape) > max_iarange_nesting:
+        raise ValueError('\n  '.join([
+            'at site "{}", iarange stack overflow'.format(site["name"]),
+            'Try increasing max_iarange_nesting to at least {}'.format(len(expected_shape))]))
+
+    # Ignore dimensions left of max_iarange_nesting.
+    if max_iarange_nesting < len(actual_shape):
+        actual_shape = actual_shape[len(actual_shape) - max_iarange_nesting:]
+
+    # Check for incorrect iarange placement on the right of max_iarange_nesting.
+    for actual_size, expected_size in zip_longest(reversed(actual_shape), reversed(expected_shape), fillvalue=1):
+        if expected_size != -1 and expected_size != actual_size:
+            raise ValueError('\n  '.join([
+                'at site "{}", invalid log_prob shape'.format(site["name"]),
+                'Expected {}, actual {}'.format(expected_shape, actual_shape),
+                'Try one of the following fixes:',
+                '- enclose the batched tensor in a with iarange(...): context',
+                '- .reshape(extra_event_dims=...) the distribution being sampled',
+                '- .permute() data dimensions']))
+
+    # TODO Check parallel dimensions on the left of max_iarange_nesting.
 
 
 def deep_getattr(obj, name):

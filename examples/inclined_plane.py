@@ -4,7 +4,6 @@ import argparse
 
 import numpy as np
 import torch
-from torch.autograd import Variable
 
 import pyro
 from pyro.distributions import Uniform, Normal
@@ -32,16 +31,16 @@ time_measurement_sigma = 0.02  # observation noise in seconds (known quantity)
 # in steps of size dt, and optionally includes measurement noise
 
 def simulate(mu, length=2.0, phi=np.pi / 6.0, dt=0.005, noise_sigma=None):
-    T = Variable(torch.zeros(1))
-    velocity = Variable(torch.zeros(1))
-    displacement = Variable(torch.zeros(1))
-    acceleration = Variable(torch.Tensor([little_g * np.sin(phi)])) - \
-        Variable(torch.Tensor([little_g * np.cos(phi)])) * mu
+    T = torch.zeros(1)
+    velocity = torch.zeros(1)
+    displacement = torch.zeros(1)
+    acceleration = torch.tensor([little_g * np.sin(phi)]) - \
+        torch.tensor([little_g * np.cos(phi)]) * mu
 
-    if acceleration.data[0] <= 0.0:             # the box doesn't slide if the friction is too large
-        return Variable(torch.Tensor([1.0e5]))  # return a very large time instead of infinity
+    if acceleration.item() <= 0.0:             # the box doesn't slide if the friction is too large
+        return torch.tensor([1.0e5])  # return a very large time instead of infinity
 
-    while displacement.data[0] < length:  # otherwise slide to the end of the inclined plane
+    while displacement.item() < length:  # otherwise slide to the end of the inclined plane
         displacement += velocity * dt
         velocity += acceleration * dt
         T += dt
@@ -49,7 +48,7 @@ def simulate(mu, length=2.0, phi=np.pi / 6.0, dt=0.005, noise_sigma=None):
     if noise_sigma is None:
         return T
     else:
-        return T + Variable(noise_sigma * torch.randn(1))
+        return T + noise_sigma * torch.randn(1)
 
 
 # analytic formula that the simulator above is computing via
@@ -65,19 +64,19 @@ def analytic_T(mu, length=2.0, phi=np.pi / 6.0):
 print("generating simulated data using the true coefficient of friction %.3f" % mu0)
 N_obs = 20
 torch.manual_seed(2)
-observed_data = torch.cat([simulate(Variable(torch.Tensor([mu0])), noise_sigma=time_measurement_sigma)
+observed_data = torch.cat([simulate(torch.tensor([mu0]), noise_sigma=time_measurement_sigma)
                            for _ in range(N_obs)])
-observed_mean = np.mean([T.data[0] for T in observed_data])
+observed_mean = np.mean([T.item() for T in observed_data])
 
 
 # define model with uniform prior on mu and gaussian noise on the descent time
 def model(observed_data):
-    mu_prior = Uniform(Variable(torch.zeros(1)), Variable(torch.ones(1)))
+    mu_prior = Uniform(torch.zeros(1), torch.ones(1))
     mu = pyro.sample("mu", mu_prior)
 
     def observe_T(T_obs, obs_name):
         T_simulated = simulate(mu)
-        T_obs_dist = Normal(T_simulated, Variable(torch.Tensor([time_measurement_sigma])))
+        T_obs_dist = Normal(T_simulated, torch.tensor([time_measurement_sigma]))
         pyro.observe(obs_name, T_obs_dist, T_obs)
 
     for i, T_obs in enumerate(observed_data):
@@ -100,8 +99,8 @@ def main(args):
     posterior_std_dev = torch.std(torch.cat(posterior_samples), 0)
 
     # report results
-    inferred_mu = posterior_mean.data[0]
-    inferred_mu_uncertainty = posterior_std_dev.data[0]
+    inferred_mu = posterior_mean.item()
+    inferred_mu_uncertainty = posterior_std_dev.item()
     print("the coefficient of friction inferred by pyro is %.3f +- %.3f" %
           (inferred_mu, inferred_mu_uncertainty))
 
@@ -111,9 +110,9 @@ def main(args):
     # but will be systematically off from the third number
     print("the mean observed descent time in the dataset is: %.4f seconds" % observed_mean)
     print("the (forward) simulated descent time for the inferred (mean) mu is: %.4f seconds" %
-          simulate(posterior_mean).data[0])
+          simulate(posterior_mean).item())
     print(("disregarding measurement noise, elementary calculus gives the descent time\n" +
-           "for the inferred (mean) mu as: %.4f seconds") % analytic_T(posterior_mean.data[0]))
+           "for the inferred (mean) mu as: %.4f seconds") % analytic_T(posterior_mean.item()))
 
     """
     ################## EXERCISE ###################
