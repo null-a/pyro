@@ -114,42 +114,44 @@ class DynAIR(nn.Module):
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
 
-        y = self.model_sample_y(batch_size)
-        bkg = self.decode_bkg(y)
-
         frames = []
         zs = mk_matrix(self.seq_length, self.max_obj_count)
         ws = mk_matrix(self.seq_length, self.max_obj_count)
 
-        for t in range(self.seq_length):
+        with pyro.iarange('data'):
 
-            # To begin with, we'll sample max_obj_count objects for
-            # all sequences, and throw out the extra objects. We can
-            # consider refining this to avoid this unnecessary
-            # sampling later.
+            y = self.model_sample_y(batch_size)
+            bkg = self.decode_bkg(y)
 
-            for i in range(self.max_obj_count):
+            for t in range(self.seq_length):
 
-                mask = Variable((obj_counts > i).float())
+                # To begin with, we'll sample max_obj_count objects for
+                # all sequences, and throw out the extra objects. We can
+                # consider refining this to avoid this unnecessary
+                # sampling later.
 
-                with poutine.scale(None, mask):
-                    if t > 0:
-                        z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
-                    else:
-                        z = self.model_sample_z_0(i, batch_size)
-                        w = self.model_sample_w_0(i, batch_size)
+                for i in range(self.max_obj_count):
 
-                # Zero out unused samples here. This isn't necessary
-                # for correctness, but might help spot any mistakes
-                # elsewhere.
-                zs[t][i] = z * mask.view(-1, 1)
-                ws[t][i] = w * mask.view(-1, 1)
+                    mask = Variable((obj_counts > i).float())
 
-            frame_mean = self.model_emission(zs[t], ws[t], bkg, obj_counts)
-            frames.append(frame_mean)
+                    with poutine.scale(None, mask):
+                        if t > 0:
+                            z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
+                        else:
+                            z = self.model_sample_z_0(i, batch_size)
+                            w = self.model_sample_w_0(i, batch_size)
 
-            if do_likelihood:
-                self.likelihood(t, frame_mean, batch[:, t])
+                    # Zero out unused samples here. This isn't necessary
+                    # for correctness, but might help spot any mistakes
+                    # elsewhere.
+                    zs[t][i] = z * mask.view(-1, 1)
+                    ws[t][i] = w * mask.view(-1, 1)
+
+                frame_mean = self.model_emission(zs[t], ws[t], bkg, obj_counts)
+                frames.append(frame_mean)
+
+                if do_likelihood:
+                    self.likelihood(t, frame_mean, batch[:, t])
 
         return frames, ws, zs
 
@@ -232,11 +234,6 @@ class DynAIR(nn.Module):
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
 
-        # NOTE: Here we're guiding y based on the contents of the
-        # first frame only.
-        # TODO: Implement a better guide for y.
-        y = self.guide_y(batch[:, 0])
-
         ws = mk_matrix(self.seq_length, self.max_obj_count)
         zs = mk_matrix(self.seq_length, self.max_obj_count)
 
@@ -244,35 +241,43 @@ class DynAIR(nn.Module):
         z_init_i = batch_expand(self.guide_z_init_i, batch_size)
         w_t_init = batch_expand(self.guide_w_t_init, batch_size)
 
-        for t in range(self.seq_length):
 
-            x = batch[:, t]
-            x_embed = self.x_embed(x)
-            rnn_hid_prev = None
+        with pyro.iarange('data'):
 
-            # As in the model, we'll sample max_obj_count objects for
-            # all sequences, and ignore the ones we don't need.
+            # NOTE: Here we're guiding y based on the contents of the
+            # first frame only.
+            # TODO: Implement a better guide for y.
+            y = self.guide_y(batch[:, 0])
 
-            for i in range(self.max_obj_count):
+            for t in range(self.seq_length):
 
-                w_prev_i = ws[t-1][i] if t > 0 else w_init_i
-                z_prev_i = zs[t-1][i] if t > 0 else z_init_i
-                w_t_prev = ws[t][i-1] if i > 0 else w_t_init
+                x = batch[:, t]
+                x_embed = self.x_embed(x)
+                rnn_hid_prev = None
 
-                mask = Variable((obj_counts > i).float())
+                # As in the model, we'll sample max_obj_count objects for
+                # all sequences, and ignore the ones we don't need.
 
-                with poutine.scale(None, mask):
-                    w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
-                    x_att = self.image_to_window(w, x)
-                    z = self.guide_z(t, i, w, x_att, z_prev_i)
+                for i in range(self.max_obj_count):
 
-                # Zero out unused samples here. This isn't necessary
-                # for correctness, but might help spot any mistakes
-                # elsewhere.
-                ws[t][i] = w * mask.view(-1, 1)
-                zs[t][i] = z * mask.view(-1, 1)
+                    w_prev_i = ws[t-1][i] if t > 0 else w_init_i
+                    z_prev_i = zs[t-1][i] if t > 0 else z_init_i
+                    w_t_prev = ws[t][i-1] if i > 0 else w_t_init
 
-                rnn_hid_prev = rnn_hid
+                    mask = Variable((obj_counts > i).float())
+
+                    with poutine.scale(None, mask):
+                        w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+                        x_att = self.image_to_window(w, x)
+                        z = self.guide_z(t, i, w, x_att, z_prev_i)
+
+                    # Zero out unused samples here. This isn't necessary
+                    # for correctness, but might help spot any mistakes
+                    # elsewhere.
+                    ws[t][i] = w * mask.view(-1, 1)
+                    zs[t][i] = z * mask.view(-1, 1)
+
+                    rnn_hid_prev = rnn_hid
 
         return ws, zs, y
 
