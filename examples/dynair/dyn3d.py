@@ -159,35 +159,35 @@ class DynAIR(nn.Module):
         # TODO: Using a normal here isn't very sensible since the data
         # is in [0, 1]. Do something better.
         pyro.sample('x_{}'.format(t),
-                    dist.Normal(frame_mean, frame_sd, extra_event_dims=3),
+                    dist.Normal(frame_mean, frame_sd).reshape(extra_event_dims=3),
                     obs=obs)
 
     def model_sample_y(self, batch_size):
         return pyro.sample('y', dist.Normal(self.y_prior_mean.expand(batch_size, -1),
-                                            self.y_prior_sd.expand(batch_size, -1),
-                                            extra_event_dims=1))
+                                            self.y_prior_sd.expand(batch_size, -1))
+                                .reshape(extra_event_dims=1))
 
     def model_sample_w_0(self, i, batch_size):
         return pyro.sample('w_0_{}'.format(i),
                            dist.Normal(
                                self.w_0_prior_mean.expand(batch_size, -1),
-                               self.w_0_prior_sd.expand(batch_size, -1),
-                               extra_event_dims=1))
+                               self.w_0_prior_sd.expand(batch_size, -1))
+                           .reshape(extra_event_dims=1))
 
     def model_sample_w(self, t, i, w_mean, w_sd):
         return pyro.sample('w_{}_{}'.format(t, i),
-                           dist.Normal(w_mean, w_sd, extra_event_dims=1))
+                           dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
 
     def model_sample_z_0(self, i, batch_size):
         return pyro.sample('z_0_{}'.format(i),
                            dist.Normal(
                                self.z_0_prior_mean.expand(batch_size, -1),
-                               self.z_0_prior_sd.expand(batch_size, -1),
-                               extra_event_dims=1))
+                               self.z_0_prior_sd.expand(batch_size, -1))
+                           .reshape(extra_event_dims=1))
 
     def model_sample_z(self, t, i, z_mean, z_sd):
         return pyro.sample('z_{}_{}'.format(t, i),
-                           dist.Normal(z_mean, z_sd, extra_event_dims=1))
+                           dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def model_transition(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
@@ -267,16 +267,16 @@ class DynAIR(nn.Module):
 
     def guide_y(self, x0):
         y_mean, y_sd = self.y_param(x0)
-        return pyro.sample('y', dist.Normal(y_mean, y_sd, extra_event_dims=1))
+        return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
 
     def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev):
         w_mean, w_sd, rnn_hid = self.w_param(x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
-        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd, extra_event_dims=1))
+        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, rnn_hid
 
     def guide_z(self, t, i, w, x_att, z_prev_i):
         z_mean, z_sd = self.z_param(w, x_att, z_prev_i)
-        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd, extra_event_dims=1))
+        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def image_to_window(self, w, images):
         n = w.size(0)
