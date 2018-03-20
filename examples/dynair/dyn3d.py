@@ -218,7 +218,7 @@ class DynAIR(nn.Module):
 
     # ==GUIDE==================================================
 
-    def guide(self, batch, *args):
+    def guide(self, batch, obj_counts, *args):
 
         # I'd rather register model/guide modules in their methods,
         # but this is easier.
@@ -229,13 +229,16 @@ class DynAIR(nn.Module):
         batch_size = batch.size(0)
         assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
 
+        assert_size(obj_counts, (batch_size,))
+        assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
+
         # NOTE: Here we're guiding y based on the contents of the
         # first frame only.
         # TODO: Implement a better guide for y.
         y = self.guide_y(batch[:, 0])
 
-        ws = mk_matrix(self.seq_length, self.num_obj)
-        zs = mk_matrix(self.seq_length, self.num_obj)
+        ws = mk_matrix(self.seq_length, self.max_obj_count)
+        zs = mk_matrix(self.seq_length, self.max_obj_count)
 
         w_init_i = batch_expand(self.guide_w_init_i, batch_size)
         z_init_i = batch_expand(self.guide_z_init_i, batch_size)
@@ -247,19 +250,28 @@ class DynAIR(nn.Module):
             x_embed = self.x_embed(x)
             rnn_hid_prev = None
 
-            for i in range(self.num_obj):
+            # As in the model, we'll sample max_obj_count objects for
+            # all sequences, and ignore the ones we don't need.
+
+            for i in range(self.max_obj_count):
 
                 w_prev_i = ws[t-1][i] if t > 0 else w_init_i
                 z_prev_i = zs[t-1][i] if t > 0 else z_init_i
                 w_t_prev = ws[t][i-1] if i > 0 else w_t_init
 
-                w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+                mask = Variable((obj_counts > i).float())
 
-                x_att = self.image_to_window(w, x)
-                z = self.guide_z(t, i, w, x_att, z_prev_i)
+                with poutine.scale(None, mask):
+                    w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+                    x_att = self.image_to_window(w, x)
+                    z = self.guide_z(t, i, w, x_att, z_prev_i)
 
-                ws[t][i] = w
-                zs[t][i] = z
+                # Zero out unused samples here. This isn't necessary
+                # for correctness, but might help spot any mistakes
+                # elsewhere.
+                ws[t][i] = w * mask.view(-1, 1)
+                zs[t][i] = z * mask.view(-1, 1)
+
                 rnn_hid_prev = rnn_hid
 
         return ws, zs, y
