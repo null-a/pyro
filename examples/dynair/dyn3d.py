@@ -32,7 +32,7 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
-        self.num_obj = 3
+        self.max_obj_count = 3
 
         self.image_size = 50
         self.num_chan = 4
@@ -109,28 +109,43 @@ class DynAIR(nn.Module):
 
 
     # TODO: This do_likelihood business is unpleasant.
-    def model(self, batch, do_likelihood=True):
-
+    def model(self, batch, obj_counts, do_likelihood=True):
         batch_size = batch.size(0)
+        assert_size(obj_counts, (batch_size,))
+        assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
 
         y = self.model_sample_y(batch_size)
         bkg = self.decode_bkg(y)
 
         frames = []
-        zs = mk_matrix(self.seq_length, self.num_obj)
-        ws = mk_matrix(self.seq_length, self.num_obj)
+        zs = mk_matrix(self.seq_length, self.max_obj_count)
+        ws = mk_matrix(self.seq_length, self.max_obj_count)
 
         for t in range(self.seq_length):
-            for i in range(self.num_obj):
-                if t > 0:
-                    z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
-                else:
-                    z = self.model_sample_z_0(i, batch_size)
-                    w = self.model_sample_w_0(i, batch_size)
-                zs[t][i] = z
-                ws[t][i] = w
 
-            frame_mean = self.model_emission(zs[t], ws[t], bkg)
+            # To begin with, we'll sample max_obj_counts objects for
+            # all sequences, and throw out the extra objects. We can
+            # consider refining this to avoid this unnecessary
+            # sampling later.
+
+            for i in range(self.max_obj_count):
+
+                mask = Variable((obj_counts > i).float())
+
+                with poutine.scale(None, mask):
+                    if t > 0:
+                        z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
+                    else:
+                        z = self.model_sample_z_0(i, batch_size)
+                        w = self.model_sample_w_0(i, batch_size)
+
+                # Zero out unused samples here. This isn't necessary
+                # for correctness, but might help spot any mistakes
+                # elsewhere.
+                zs[t][i] = z * mask.view(-1, 1)
+                ws[t][i] = w * mask.view(-1, 1)
+
+            frame_mean = self.model_emission(zs[t], ws[t], bkg, obj_counts)
             frames.append(frame_mean)
 
             if do_likelihood:
@@ -183,13 +198,14 @@ class DynAIR(nn.Module):
         w = self.model_sample_w(t, i, w_mean, w_sd)
         return z, w
 
-    def model_emission(self, zs, ws, bkg):
+    def model_emission(self, zs, ws, bkg, obj_counts):
         #batch_size = z.size(0)
         #assert z.size(0) == w.size(0)
         acc = bkg
-        for z, w in zip(zs, ws):
+        for i, (z, w) in enumerate(zip(zs, ws)):
             assert z.size(0) == w.size(0)
-            x_att = self.decode_obj(z)
+            mask = Variable((obj_counts > i).float())
+            x_att = self.decode_obj(z) * mask.view(-1, 1)
             acc = over(self.window_to_image(w, x_att), acc)
         return acc
 
@@ -494,10 +510,10 @@ def overlay_window_outlines_conditionally(dynair, frame, z_where, color, ii):
                 over(draw_window_outline(dynair, z_where, color) * presence_mask,
                      frame))
 
-def overlay_multiple_window_outlines(dynair, frame, ws):
+def overlay_multiple_window_outlines(dynair, frame, ws, obj_count):
     acc = frame
-    for i, w in enumerate(ws):
-        acc = overlay_window_outlines(dynair, acc, w, ['red', 'green', 'blue'][i % 3])
+    for i in range(obj_count):
+        acc = overlay_window_outlines(dynair, acc, ws[i], ['red', 'green', 'blue'][i % 3])
     return acc
 
 def frames_to_tensor(arr):
@@ -533,17 +549,19 @@ if __name__ == '__main__':
 
     # Test model by sampling:
     # dynair = DynAIR()
-    # dummy_data = Variable(torch.ones(1, 14, 4, 32, 32))
-    # frames, ws, zs = dynair.model(dummy_data, do_likelihood=False)
+    # dummy_data = Variable(torch.ones(3, 20, 4, 50, 50))
+    # obj_counts = torch.LongTensor([1, 2, 3])
+    # frames, ws, zs = dynair.model(dummy_data, obj_counts, do_likelihood=False)
+
     # print(len(frames))
     # print(frames[0].size())
-
     # print(len(ws))
     # print(ws[0].size())
-
     # print(len(zs))
     # print(zs[0].size())
     # # print(zs)
+
+    # Visualize prior samples with matplotlib:
     # from matplotlib import pyplot as plt
     # for frame in frames:
     #     print(frame[0].data.size())
@@ -551,6 +569,17 @@ if __name__ == '__main__':
     #     plt.imshow(img)
     #     plt.show()
     # input('press a key...')
+
+    # Visualise prior samples using visdom:
+    # vis = visdom.Visdom()
+    # frames = frames_to_tensor(frames)
+    # ws = latents_to_tensor(ws)
+
+    # ix = 2
+    # out = overlay_multiple_window_outlines(dynair, frames[ix], ws[ix], obj_counts[ix])
+    # vis.images(frames_to_rgb_list(out), nrow=10)
+
+
 
     # Test guide:
     #(batch, seq, channel, w, h)
