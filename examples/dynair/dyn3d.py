@@ -473,7 +473,7 @@ def run_svi(data, args):
             ws = latents_to_tensor(ws)
 
             for k in range(n):
-                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], 1)
+                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], test_obj_counts_batch[k])
                 vis.images(frames_to_rgb_list(test_x_batch[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
