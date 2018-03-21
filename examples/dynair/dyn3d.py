@@ -32,7 +32,7 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
-        self.max_obj_count = 1
+        self.max_obj_count = 3
 
         self.image_size = 50
         self.num_chan = 4
@@ -488,13 +488,14 @@ def run_svi(data, args):
 
 
 def load_data():
-    X_np = np.load('cube2.npz')['X']
-    #print(X_np.shape)
+    data = np.load('./data/multi_obj.npz')
+    X_np = data['X']
+    # print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
-    obj_counts = Variable(torch.ones(X.size(0)).long())
-    return X, obj_counts
+    Y = torch.from_numpy(data['Y'].astype(np.uint8))
+    return X, Y
 
 def frames_to_rgb_list(frames):
     return frames[:, 0:3].data.numpy().tolist()

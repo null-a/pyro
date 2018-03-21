@@ -6,6 +6,7 @@ examples/processed
 examples/results
 examples/raw
 examples/dmm/*.pkl
+examples/dynair/data
 processed
 raw
 
