@@ -487,7 +487,7 @@ def run_svi(data, args):
 
 
 
-def load_data():
+def load_data(use_cuda):
     data = np.load('./data/multi_obj.npz')
     X_np = data['X']
     # print(X_np.shape)
@@ -495,6 +495,9 @@ def load_data():
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
+    if use_cuda:
+        X = X.cuda()
+        Y = Y.cuda()
     return X, Y
 
 def frames_to_rgb_list(frames):
@@ -623,11 +626,9 @@ if __name__ == '__main__':
     # # print(torch.stack(zs))
     # print(y)
 
-    data = load_data()
+    data = load_data(args.cuda)
     # X = Variable(torch.zeros(1000, 20, 4, 50, 50))
     # nn.init.normal(X)
-    if args.cuda:
-        data = tuple(x.cuda() for x in data)
     run_svi(data, args)
 
     # ====================
