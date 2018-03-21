@@ -431,18 +431,27 @@ def over(a, b):
 
 
 
+def split(t, batch_size, num_train_batches, num_test_batches):
+    n = t.size(0)
+    assert batch_size > 0
+    assert num_train_batches >= 0
+    assert num_test_batches >= 0
+    assert n % batch_size == 0
+    assert batch_size * (num_train_batches + num_test_batches) == n
+    batches = t.chunk(n // batch_size)
+    train = batches[0:num_train_batches]
+    test = batches[num_train_batches:(num_train_batches+num_test_batches)]
+    return train, test
+
 def run_svi(data, args):
 
     vis = visdom.Visdom()
     dynair = DynAIR(use_cuda=args.cuda)
 
-    # Don't train on the last batch.
-    num_batches = 39
-    X, obj_counts = data
-    all_x_batches = X.chunk(num_batches + 1)
-    x_batches = all_x_batches[0:-1]
-    all_obj_counts_batches = obj_counts.chunk(num_batches + 1)
-    obj_counts_batches = all_obj_counts_batches[0:-1]
+    X, Y = data # (sequences, counts)
+    batch_size = 25
+    X_train, X_test = split(X, batch_size, 39, 1)
+    Y_train, Y_test = split(Y, batch_size, 39, 1)
 
     def per_param_optim_args(module_name, param_name, tags):
         return {'lr': 1e-4}
@@ -454,27 +463,27 @@ def run_svi(data, args):
 
     for i in range(5000):
 
-        for j, (x_batch, obj_counts_batch) in enumerate(zip(x_batches, obj_counts_batches)):
-            loss = svi.step(x_batch, obj_counts_batch)
+        for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
+            loss = svi.step(X_batch, Y_batch)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
-            elbo = -loss / (dynair.seq_length * x_batch.size(0)) # elbo per datum, per frame
+            elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
 
         if (i+1) % 1 == 0:
             ix = 40
             # Produce visualization for train & test data points.
-            test_x_batch = torch.cat((X[ix:ix+1], all_x_batches[-1][0:1]))
-            test_obj_counts_batch = torch.cat((obj_counts[ix:ix+1], all_obj_counts_batches[-1][0:1]))
-            n = test_x_batch.size(0)
+            X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
+            Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
+            n = X_vis.size(0)
 
-            frames, ws, extra_frames, extra_ws = dynair.infer(test_x_batch, test_obj_counts_batch, 15)
+            frames, ws, extra_frames, extra_ws = dynair.infer(X_vis, Y_vis, 15)
             frames = frames_to_tensor(frames)
             ws = latents_to_tensor(ws)
 
             for k in range(n):
-                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], test_obj_counts_batch[k])
-                vis.images(frames_to_rgb_list(test_x_batch[k].cpu()), nrow=10)
+                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y_vis[k])
+                vis.images(frames_to_rgb_list(X_vis[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
                 # out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
