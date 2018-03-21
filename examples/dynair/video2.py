@@ -1,3 +1,4 @@
+import random
 import glob
 import math
 import numpy as np
@@ -10,7 +11,7 @@ from PIL.ImageTransform import AffineTransform
 # montage out.tiff -tile x1 -geometry +2 out.png
 # http://www.imagemagick.org/Usage/montage/
 
-SIZE = 32
+SIZE = 50
 
 def interp1(n, a, b, t):
     return a + (b - a) * (t / float(n - 1))
@@ -50,8 +51,15 @@ def mk_s3(color):
     draw.polygon([SIZE/2, 0,  SIZE/2, SIZE, 0, SIZE/2,  SIZE, SIZE/2], fill=color)
     return img
 
-SHAPES = [mk_s1, mk_s2, mk_s3]
-COLORS = [['red', 'green'], ['green', 'blue'], ['blue', 'red']]
+# https://www.emojione.com/
+def load_sprites():
+    fns = glob.glob('/Users/paul/Downloads/emoji/*.png')
+    return [Image.open(fn).convert('RGBA').resize((SIZE, SIZE), resample=Image.BILINEAR) for fn in fns]
+
+SHAPES = load_sprites()
+
+#SHAPES = [mk_s1, mk_s2, mk_s3]
+#COLORS = [['red', 'green'], ['green', 'blue'], ['blue', 'red']]
 
 def checker_board(n):
     img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
@@ -117,13 +125,27 @@ def sample_end_points(n):
 # Object start somewhere in frame and move towards to center of the frame.
 
 def sample_end_points():
-    theta = np.random.uniform() * 2 * np.pi
-    h = np.random.uniform() * SIZE / 2
-    x = math.cos(theta) * h
-    y = math.sin(theta) * h
-    o = SIZE/2
-    return (x + o, y + o), (o, o)
 
+    # Avoid placing objects in a border of the following width. This
+    # ensures objects are not partially out of shot.
+    b = 7
+    assert SIZE == 50, 'SIZE != 50 -- border width needs tuning for this new image size.'
+
+    x0 = np.random.uniform(b, SIZE-b)
+    x1 = np.random.uniform(b, SIZE-b)
+    y0 = np.random.uniform(b, SIZE-b)
+    y1 = np.random.uniform(b, SIZE-b)
+
+    # Compute path length.
+    path_length = math.sqrt((x0-x1)**2 + (y0-y1)**2)
+    # print(path_length)
+
+    MIN_PATH_LENGTH = SIZE / 2
+
+    if path_length < MIN_PATH_LENGTH:
+        return sample_end_points()
+    else:
+        return (x0, y0), (x1, y1)
 
 def sample_shade():
     img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
@@ -165,14 +187,14 @@ def sample_natural_scene_bkg(size):
     x = np.random.randint(t)
     y = np.random.randint(t)
 
-    cropped = im.crop((x,y,x+256-t,y+256-t)).resize((size, size)).convert('RGBA')
+    cropped = im.crop((x,y,x+256-t,y+256-t)).resize((size, size), resample=Image.BILINEAR).convert('RGBA')
     #arr = img_to_arr(cropped)
     return cropped
 
 def sample_scene():
 
     # number of frames
-    n = 14
+    n = 20
 
     bkg = sample_natural_scene_bkg(SIZE)
     #bkg = checker_board(4)
@@ -181,16 +203,23 @@ def sample_scene():
     #shade = sample_shade()
 
     # Sample objects
-    num_objs = 1#np.random.randint(3) + 1
+    MAX_NUM_OBJS = 3
+    num_objs = np.random.randint(MAX_NUM_OBJS) + 1
+
+    # I choose not to use a particular sprite more than once.
+    assert len(SHAPES) == MAX_NUM_OBJS
+    sprites_ix = list(range(MAX_NUM_OBJS))
+    random.shuffle(sprites_ix)
+
     objs = []
     for i in range(num_objs):
         xy1, xy2 = sample_end_points()
         objs.append(dict(
             xy1=xy1,
             xy2=xy2,
-            shape=0,#np.random.randint(3),
-            color=0,#np.random.randint(2),
-            rotation=0#,np.random.randint(4) * 90#np.random.uniform(360)
+            shape=SHAPES[sprites_ix[i]],
+            rot_init=np.random.uniform(360),
+            rot_vel=np.random.uniform(0, 15)
         ))
     #print(objs)
 
@@ -199,9 +228,9 @@ def sample_scene():
         acc = bkg
         for obj in objs:
             x, y = interp(n, obj['xy1'], obj['xy2'], t)
-            s = SHAPES[obj['shape']](COLORS[obj['shape']][obj['color']])
-            s = rot(s, obj['rotation']) # add time dep. rotation
-            s = scale(s, 2) # add variable scale, possibly dynamic
+            s = obj['shape']
+            s = rot(s, obj['rot_init'] + obj['rot_vel'] * t)
+            s = scale(s, 4) # add variable scale, possibly dynamic
             s = position(s, x, y)
             acc = Image.alpha_composite(acc, s)
 
@@ -209,11 +238,15 @@ def sample_scene():
 
         frames.append(acc)
 
-    return frames
+    return frames, num_objs
 
 
 def sample_dataset(n):
-    return np.stack(np.stack(img_to_arr(frame) for frame in sample_scene()) for _ in range(n))
+    seqs, counts = tuple(zip(*[sample_scene() for _ in range(n)]))
+
+    seqs_arr = np.stack(np.stack(img_to_arr(frame) for frame in seq) for seq in seqs)
+    counts_arr = np.array(counts, dtype=np.int8)
+    return seqs_arr, counts_arr
 
 def img_to_arr(img):
     assert img.mode == 'RGBA'
@@ -225,7 +258,7 @@ def img_to_arr(img):
 
 
 # Save a tiff
-frames = sample_scene()
+frames, _ = sample_scene()
 save_seq(frames)
 
 # Convert a frame to correct array format for the model.
@@ -237,6 +270,7 @@ save_seq(frames)
 # plt.show()
 
 # Make a dataset
-# out = sample_dataset(1000)
-# print(out.shape)
-# np.savez_compressed('single_object_one_class_with_nat_bkg.npz', X=out)
+# seqs_arr, counts_arr = sample_dataset(1000)
+# print(seqs_arr.shape)
+# print(counts_arr)
+# np.savez_compressed('multi_obj.npz', X=seqs_arr, Y=counts_arr)
