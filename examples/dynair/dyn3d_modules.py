@@ -94,9 +94,7 @@ class EmbedX(nn.Module):
 
     def forward(self, x):
         batch_size = x.size(0)
-        # This use of contiguous may not be necessary with PyTorch >=
-        # 0.4.
-        x_flat = x.contiguous().view(batch_size, -1)
+        x_flat = x.view(batch_size, -1)
         return self.mlp(x_flat)
 
 
@@ -171,7 +169,7 @@ class ParamY(nn.Module):
 
     def forward(self, x):
         batch_size = x.size(0)
-        x_flat = x.contiguous().view(batch_size, -1)
+        x_flat = x.view(batch_size, -1)
         out = self.mlp(x_flat)
         cols = split_at(out, self.col_widths)
         y_mean = cols[0]
