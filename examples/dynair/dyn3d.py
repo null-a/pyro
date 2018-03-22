@@ -22,6 +22,8 @@ from PIL import Image, ImageDraw
 import json
 import argparse
 from collections import defaultdict
+import time
+from datetime import timedelta
 
 class DynAIR(nn.Module):
     def __init__(self, use_cuda=False):
@@ -463,7 +465,7 @@ def add_grad_hooks(module):
 
 
 def run_svi(data, args):
-
+    t0 = time.time()
     vis = visdom.Visdom()
     dynair = DynAIR(use_cuda=args.cuda)
     norms = add_grad_hooks(dynair)
@@ -488,7 +490,8 @@ def run_svi(data, args):
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
-            print('\33[2K\repoch={}, batch={}, elbo={:.2f}'.format(i, j, elbo), end='')
+            elapsed = str(timedelta(seconds=time.time()- t0))
+            print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
 
         if (i+1) % 1 == 0:
             ix = 40
