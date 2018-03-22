@@ -19,7 +19,9 @@ import dyn3d_modules as mod
 import visdom
 from PIL import Image, ImageDraw
 
+import json
 import argparse
+from collections import defaultdict
 
 class DynAIR(nn.Module):
     def __init__(self, use_cuda=False):
@@ -445,10 +447,26 @@ def split(t, batch_size, num_train_batches, num_test_batches):
     test = batches[num_train_batches:(num_train_batches+num_test_batches)]
     return train, test
 
+
+# Borrowed from:
+# https://github.com/uber/pyro/blob/5b67518dc1ded8aac59b6dfc51d0892223e8faad/tutorial/source/gmm.ipynb
+def add_grad_hooks(module):
+    norms = defaultdict(list)
+    def hook(name, grad):
+        norm = grad.norm().item()
+        # print(name)
+        # print(norm)
+        norms[name].append(norm)
+    for name, value in module.named_parameters():
+        value.register_hook(lambda grad, name=name: hook(name, grad))
+    return norms
+
+
 def run_svi(data, args):
 
     vis = visdom.Visdom()
     dynair = DynAIR(use_cuda=args.cuda)
+    norms = add_grad_hooks(dynair)
 
     X, Y = data # (sequences, counts)
     batch_size = 25
@@ -494,6 +512,11 @@ def run_svi(data, args):
         if (i+1) % 50 == 0:
             #print('Saving parameters...')
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
+
+        # Write grad norms to disk.
+        with open('grad_norms.json', 'w') as f:
+            json.dump(norms, f)
+
 
 
 
