@@ -75,9 +75,12 @@ class DynAIR(nn.Module):
 
 
         # Parameters.
-        self.guide_w_init_i = nn.Parameter(torch.zeros(self.w_size))
-        self.guide_z_init_i = nn.Parameter(torch.zeros(self.z_size))
         self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
+        self.guide_w_init = nn.ParameterList(
+            [nn.Parameter(torch.zeros(self.w_size)) for _ in range(self.max_obj_count)])
+        self.guide_z_init = nn.ParameterList(
+            [nn.Parameter(torch.zeros(self.z_size)) for _ in range(self.max_obj_count)])
+
 
         self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
 
@@ -237,10 +240,9 @@ class DynAIR(nn.Module):
         ws = mk_matrix(self.seq_length, self.max_obj_count)
         zs = mk_matrix(self.seq_length, self.max_obj_count)
 
-        w_init_i = batch_expand(self.guide_w_init_i, batch_size)
-        z_init_i = batch_expand(self.guide_z_init_i, batch_size)
+        w_init = [batch_expand(w_init_i, batch_size) for w_init_i in self.guide_w_init]
+        z_init = [batch_expand(z_init_i, batch_size) for z_init_i in self.guide_z_init]
         w_t_init = batch_expand(self.guide_w_t_init, batch_size)
-
 
         with pyro.iarange('data'):
 
@@ -260,8 +262,8 @@ class DynAIR(nn.Module):
 
                 for i in range(self.max_obj_count):
 
-                    w_prev_i = ws[t-1][i] if t > 0 else w_init_i
-                    z_prev_i = zs[t-1][i] if t > 0 else z_init_i
+                    w_prev_i = ws[t-1][i] if t > 0 else w_init[i]
+                    z_prev_i = zs[t-1][i] if t > 0 else z_init[i]
                     w_t_prev = ws[t][i-1] if i > 0 else w_t_init
 
                     mask = Variable((obj_counts > i).float())
