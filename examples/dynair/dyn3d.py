@@ -484,7 +484,8 @@ def run_svi(data, args):
         return {'lr': 1e-4}
 
     svi = SVI(dynair.model, dynair.guide,
-              optim.Adam(per_param_optim_args),
+              #optim.Adam(per_param_optim_args),
+              optim.ClippedAdam({'lr': 1e-4, 'clip_norm': 100}), # This is applied pointwise.
               loss='ELBO',
               trace_graph=False) # We don't have discrete choices.
 
