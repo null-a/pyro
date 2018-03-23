@@ -489,7 +489,7 @@ def run_svi(data, args):
               loss='ELBO',
               trace_graph=False) # We don't have discrete choices.
 
-    for i in range(5000):
+    for i in range(10**6):
 
         for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
             loss = svi.step(X_batch, Y_batch)
@@ -499,7 +499,7 @@ def run_svi(data, args):
             elapsed = str(timedelta(seconds=time.time()- t0))
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
 
-        if (i+1) % 1 == 0:
+        if i < 50 or (i+1) % 50 == 0:
             ix = 40
             # Produce visualization for train & test data points.
             X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
