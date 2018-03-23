@@ -63,10 +63,14 @@ class DynAIR(nn.Module):
         self.y_prior_sd = self.ng_ones(self.y_size)
 
         # TODO: Using a (reparameterized) uniform would probably be
-        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.3), 0, 0]))
-        self.w_0_prior_sd = Variable(torch.Tensor([0.7, 0.7, 0.7]),
         # better for the cubes data set. (Though this would makes less
         # sense if we allowed objects to begin off screen.)
+
+        # TODO: This is probably too extreme. Adjusted prior scale
+        # from {mean=log(0.3), sd=0.7} to this while attempting to
+        # make optimising for multiple objects work.
+        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.1), 0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.05, 0.7, 0.7]),
                                      requires_grad=False)
         if use_cuda:
             self.w_0_prior_mean = self.w_0_prior_mean.cuda()
