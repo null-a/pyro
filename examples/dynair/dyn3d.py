@@ -107,7 +107,7 @@ class DynAIR(nn.Module):
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
-        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=0.0)
+        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
