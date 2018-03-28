@@ -364,30 +364,25 @@ class DynAIR(nn.Module):
     def infer(self, batch, obj_counts, num_extra_frames=0):
         trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
         frames, _, _ = poutine.replay(self.model, trace)(batch, obj_counts, do_likelihood=False)
-        ws, zs, y = trace.nodes['_RETURN']['value']
+        wss, zss, y = trace.nodes['_RETURN']['value']
 
-        # TODO: Reinstate extrapolation code. (Re-use model code.)
+        bkg = self.decode_bkg(y)
 
-        #bkg = self.decode_bkg(y)
+        extra_wss = []
+        extra_zss = []
+        extra_frames = []
 
-        # extra_ws = []
-        # extra_zs = []
-        # extra_frames = []
+        ws = wss[-1]
+        zs = zss[-1]
 
-        # w = ws[-1]
-        # z = zs[-1]
+        for t in range(num_extra_frames):
+            zs, ws = self.model_transition(self.seq_length + t, obj_counts, zs, ws)
+            frame_mean = self.model_emission(zs, ws, bkg, obj_counts)
+            extra_frames.append(frame_mean)
+            extra_wss.append(ws)
+            extra_zss.append(zs)
 
-        # for t in range(num_extra_frames):
-        #     z, w = self.model_transition(num_extra_frames + t, z, w)
-        #     frame_mean = self.model_emission(z, w, bkg)
-        #     extra_frames.append(frame_mean)
-        #     extra_ws.append(w)
-        #     extra_zs.append(z)
-
-        extra_frames = None
-        extra_ws = None
-
-        return frames, ws, extra_frames, extra_ws
+        return frames, wss, extra_frames, extra_wss
 
 
 def batch_expand(t, b):
@@ -528,17 +523,20 @@ def run_svi(data, args):
             Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
             n = X_vis.size(0)
 
-            frames, ws, extra_frames, extra_ws = dynair.infer(X_vis, Y_vis, 15)
+            frames, wss, extra_frames, extra_wss = dynair.infer(X_vis, Y_vis, 15)
+
             frames = frames_to_tensor(frames)
-            ws = latents_to_tensor(ws)
+            ws = latents_to_tensor(wss)
+            extra_frames = frames_to_tensor(extra_frames)
+            extra_ws = latents_to_tensor(extra_wss)
 
             for k in range(n):
                 out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y_vis[k])
                 vis.images(frames_to_rgb_list(X_vis[k].cpu()), nrow=10)
                 vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
-                # out = overlay_window_outlines(dynair, extra_frames[k], extra_ws[k])
-                # vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+                out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y_vis[k])
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
 
         if (i+1) % 50 == 0:
             #print('Saving parameters...')
