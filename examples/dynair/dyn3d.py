@@ -50,7 +50,7 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
-        self.x_embed_size = 200
+        self.x_embed_size = 800
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -102,7 +102,7 @@ class DynAIR(nn.Module):
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW(200, [], self.x_embed_size, self.w_size, self.z_size)
-        self.x_embed = mod.EmbedX([500], self.x_embed_size, self.x_size)
+        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
 
         # Model modules:
