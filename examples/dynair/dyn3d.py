@@ -126,9 +126,9 @@ class DynAIR(nn.Module):
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
 
+        zss = []
+        wss = []
         frames = []
-        zs = mk_matrix(self.seq_length, self.max_obj_count)
-        ws = mk_matrix(self.seq_length, self.max_obj_count)
 
         with pyro.iarange('data'):
 
@@ -136,36 +136,22 @@ class DynAIR(nn.Module):
             bkg = self.decode_bkg(y)
 
             for t in range(self.seq_length):
+                if t>0:
+                    zs_prev, ws_prev = zss[-1], wss[-1]
+                else:
+                    zs_prev, ws_prev = None, None
 
-                # To begin with, we'll sample max_obj_count objects for
-                # all sequences, and throw out the extra objects. We can
-                # consider refining this to avoid this unnecessary
-                # sampling later.
+                zs, ws = self.model_transition(t, obj_counts, zs_prev, ws_prev)
+                frame_mean = self.model_emission(zs, ws, bkg, obj_counts)
 
-                for i in range(self.max_obj_count):
-
-                    mask = Variable((obj_counts > i).float())
-
-                    with poutine.scale(None, mask):
-                        if t > 0:
-                            z, w = self.model_transition(t, i, zs[t-1][i], ws[t-1][i])
-                        else:
-                            z = self.model_sample_z_0(i, batch_size)
-                            w = self.model_sample_w_0(i, batch_size)
-
-                    # Zero out unused samples here. This isn't necessary
-                    # for correctness, but might help spot any mistakes
-                    # elsewhere.
-                    zs[t][i] = z * mask.view(-1, 1)
-                    ws[t][i] = w * mask.view(-1, 1)
-
-                frame_mean = self.model_emission(zs[t], ws[t], bkg, obj_counts)
+                zss.append(zs)
+                wss.append(ws)
                 frames.append(frame_mean)
 
                 if do_likelihood:
                     self.likelihood(t, frame_mean, batch[:, t])
 
-        return frames, ws, zs
+        return frames, wss, zss
 
     def likelihood(self, t, frame_mean, obs):
         frame_sd = (self.likelihood_sd * self.ng_ones(1)).expand_as(frame_mean)
@@ -202,7 +188,7 @@ class DynAIR(nn.Module):
         return pyro.sample('z_{}_{}'.format(t, i),
                            dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
-    def model_transition(self, t, i, z_prev, w_prev):
+    def model_transition_one(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.z_size))
         assert_size(w_prev, (batch_size, self.w_size))
@@ -211,6 +197,42 @@ class DynAIR(nn.Module):
         z = self.model_sample_z(t, i, z_mean, z_sd)
         w = self.model_sample_w(t, i, w_mean, w_sd)
         return z, w
+
+    def model_transition(self, t, obj_counts, zs_prev, ws_prev):
+        batch_size = obj_counts.size(0)
+        assert_size(obj_counts, (batch_size,))
+
+        if t==0:
+            assert zs_prev is None and ws_prev is None
+        else:
+            assert t>0
+            assert len(zs_prev) == self.max_obj_count # was zs[t-1]
+            assert len(ws_prev) == self.max_obj_count # was ws[t-1]
+
+        zs = []
+        ws = []
+
+        # To begin with, we'll sample max_obj_count objects for all
+        # sequences, and throw out the extra objects. We can consider
+        # refining this to avoid this unnecessary sampling later.
+
+        for i in range(self.max_obj_count):
+
+            mask = Variable((obj_counts > i).float())
+
+            with poutine.scale(None, mask):
+                if t > 0:
+                    z, w = self.model_transition_one(t, i, zs_prev[i], ws_prev[i])
+                else:
+                    z = self.model_sample_z_0(i, batch_size)
+                    w = self.model_sample_w_0(i, batch_size)
+
+            # Zero out unused samples here. This isn't necessary for
+            # correctness, but might help spot any mistakes elsewhere.
+            zs.append(z * mask.view(-1, 1))
+            ws.append(w * mask.view(-1, 1))
+
+        return zs, ws
 
     def model_emission(self, zs, ws, bkg, obj_counts):
         #batch_size = z.size(0)
