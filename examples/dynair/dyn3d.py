@@ -32,6 +32,25 @@ class GuideArch(enum.Enum):
     isf = enum.auto()   # image-so-far
 
 
+from functools import wraps
+
+def cached(f):
+    name = f.__name__
+    @wraps(f)
+    def cached_f(self, *args, **kwargs):
+        assert len(kwargs) == 0, 'kwargs not supported'
+        key = (name,) + args
+        if key in self.cache:
+            self.cache_stats[name]['hit'] += 1
+            return self.cache[key]
+        else:
+            self.cache_stats[name]['miss'] += 1
+            out = f(self, *args)
+            self.cache[key] = out
+            return out
+    return cached_f
+
+
 class DynAIR(nn.Module):
     def __init__(self, guide_arch=GuideArch.isf, use_cuda=False):
 
@@ -146,6 +165,12 @@ class DynAIR(nn.Module):
         if use_cuda:
             self.cuda()
 
+        # TODO: Figure out why this didn't work with a
+        # WeakValueDictionary.
+        # (Since it would be nice to not have to think about clearing
+        # the cache.)
+        self.cache = dict()
+        self.cache_stats = defaultdict(lambda: dict(miss=0, hit=0))
 
 
     # TODO: This do_likelihood business is unpleasant.
@@ -178,6 +203,10 @@ class DynAIR(nn.Module):
 
                 if do_likelihood:
                     self.likelihood(t, frame_mean, batch[:, t])
+
+        # It's possible the cache will still need clearing manually,
+        # but this catches the common cases of SVI & infer.
+        self.cache.clear()
 
         return frames, wss, zss
 
