@@ -490,7 +490,7 @@ def run_svi(data, args):
     t0 = time.time()
     vis = visdom.Visdom()
     dynair = DynAIR(use_cuda=args.cuda)
-    norms = add_grad_hooks(dynair)
+    #norms = add_grad_hooks(dynair)
 
     X, Y = data # (sequences, counts)
     batch_size = 25
@@ -543,8 +543,8 @@ def run_svi(data, args):
             torch.save(dynair.state_dict(), 'dyn3d.pytorch')
 
         # Write grad norms to disk.
-        with open('grad_norms.json', 'w') as f:
-            json.dump(norms, f)
+        # with open('grad_norms.json', 'w') as f:
+        #     json.dump(norms, f)
 
 
 
