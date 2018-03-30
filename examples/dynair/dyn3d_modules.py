@@ -180,9 +180,9 @@ class ParamY(nn.Module):
 class DecodeObj(nn.Module):
     def __init__(self, hids, z_size, num_chan, window_size, alpha_bias=0.):
         super(DecodeObj, self).__init__()
-        self.mlp = MLP(z_size, hids + [num_chan * window_size**2], nn.ReLU)
+        self.mlp = MLP(z_size, hids + [(num_chan+1) * window_size**2], nn.ReLU)
         # Adjust bias of the alpha channel.
-        self.mlp.seq[-1].bias.data[((num_chan - 1) * window_size ** 2):] += alpha_bias
+        self.mlp.seq[-1].bias.data[(num_chan * window_size ** 2):] += alpha_bias
 
     def forward(self, z):
         return sigmoid(self.mlp(z))
@@ -193,9 +193,9 @@ class DecodeBkg(nn.Module):
         super(DecodeBkg, self).__init__()
         self.num_chan = num_chan
         self.image_size = image_size
-        self.mlp = MLP(y_size, hids + [(num_chan-1) * image_size**2], nn.ReLU)
+        self.mlp = MLP(y_size, hids + [num_chan * image_size**2], nn.ReLU)
 
     def forward(self, y):
         batch_size = y.size(0)
         out_flat = sigmoid(self.mlp(y))
-        return out_flat.view(batch_size, self.num_chan-1, self.image_size, self.image_size)
+        return out_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)

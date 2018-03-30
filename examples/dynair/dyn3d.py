@@ -39,7 +39,7 @@ class DynAIR(nn.Module):
         self.max_obj_count = 1
 
         self.image_size = 50
-        self.num_chan = 4
+        self.num_chan = 3 # not inc. the alpha channel
 
         self.window_size = 22
 
@@ -48,7 +48,8 @@ class DynAIR(nn.Module):
         self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
 
         self.x_size = self.num_chan * self.image_size**2
-        self.x_att_size = self.num_chan * self.window_size**2
+        self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
+        self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
         self.x_embed_size = 200
 
@@ -91,8 +92,6 @@ class DynAIR(nn.Module):
             [nn.Parameter(torch.zeros(self.z_size)) for _ in range(self.max_obj_count)])
 
 
-        self.bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
-
         # Modules
 
         # TODO: Review all arch. of all modules. (Currently just using
@@ -108,7 +107,7 @@ class DynAIR(nn.Module):
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
-        self.decode_bkg_rgb = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
+        self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
@@ -245,12 +244,6 @@ class DynAIR(nn.Module):
             acc = over(self.window_to_image(w, x_att), acc)
         return acc
 
-    def decode_bkg(self, y):
-        batch_size = y.size(0)
-        rgb = self.decode_bkg_rgb(y)
-        alpha = batch_expand(self.bkg_alpha, batch_size)
-        return torch.cat((rgb, alpha), 1)
-
 
     # ==GUIDE==================================================
 
@@ -338,12 +331,12 @@ class DynAIR(nn.Module):
     def window_to_image(self, w, windows):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
-        assert_size(windows, (n, self.x_att_size))
+        assert_size(windows, (n, self.x_obj_size))
         theta = expand_theta(w_to_theta(w))
         assert_size(theta, (n, 2, 3))
-        grid = affine_grid(theta, torch.Size((n, self.num_chan, self.image_size, self.image_size)))
+        grid = affine_grid(theta, torch.Size((n, self.num_chan+1, self.image_size, self.image_size)))
         # first arg to grid sample should be (n, c, in_w, in_h)
-        return grid_sample(windows.view(n, self.num_chan, self.window_size, self.window_size), grid)
+        return grid_sample(windows.view(n, self.num_chan+1, self.window_size, self.window_size), grid)
 
     # Helpers to create zeros/ones on cpu/gpu as appropriate.
     def ng_zeros(self, *args, **kwargs):
@@ -432,31 +425,16 @@ def assert_size(t, expected_size):
 
 
 
-# TODO: I suspect this can be simplified if the background is always
-# opaque and we always composite an object on to the image so far.
-# image_so_far will always have opacity=1 I think, so we can probably
-# avoid representing that explicity and simplify the over computation.
-# We might also be able to drop the alpha channel from everywhere
-# except the window contents, adopting the convention that alpha=1
-# where omitted.
-
-# This assumes that the number of channels is 4.
+# This assumes that the number of channels is 3 + the alpha channel.
 def over(a, b):
     # a over b
     # https://en.wikipedia.org/wiki/Alpha_compositing
     # assert a.size() == (n, 4, image_size, image_size)
-
+    assert a.size(1) == 4
+    assert b.size(1) == 3
     rgb_a = a[:, 0:3] # .size() == (n, 3, image_size, image_size)
-    rgb_b = b[:, 0:3]
     alpha_a = a[:, 3:4] # .size() == (n, 1, image_size, image_size)
-    alpha_b = b[:, 3:4]
-
-    c = alpha_b * (1 - alpha_a)
-    alpha = alpha_a + c
-    rgb = (rgb_a * alpha_a + rgb_b * c) / alpha
-
-    return torch.cat((rgb, alpha), 1)
-
+    return rgb_a * alpha_a + b * (1 - alpha_a)
 
 
 def split(t, batch_size, num_train_batches, num_test_batches):
@@ -558,6 +536,8 @@ def load_data(use_cuda):
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
     Y = torch.ones(X.size(0)).long()
+    # Drop the alpha channel.
+    X = X[:,:,0:3]
     if use_cuda:
         X = X.cuda()
         Y = Y.cuda()
