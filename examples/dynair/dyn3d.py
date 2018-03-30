@@ -36,7 +36,7 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
-        self.max_obj_count = 3
+        self.max_obj_count = 1
 
         self.image_size = 50
         self.num_chan = 4
@@ -50,7 +50,7 @@ class DynAIR(nn.Module):
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2
 
-        self.x_embed_size = 800
+        self.x_embed_size = 200
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -102,7 +102,7 @@ class DynAIR(nn.Module):
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW(200, [], self.x_embed_size, self.w_size, self.z_size)
-        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
+        self.x_embed = mod.EmbedX([500], self.x_embed_size, self.x_size)
 
 
         # Model modules:
@@ -494,8 +494,8 @@ def run_svi(data, args):
 
     X, Y = data # (sequences, counts)
     batch_size = 25
-    X_train, X_test = split(X, batch_size, 39, 1)
-    Y_train, Y_test = split(Y, batch_size, 39, 1)
+    X_train, X_test = split(X, batch_size, 20, 0)
+    Y_train, Y_test = split(Y, batch_size, 20, 0)
 
     def per_param_optim_args(module_name, param_name, tags):
         return {'lr': 1e-4}
@@ -519,8 +519,8 @@ def run_svi(data, args):
         if i < 50 or (i+1) % 50 == 0:
             ix = 40
             # Produce visualization for train & test data points.
-            X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
-            Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
+            X_vis = X[ix:ix+1]
+            Y_vis = Y[ix:ix+1]
             n = X_vis.size(0)
 
             frames, wss, extra_frames, extra_wss = dynair.infer(X_vis, Y_vis, 15)
@@ -551,13 +551,13 @@ def run_svi(data, args):
 
 
 def load_data(use_cuda):
-    data = np.load('./data/multi_obj.npz')
+    data = np.load('./data/cube.npz')
     X_np = data['X']
     # print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
-    Y = torch.from_numpy(data['Y'].astype(np.uint8))
+    Y = torch.ones(X.size(0)).long()
     if use_cuda:
         X = X.cuda()
         Y = Y.cuda()
