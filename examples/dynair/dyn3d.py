@@ -36,7 +36,7 @@ class DynAIR(nn.Module):
 
         self.seq_length = 20
 
-        self.max_obj_count = 1
+        self.max_obj_count = 3
 
         self.image_size = 50
         self.num_chan = 3 # not inc. the alpha channel
@@ -468,8 +468,8 @@ def run_svi(data, args):
 
     X, Y = data # (sequences, counts)
     batch_size = 25
-    X_train, X_test = split(X, batch_size, 20, 0)
-    Y_train, Y_test = split(Y, batch_size, 20, 0)
+    X_train, X_test = split(X, batch_size, 39, 1)
+    Y_train, Y_test = split(Y, batch_size, 39, 1)
 
     def per_param_optim_args(module_name, param_name, tags):
         return {'lr': 1e-4}
@@ -493,8 +493,8 @@ def run_svi(data, args):
         if i < 50 or (i+1) % 50 == 0:
             ix = 40
             # Produce visualization for train & test data points.
-            X_vis = X[ix:ix+1]
-            Y_vis = Y[ix:ix+1]
+            X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
+            Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
             n = X_vis.size(0)
 
             frames, wss, extra_frames, extra_wss = dynair.infer(X_vis, Y_vis, 15)
@@ -525,15 +525,15 @@ def run_svi(data, args):
 
 
 def load_data(use_cuda):
-    data = np.load('./data/cube.npz')
+    data = np.load('./data/multi_obj.npz')
     X_np = data['X']
     # print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
     X = Variable(torch.from_numpy(X_np))
-    Y = torch.ones(X.size(0)).long()
     # Drop the alpha channel.
     X = X[:,:,0:3]
+    Y = torch.from_numpy(data['Y'].astype(np.uint8))
     if use_cuda:
         X = X.cuda()
         Y = Y.cuda()
