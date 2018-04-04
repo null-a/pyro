@@ -518,11 +518,11 @@ def run_svi(data, args):
 
             for k in range(n):
                 out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y_vis[k])
-                vis.images(frames_to_rgb_list(X_vis[k].cpu()), nrow=10)
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+                vis.images(frames_to_rgb_list(X_vis[k].cpu()), nrow=10, opts=dict(title='input {} at epoch {}'.format(k, i)))
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=10, opts=dict(title='recon {} at epoch {}'.format(k, i)))
 
                 out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y_vis[k])
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=10)
+                vis.images(frames_to_rgb_list(out.cpu()), nrow=10, opts=dict(title='extra {} at epoch {}'.format(k, i)))
 
         if (i+1) % 50 == 0:
             #print('Saving parameters...')
