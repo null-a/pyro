@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.functional import affine_grid, grid_sample, sigmoid, softplus
+from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable
 
 import numpy as np
@@ -463,6 +464,13 @@ def add_grad_hooks(module):
         value.register_hook(lambda grad, name=name: hook(name, grad))
     return norms
 
+def clip_grads(params):
+    threshold = 2000000
+    norm = clip_grad_norm(params, threshold)
+    if norm > threshold:
+        print('\nGradient clipped, norm={:0.2f}'.format(norm))
+    #norm_after = clip_grad_norm(params, float('inf'))
+    #print('norm={}, norm_after={}'.format(norm, norm_after))
 
 def run_svi(data, args):
     t0 = time.time()
@@ -479,9 +487,9 @@ def run_svi(data, args):
         return {'lr': 1e-4}
 
     svi = SVI(dynair.model, dynair.guide,
-              #optim.Adam(per_param_optim_args),
-              optim.ClippedAdam({'lr': 1e-4, 'clip_norm': 50000}), # This is applied pointwise.
+              optim.Adam(per_param_optim_args),
               loss='ELBO',
+              param_hook=clip_grads,
               trace_graph=False) # We don't have discrete choices.
 
     for i in range(10**6):

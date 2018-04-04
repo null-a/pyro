@@ -28,10 +28,12 @@ class SVI(object):
                  optim,
                  loss,
                  loss_and_grads=None,
+                 param_hook=None,
                  **kwargs):
         self.model = model
         self.guide = guide
         self.optim = optim
+        self.param_hook = param_hook
 
         if isinstance(loss, str):
             assert loss in ["ELBO"], "The only built-in loss currently supported by SVI is ELBO"
@@ -98,6 +100,9 @@ class SVI(object):
 
         # get active params
         params = pyro.get_param_store().get_active_params()
+
+        if not self.param_hook is None:
+            self.param_hook(params)
 
         # actually perform gradient steps
         # torch.optim objects gets instantiated for any params that haven't been seen yet
