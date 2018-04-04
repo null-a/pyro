@@ -51,7 +51,7 @@ class DynAIR(nn.Module):
         self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
-        self.x_embed_size = 200
+        self.x_embed_size = 800
 
         # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
@@ -66,8 +66,12 @@ class DynAIR(nn.Module):
         # TODO: Using a (reparameterized) uniform would probably be
         # better for the cubes data set. (Though this would makes less
         # sense if we allowed objects to begin off screen.)
-        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.3), 0, 0]))
-        self.w_0_prior_sd = Variable(torch.Tensor([0.7, 0.7, 0.7]),
+
+        # TODO: This is probably too extreme. Adjusted prior scale
+        # from {mean=log(0.3), sd=0.7} to this while attempting to
+        # make optimising for multiple objects work.
+        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.1), 0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.05, 0.7, 0.7]),
                                      requires_grad=False)
         if use_cuda:
             self.w_0_prior_mean = self.w_0_prior_mean.cuda()
@@ -97,12 +101,12 @@ class DynAIR(nn.Module):
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
         self.w_param = mod.ParamW(200, [], self.x_embed_size, self.w_size, self.z_size)
-        self.x_embed = mod.EmbedX([500], self.x_embed_size, self.x_size)
+        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
-        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=0.0)
+        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)

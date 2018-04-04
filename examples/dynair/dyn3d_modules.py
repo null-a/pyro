@@ -113,7 +113,7 @@ class ParamW(nn.Module):
         super(ParamW, self).__init__()
 
         rnn_input_size = x_embed_size + w_size * 2 + z_size
-        self.rnn = nn.RNNCell(rnn_input_size, rnn_hid_size, nonlinearity='relu')
+        self.rnn = nn.RNNCell(rnn_input_size, rnn_hid_size)
 
         self.col_widths = [w_size, w_size]
         self.mlp = MLP(rnn_hid_size, hids + [sum(self.col_widths)], nn.ReLU)
