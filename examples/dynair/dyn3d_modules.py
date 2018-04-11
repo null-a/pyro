@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import sigmoid, softplus, tanh, relu
 
-
 from torch.autograd import Variable
-
-from pyro.util import ng_zeros, zeros
 
 # A general purpose module to construct networks that look like:
 # [Linear (256 -> 1)]

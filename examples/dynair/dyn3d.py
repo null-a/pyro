@@ -8,7 +8,6 @@ import numpy as np
 
 import pyro
 import pyro.distributions as dist
-from pyro.util import ng_zeros, ng_ones
 import pyro.optim as optim
 from pyro.infer import SVI
 import pyro.poutine as poutine
@@ -31,8 +30,10 @@ class DynAIR(nn.Module):
 
         super(DynAIR, self).__init__()
 
-        # Set here so that self.ng_ones/self.ng_zeros does the right
-        # thing.
+        # TODO: Could all the tensors created from the prototype be
+        # replaced with `Parameter(..., requires_grad=False)` so that
+        # they are taken care of when we call `cuda` on the module?
+        self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.use_cuda = use_cuda
 
         self.seq_length = 20
@@ -54,15 +55,15 @@ class DynAIR(nn.Module):
 
         self.x_embed_size = 800
 
-        # bkg_rgb = self.ng_zeros(self.num_chan - 1, self.image_size, self.image_size)
-        # bkg_alpha = self.ng_ones(1, self.image_size, self.image_size)
+        # bkg_rgb = self.prototype.new_zeros(self.num_chan - 1, self.image_size, self.image_size)
+        # bkg_alpha = self.prototype.new_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
 
 
         # Priors:
 
-        self.y_prior_mean = self.ng_zeros(self.y_size)
-        self.y_prior_sd = self.ng_ones(self.y_size)
+        self.y_prior_mean = self.prototype.new_zeros(self.y_size)
+        self.y_prior_sd = self.prototype.new_ones(self.y_size)
 
         # TODO: Using a (reparameterized) uniform would probably be
         # better for the cubes data set. (Though this would makes less
@@ -79,8 +80,8 @@ class DynAIR(nn.Module):
             self.w_0_prior_sd = self.w_0_prior_sd.cuda()
 
 
-        self.z_0_prior_mean = self.ng_zeros(self.z_size)
-        self.z_0_prior_sd = self.ng_ones(self.z_size)
+        self.z_0_prior_mean = self.prototype.new_zeros(self.z_size)
+        self.z_0_prior_sd = self.prototype.new_ones(self.z_size)
 
         self.likelihood_sd = 0.3
 
@@ -154,7 +155,7 @@ class DynAIR(nn.Module):
         return frames, wss, zss
 
     def likelihood(self, t, frame_mean, obs):
-        frame_sd = (self.likelihood_sd * self.ng_ones(1)).expand_as(frame_mean)
+        frame_sd = (self.likelihood_sd * self.prototype.new_ones(1)).expand_as(frame_mean)
         # TODO: Using a normal here isn't very sensible since the data
         # is in [0, 1]. Do something better.
         pyro.sample('x_{}'.format(t),
@@ -339,19 +340,6 @@ class DynAIR(nn.Module):
         # first arg to grid sample should be (n, c, in_w, in_h)
         return grid_sample(windows.view(n, self.num_chan+1, self.window_size, self.window_size), grid)
 
-    # Helpers to create zeros/ones on cpu/gpu as appropriate.
-    def ng_zeros(self, *args, **kwargs):
-        t = ng_zeros(*args, **kwargs)
-        if self.use_cuda:
-            t = t.cuda()
-        return t
-
-    def ng_ones(self, *args, **kwargs):
-        t = ng_ones(*args, **kwargs)
-        if self.use_cuda:
-            t = t.cuda()
-        return t
-
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
@@ -394,7 +382,7 @@ def expand_theta(theta):
     #             [0,s,y]]
     n = theta.size(0)
     assert_size(theta, (n, 3))
-    out = torch.cat((ng_zeros([1, 1]).type_as(theta).expand(n, 1), theta), 1)
+    out = torch.cat((torch.zeros([1, 1]).type_as(theta).expand(n, 1), theta), 1)
     ix = Variable(expansion_indices)
     if theta.is_cuda:
         ix = ix.cuda()
@@ -483,7 +471,7 @@ def run_svi(data, args):
     X_train, X_test = split(X, batch_size, 39, 1)
     Y_train, Y_test = split(Y, batch_size, 39, 1)
 
-    def per_param_optim_args(module_name, param_name, tags):
+    def per_param_optim_args(module_name, param_name):
         return {'lr': 1e-4}
 
     svi = SVI(dynair.model, dynair.guide,
