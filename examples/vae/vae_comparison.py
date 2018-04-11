@@ -10,9 +10,9 @@ from torch.nn import functional
 from torchvision.utils import save_image
 
 import pyro
-from examples import util
-from examples.util import RESULTS_DIR
-from pyro.distributions import Normal, Bernoulli
+from utils.mnist_cached import RESULTS_DIR, DATA_DIR
+from pyro.contrib.examples import util
+from pyro.distributions import Bernoulli, Normal
 from pyro.infer import SVI
 from pyro.optim import Adam
 
@@ -39,7 +39,7 @@ class Encoder(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        x = x.view(-1, 784)
+        x = x.reshape(-1, 784)
         h1 = self.relu(self.fc1(x))
         return self.fc21(h1), torch.exp(self.fc22(h1))
 
@@ -128,7 +128,7 @@ class VAE(object):
             if i == 0:
                 n = min(x.size(0), 8)
                 comparison = torch.cat([x[:n],
-                                        recon_x.view(self.args.batch_size, 1, 28, 28)[:n]])
+                                        recon_x.reshape(self.args.batch_size, 1, 28, 28)[:n]])
                 save_image(comparison.detach().cpu(),
                            os.path.join(OUTPUT_DIR, 'reconstruction_' + str(epoch) + '.png'),
                            nrow=n)
@@ -150,7 +150,7 @@ class PytorchVAEImpl(VAE):
     def compute_loss_and_gradient(self, x):
         self.optimizer.zero_grad()
         recon_x, z_mean, z_var = self.model_eval(x)
-        binary_cross_entropy = functional.binary_cross_entropy(recon_x, x.view(-1, 784))
+        binary_cross_entropy = functional.binary_cross_entropy(recon_x, x.reshape(-1, 784))
         # Uses analytical KL divergence expression for D_kl(q(z|x) || p(z))
         # Refer to Appendix B from VAE paper:
         # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
@@ -187,7 +187,7 @@ class PyroVAEImpl(VAE):
             img = decoder.forward(z)
             pyro.sample('obs',
                         Bernoulli(img).reshape(extra_event_dims=1),
-                        obs=data.view(-1, 784))
+                        obs=data.reshape(-1, 784))
 
     def guide(self, data):
         encoder = pyro.module('encoder', self.vae_encoder)
@@ -211,10 +211,12 @@ class PyroVAEImpl(VAE):
 def setup(args):
     pyro.set_rng_seed(args.rng_seed)
     train_loader = util.get_data_loader(dataset_name='MNIST',
+                                        data_dir=DATA_DIR,
                                         batch_size=args.batch_size,
                                         is_training_set=True,
                                         shuffle=True)
     test_loader = util.get_data_loader(dataset_name='MNIST',
+                                       data_dir=DATA_DIR,
                                        batch_size=args.batch_size,
                                        is_training_set=False,
                                        shuffle=True)

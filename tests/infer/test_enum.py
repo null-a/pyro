@@ -6,7 +6,7 @@ import math
 import pytest
 import torch
 from torch.autograd import grad
-from torch.distributions import kl_divergence
+from torch.distributions import constraints, kl_divergence
 
 import pyro
 import pyro.distributions as dist
@@ -44,15 +44,15 @@ def test_iter_discrete_traces_scalar(graph_type):
     @config_enumerate
     def model():
         p = pyro.param("p", torch.tensor(0.05))
-        ps = pyro.param("ps", torch.tensor([0.1, 0.2, 0.3, 0.4]))
+        probs = pyro.param("probs", torch.tensor([0.1, 0.2, 0.3, 0.4]))
         x = pyro.sample("x", dist.Bernoulli(p))
-        y = pyro.sample("y", dist.Categorical(ps))
+        y = pyro.sample("y", dist.Categorical(probs))
         return dict(x=x, y=y)
 
     traces = list(iter_discrete_traces(graph_type, model))
 
-    ps = pyro.param("ps")
-    assert len(traces) == 2 * len(ps)
+    probs = pyro.param("probs")
+    assert len(traces) == 2 * len(probs)
 
 
 @pytest.mark.parametrize("graph_type", ["flat", "dense"])
@@ -62,19 +62,19 @@ def test_iter_discrete_traces_vector(graph_type):
     @config_enumerate
     def model():
         p = pyro.param("p", torch.tensor([0.05, 0.15]))
-        ps = pyro.param("ps", torch.tensor([[0.1, 0.2, 0.3, 0.4],
-                                           [0.4, 0.3, 0.2, 0.1]]))
+        probs = pyro.param("probs", torch.tensor([[0.1, 0.2, 0.3, 0.4],
+                                                  [0.4, 0.3, 0.2, 0.1]]))
         with pyro.iarange("iarange", 2):
             x = pyro.sample("x", dist.Bernoulli(p))
-            y = pyro.sample("y", dist.Categorical(ps))
+            y = pyro.sample("y", dist.Categorical(probs))
         assert x.size() == (2,)
         assert y.size() == (2,)
         return dict(x=x, y=y)
 
     traces = list(iter_discrete_traces(graph_type, model))
 
-    ps = pyro.param("ps")
-    assert len(traces) == 2 * ps.size(-1)
+    probs = pyro.param("probs")
+    assert len(traces) == 2 * probs.size(-1)
 
 
 @pytest.mark.parametrize("enumerate1", [None, "sequential", "parallel"])
@@ -102,14 +102,14 @@ def test_iter_discrete_traces_nan(enumerate1):
 # A simple Gaussian mixture model, with no vectorization.
 def gmm_model(data, verbose=False):
     p = pyro.param("p", torch.tensor(0.3, requires_grad=True))
-    sigma = pyro.param("sigma", torch.tensor(1.0, requires_grad=True))
-    mus = torch.tensor([-1, 1])
+    scale = pyro.param("scale", torch.tensor(1.0, requires_grad=True))
+    mus = torch.tensor([-1.0, 1.0])
     for i in pyro.irange("data", len(data)):
         z = pyro.sample("z_{}".format(i), dist.Bernoulli(p))
         z = z.long()
         if verbose:
             logger.debug("M{} z_{} = {}".format("  " * i, i, z.numpy()))
-        pyro.observe("x_{}".format(i), dist.Normal(mus[z], sigma), data[i])
+        pyro.sample("x_{}".format(i), dist.Normal(mus[z], scale), obs=data[i])
 
 
 def gmm_guide(data, verbose=False):
@@ -137,22 +137,22 @@ def test_gmm_iter_discrete_traces(data_size, graph_type, model):
 def gmm_batch_model(data):
     p = pyro.param("p", torch.tensor([0.3], requires_grad=True))
     p = torch.cat([p, 1 - p])
-    sigma = pyro.param("sigma", torch.tensor([1.0], requires_grad=True))
-    mus = torch.tensor([-1, 1])
+    scale = pyro.param("scale", torch.tensor([1.0], requires_grad=True))
+    mus = torch.tensor([-1.0, 1.0])
     with pyro.iarange("data", len(data)) as batch:
         n = len(batch)
         z = pyro.sample("z", dist.OneHotCategorical(p).reshape([n]))
         assert z.shape[-2:] == (n, 2)
-        mu = (z * mus).sum(-1)
-        pyro.observe("x", dist.Normal(mu, sigma.expand(n)), data[batch])
+        loc = (z * mus).sum(-1)
+        pyro.sample("x", dist.Normal(loc, scale.expand(n)), obs=data[batch])
 
 
 def gmm_batch_guide(data):
     with pyro.iarange("data", len(data)) as batch:
         n = len(batch)
-        ps = pyro.param("ps", torch.tensor(torch.ones(n, 1) * 0.6, requires_grad=True))
-        ps = torch.cat([ps, 1 - ps], dim=1)
-        z = pyro.sample("z", dist.OneHotCategorical(ps))
+        probs = pyro.param("probs", torch.tensor(torch.ones(n, 1) * 0.6, requires_grad=True))
+        probs = torch.cat([probs, 1 - probs], dim=1)
+        z = pyro.sample("z", dist.OneHotCategorical(probs))
         assert z.shape[-2:] == (n, 2)
 
 
@@ -175,7 +175,7 @@ def test_gmm_batch_iter_discrete_traces(model, data_size, graph_type):
 @pytest.mark.parametrize("enumerate1", [None, "sequential", "parallel"])
 def test_svi_step_smoke(model, guide, enumerate1):
     pyro.clear_param_store()
-    data = torch.tensor([0, 1, 9])
+    data = torch.tensor([0.0, 1.0, 9.0])
 
     guide = config_enumerate(guide, default=enumerate1)
     optimizer = pyro.optim.Adam({"lr": .001})
@@ -785,3 +785,127 @@ def test_elbo_rsvi(enumerate1):
         "\nexpected a.grad= {}".format(expected_a.detach().cpu().numpy()),
         "\n  actual a.grad = {}".format(actual_a.detach().cpu().numpy()),
     ]))
+
+
+@pytest.mark.parametrize("enumerate1,num_steps", [
+    ("sequential", 2),
+    ("sequential", 3),
+    ("parallel", 2),
+    ("parallel", 3),
+    ("parallel", 10),
+    ("parallel", 20),
+    pytest.param("parallel", 30, marks=pytest.mark.skip(reason="extremely expensive")),
+])
+def test_elbo_hmm_in_model(enumerate1, num_steps):
+    pyro.clear_param_store()
+    data = torch.ones(num_steps)
+    init_probs = torch.tensor([0.5, 0.5])
+
+    def model(data):
+        transition_probs = pyro.param("transition_probs",
+                                      torch.tensor([[0.9, 0.1], [0.1, 0.9]]),
+                                      constraint=constraints.simplex)
+        locs = pyro.param("obs_locs", torch.tensor([-1.0, 1.0]))
+        scale = pyro.param("obs_scale", torch.tensor(1.0),
+                           constraint=constraints.positive)
+
+        x = None
+        for i, y in enumerate(data):
+            probs = init_probs if x is None else transition_probs[x]
+            x = pyro.sample("x_{}".format(i), dist.Categorical(probs))
+            pyro.sample("y_{}".format(i), dist.Normal(locs[x], scale), obs=y)
+
+    @config_enumerate(default=enumerate1)
+    def guide(data):
+        mean_field_probs = pyro.param("mean_field_probs", torch.ones(num_steps, 2) / 2,
+                                      constraint=constraints.simplex)
+        for i in range(num_steps):
+            pyro.sample("x_{}".format(i), dist.Categorical(mean_field_probs[i]))
+
+    elbo = TraceEnum_ELBO(max_iarange_nesting=0)
+    elbo.loss_and_grads(model, guide, data)
+
+    expected_unconstrained_grads = {
+        "transition_probs": torch.tensor([[0.2, -0.2], [-0.2, 0.2]]) * (num_steps - 1),
+        "obs_locs": torch.tensor([-num_steps, 0]),
+        "obs_scale": torch.tensor(-num_steps),
+        "mean_field_probs": torch.tensor([[0.5, -0.5]] * num_steps),
+    }
+
+    for name, value in pyro.get_param_store().named_parameters():
+        actual = value.grad
+        expected = expected_unconstrained_grads[name]
+        assert_equal(actual, expected, msg=''.join([
+            '\nexpected {}.grad = {}'.format(name, expected.numpy()),
+            '\n  actual {}.grad = {}'.format(name, actual.detach().cpu().numpy()),
+        ]))
+
+
+@pytest.mark.parametrize("enumerate1,num_steps", [
+    ("sequential", 2),
+    ("sequential", 3),
+    ("parallel", 2),
+    ("parallel", 3),
+    ("parallel", 10),
+    ("parallel", 20),
+    pytest.param("parallel", 30, marks=pytest.mark.skip(reason="extremely expensive")),
+])
+def test_elbo_hmm_in_guide(enumerate1, num_steps):
+    pyro.clear_param_store()
+    data = torch.ones(num_steps)
+    init_probs = torch.tensor([0.5, 0.5])
+
+    def model(data):
+        transition_probs = pyro.param("transition_probs",
+                                      torch.tensor([[0.75, 0.25], [0.25, 0.75]]),
+                                      constraint=constraints.simplex)
+        emission_probs = pyro.param("emission_probs",
+                                    torch.tensor([[0.75, 0.25], [0.25, 0.75]]),
+                                    constraint=constraints.simplex)
+
+        x = None
+        for i, y in enumerate(data):
+            probs = init_probs if x is None else transition_probs[x]
+            x = pyro.sample("x_{}".format(i), dist.Categorical(probs))
+            pyro.sample("y_{}".format(i), dist.Categorical(emission_probs[x]), obs=y)
+
+    @config_enumerate(default=enumerate1)
+    def guide(data):
+        transition_probs = pyro.param("transition_probs",
+                                      torch.tensor([[0.75, 0.25], [0.25, 0.75]]),
+                                      constraint=constraints.simplex)
+        x = None
+        for i, y in enumerate(data):
+            probs = init_probs if x is None else transition_probs[x]
+            x = pyro.sample("x_{}".format(i), dist.Categorical(probs))
+
+    elbo = TraceEnum_ELBO(max_iarange_nesting=0)
+    elbo.loss_and_grads(model, guide, data)
+
+    # These golden values simply test agreement between parallel and sequential.
+    expected_grads = {
+        2: {
+            "transition_probs": [[0.1029949, -0.1029949], [0.1029949, -0.1029949]],
+            "emission_probs": [[0.75, -0.75], [0.25, -0.25]],
+        },
+        3: {
+            "transition_probs": [[0.25748726, -0.25748726], [0.25748726, -0.25748726]],
+            "emission_probs": [[1.125, -1.125], [0.375, -0.375]],
+        },
+        10: {
+            "transition_probs": [[1.64832076, -1.64832076], [1.64832076, -1.64832076]],
+            "emission_probs": [[3.75, -3.75], [1.25, -1.25]],
+        },
+        20: {
+            "transition_probs": [[3.70781687, -3.70781687], [3.70781687, -3.70781687]],
+            "emission_probs": [[7.5, -7.5], [2.5, -2.5]],
+        },
+    }
+
+    for name, value in pyro.get_param_store().named_parameters():
+        actual = value.grad
+        expected = torch.tensor(expected_grads[num_steps][name])
+        assert_equal(actual, expected, msg=''.join([
+            '\nexpected {}.grad = {}'.format(name, expected.numpy()),
+            '\n  actual {}.grad = {}'.format(name, actual.detach().cpu().numpy()),
+        ]))

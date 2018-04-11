@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function
 
-from .poutine import Messenger, Poutine
+from .poutine import Messenger
 
 
 class EnumerateMessenger(Messenger):
@@ -48,27 +48,7 @@ class EnumerateMessenger(Messenger):
             elif target_dim > actual_dim:
                 # Reshape to move actual_dim to target_dim.
                 diff = target_dim - actual_dim
-                value = value.contiguous().view(value.shape[:1] + (1,) * diff + value.shape[1:])
+                value = value.reshape(value.shape[:1] + (1,) * diff + value.shape[1:])
 
             msg["value"] = value
             msg["done"] = True
-
-
-class EnumeratePoutine(Poutine):
-    """
-    Enumerates in parallel over discrete sample sites that are configured with
-    ``infer={"enumerate": "parallel"}``.
-
-    :param int first_available_dim: The first tensor dimension (counting
-        from the right) that is available for parallel enumeration. This
-        dimension and all dimensions left may be used internally by Pyro.
-    """
-    def __init__(self, fn, first_available_dim):
-        """
-        :param fn: A stochastic function (callable containing pyro primitive
-            calls).
-        :param int first_available_dim: The first tensor dimension (counting
-            from the right) that is available for parallel enumeration. This
-            dimension and all dimensions left may be used internally by Pyro.
-        """
-        super(EnumeratePoutine, self).__init__(EnumerateMessenger(first_available_dim), fn)

@@ -12,7 +12,7 @@ import pyro.poutine as poutine
 from pyro.infer.mcmc.trace_kernel import TraceKernel
 from pyro.ops.dual_averaging import DualAveraging
 from pyro.ops.integrator import velocity_verlet, single_step_velocity_verlet
-from pyro.util import is_nan, is_inf
+from pyro.util import torch_isnan, torch_isinf
 
 
 class HMC(TraceKernel):
@@ -75,7 +75,7 @@ class HMC(TraceKernel):
         return trace_poutine.trace
 
     def _kinetic_energy(self, r):
-        return 0.5 * torch.sum(torch.stack([r[name]**2 for name in r]))
+        return 0.5 * sum(x.pow(2).sum() for x in r.values())
 
     def _potential_energy(self, z):
         # Since the model is specified in the constrained space, transform the
@@ -84,7 +84,7 @@ class HMC(TraceKernel):
         for name, transform in self.transforms.items():
             z_constrained[name] = transform.inv(z_constrained[name])
         trace = self._get_trace(z_constrained)
-        potential_energy = -trace.log_pdf()
+        potential_energy = -trace.log_prob_sum()
         # adjust by the jacobian for this transformation.
         for name, transform in self.transforms.items():
             potential_energy += transform.log_abs_det_jacobian(z_constrained[name], z[name]).sum()
@@ -119,7 +119,11 @@ class HMC(TraceKernel):
             z, r, self._potential_energy, step_size)
         energy_new = potential_energy + self._kinetic_energy(r_new)
         delta_energy = energy_new - energy_current
-        # direction=1 means keep increasing step_size, otherwise decreasing step_size
+        # direction=1 means keep increasing step_size, otherwise decreasing step_size.
+        # Note that the direction is -1 if delta_energy is `NaN` which may be the
+        # case for a diverging trajectory (e.g. in the case of evaluating log prob
+        # of a value simulated using a large step size for a constrained sample
+        # site).
         direction = 1 if target_accept_logprob < -delta_energy else -1
 
         # define scale for step_size: 2 for increasing, 1/2 for decreasing
@@ -145,8 +149,8 @@ class HMC(TraceKernel):
         self.num_steps = max(1, int(self.trajectory_length / self.step_size))
 
     def _validate_trace(self, trace):
-        trace_log_pdf = trace.log_pdf()
-        if is_nan(trace_log_pdf) or is_inf(trace_log_pdf):
+        trace_log_prob_sum = trace.log_prob_sum()
+        if torch_isnan(trace_log_prob_sum) or torch_isinf(trace_log_prob_sum):
             raise ValueError("Model specification incorrect - trace log pdf is NaN or Inf.")
 
     def initial_trace(self):
@@ -161,9 +165,9 @@ class HMC(TraceKernel):
         self._prototype_trace = trace
         # momenta distribution - currently standard normal
         for name, node in sorted(trace.iter_stochastic_nodes(), key=lambda x: x[0]):
-            r_mu = torch.zeros_like(node["value"])
-            r_sigma = torch.ones_like(node["value"])
-            self._r_dist[name] = dist.Normal(mu=r_mu, sigma=r_sigma)
+            r_loc = torch.zeros_like(node["value"])
+            r_scale = torch.ones_like(node["value"])
+            self._r_dist[name] = dist.Normal(loc=r_loc, scale=r_scale)
             if node["fn"].support is not constraints.real and self._automatic_transform_enabled:
                 self.transforms[name] = biject_to(node["fn"].support).inv
         self._validate_trace(trace)
@@ -175,8 +179,8 @@ class HMC(TraceKernel):
             self.step_size = self._find_reasonable_step_size(z)
             self.num_steps = max(1, int(self.trajectory_length / self.step_size))
             # make prox-center for Dual Averaging scheme
-            mu = math.log(10 * self.step_size)
-            self._adapted_scheme = DualAveraging(prox_center=mu)
+            loc = math.log(10 * self.step_size)
+            self._adapted_scheme = DualAveraging(prox_center=loc)
 
     def end_warmup(self):
         if self.adapt_step_size:
@@ -210,7 +214,14 @@ class HMC(TraceKernel):
             z = z_new
 
         if self.adapt_step_size:
-            accept_prob = (-delta_energy).exp().clamp(max=1).item()
+            # Set accept prob to 0.0 if delta_energy is `NaN` which could be the case
+            # which may be the case for a diverging trajectory (e.g. in the case of
+            # evaluating log prob of a value simulated using a large step size for
+            # a constrained sample site).
+            if torch_isnan(delta_energy):
+                accept_prob = delta_energy.new_tensor(0.0)
+            else:
+                accept_prob = (-delta_energy).exp().clamp(max=1).item()
             self._adapt_step_size(accept_prob)
 
         self._t += 1

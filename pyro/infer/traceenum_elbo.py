@@ -3,25 +3,32 @@ from __future__ import absolute_import, division, print_function
 import warnings
 
 import pyro
+import pyro.infer as infer
 import pyro.poutine as poutine
 from pyro.distributions.util import is_identically_zero
 from pyro.infer.elbo import ELBO
 from pyro.infer.enum import iter_discrete_traces
-from pyro.infer.util import MultiFrameDice
-from pyro.poutine.enumerate_poutine import EnumeratePoutine
+from pyro.infer.util import Dice
+from pyro.poutine import EnumerateMessenger
 from pyro.poutine.util import prune_subsample_sites
-from pyro.util import check_model_guide_match, check_site_shape, is_nan
+from pyro.util import check_model_guide_match, check_site_shape, check_traceenum_requirements, torch_isnan
 
 
 def _compute_dice_elbo(model_trace, guide_trace):
-    dice = MultiFrameDice(guide_trace)
-    elbo = 0
+    # y depends on x iff ordering[x] <= ordering[y]
+    # TODO refine this coarse dependency ordering.
+    ordering = {name: frozenset(f for f in site["cond_indep_stack"] if f.vectorized)
+                for name, site in model_trace.nodes.items()
+                if site["type"] == "sample"}
+
+    dice = Dice(guide_trace, ordering)
+    elbo = 0.0
     for name, model_site in model_trace.nodes.items():
         if model_site["type"] == "sample":
-            cost = model_site["batch_log_pdf"]
+            cost = model_site["log_prob"]
             if not model_site["is_observed"]:
-                cost = cost - guide_trace.nodes[name]["batch_log_pdf"]
-            dice_prob = dice.in_context(model_site["cond_indep_stack"])
+                cost = cost - guide_trace.nodes[name]["log_prob"]
+            dice_prob = dice.in_context(cost.shape, ordering[name])
             # TODO use score_parts.entropy_term to "stick the landing"
             elbo = elbo + (dice_prob * cost).sum()
     return elbo
@@ -48,25 +55,29 @@ class TraceEnum_ELBO(ELBO):
         the result packaged as a trace generator
         """
         # enable parallel enumeration
-        guide = EnumeratePoutine(guide, first_available_dim=self.max_iarange_nesting)
+        guide = EnumerateMessenger(first_available_dim=self.max_iarange_nesting)(guide)
 
         for i in range(self.num_particles):
             for guide_trace in iter_discrete_traces("flat", guide, *args, **kwargs):
                 model_trace = poutine.trace(poutine.replay(model, guide_trace),
                                             graph_type="flat").get_trace(*args, **kwargs)
 
-                check_model_guide_match(model_trace, guide_trace)
+                if infer.is_validation_enabled():
+                    check_model_guide_match(model_trace, guide_trace, self.max_iarange_nesting)
                 guide_trace = prune_subsample_sites(guide_trace)
                 model_trace = prune_subsample_sites(model_trace)
+                if infer.is_validation_enabled():
+                    check_traceenum_requirements(model_trace, guide_trace)
 
-                model_trace.compute_batch_log_pdf()
-                for site in model_trace.nodes.values():
-                    if site["type"] == "sample":
-                        check_site_shape(site, self.max_iarange_nesting)
+                model_trace.compute_log_prob()
                 guide_trace.compute_score_parts()
-                for site in guide_trace.nodes.values():
-                    if site["type"] == "sample":
-                        check_site_shape(site, self.max_iarange_nesting)
+                if infer.is_validation_enabled():
+                    for site in model_trace.nodes.values():
+                        if site["type"] == "sample":
+                            check_site_shape(site, self.max_iarange_nesting)
+                    for site in guide_trace.nodes.values():
+                        if site["type"] == "sample":
+                            check_site_shape(site, self.max_iarange_nesting)
 
                 yield model_trace, guide_trace
 
@@ -86,7 +97,7 @@ class TraceEnum_ELBO(ELBO):
             elbo += elbo_particle.item() / self.num_particles
 
         loss = -elbo
-        if is_nan(loss):
+        if torch_isnan(loss):
             warnings.warn('Encountered NAN loss')
         return loss
 
@@ -107,7 +118,7 @@ class TraceEnum_ELBO(ELBO):
             elbo += elbo_particle.item() / self.num_particles
 
             # collect parameters to train from model and guide
-            trainable_params = set(site["value"]
+            trainable_params = set(site["value"].unconstrained()
                                    for trace in (model_trace, guide_trace)
                                    for site in trace.nodes.values()
                                    if site["type"] == "param")
@@ -118,6 +129,6 @@ class TraceEnum_ELBO(ELBO):
                 pyro.get_param_store().mark_params_active(trainable_params)
 
         loss = -elbo
-        if is_nan(loss):
+        if torch_isnan(loss):
             warnings.warn('Encountered NAN loss')
         return loss

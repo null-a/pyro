@@ -21,7 +21,7 @@ def eq(x, y, prec=1e-10):
 
 
 # XXX name is a bit silly
-class NormalNormalNormalPoutineTestCase(TestCase):
+class NormalNormalNormalHandlerTestCase(TestCase):
 
     def setUp(self):
         pyro.clear_param_store()
@@ -34,17 +34,17 @@ class NormalNormalNormalPoutineTestCase(TestCase):
                                   Normal(latent1,
                                          5 * torch.ones(2)))
             x_dist = Normal(latent2, torch.ones(2))
-            pyro.observe("obs", x_dist, torch.ones(2))
+            pyro.sample("obs", x_dist, obs=torch.ones(2))
             return latent1
 
         def guide():
-            mu1 = pyro.param("mu1", torch.randn(2, requires_grad=True))
-            sigma1 = pyro.param("sigma1", torch.ones(2, requires_grad=True))
-            pyro.sample("latent1", Normal(mu1, sigma1))
+            loc1 = pyro.param("loc1", torch.randn(2, requires_grad=True))
+            scale1 = pyro.param("scale1", torch.ones(2, requires_grad=True))
+            pyro.sample("latent1", Normal(loc1, scale1))
 
-            mu2 = pyro.param("mu2", torch.randn(2, requires_grad=True))
-            sigma2 = pyro.param("sigma2", torch.ones(2, requires_grad=True))
-            latent2 = pyro.sample("latent2", Normal(mu2, sigma2))
+            loc2 = pyro.param("loc2", torch.randn(2, requires_grad=True))
+            scale2 = pyro.param("scale2", torch.ones(2, requires_grad=True))
+            latent2 = pyro.sample("latent2", Normal(loc2, scale2))
             return latent2
 
         self.model = model
@@ -55,15 +55,15 @@ class NormalNormalNormalPoutineTestCase(TestCase):
                             "_INPUT", "_RETURN"]
 
         self.guide_sites = ["latent1", "latent2",
-                            "mu1", "sigma1",
-                            "mu2", "sigma2",
+                            "loc1", "scale1",
+                            "loc2", "scale2",
                             "_INPUT", "_RETURN"]
 
         self.full_sample_sites = {"latent1": "latent1", "latent2": "latent2"}
         self.partial_sample_sites = {"latent1": "latent1"}
 
 
-class TracePoutineTests(NormalNormalNormalPoutineTestCase):
+class TraceHandlerTests(NormalNormalNormalHandlerTestCase):
 
     def test_trace_full(self):
         guide_trace = poutine.trace(self.guide).get_trace()
@@ -84,7 +84,7 @@ class TracePoutineTests(NormalNormalNormalPoutineTestCase):
                      model_trace.nodes["_RETURN"]["value"])
 
 
-class ReplayPoutineTests(NormalNormalNormalPoutineTestCase):
+class ReplayHandlerTests(NormalNormalNormalHandlerTestCase):
 
     def test_replay_full(self):
         guide_trace = poutine.trace(self.guide).get_trace()
@@ -119,7 +119,7 @@ class ReplayPoutineTests(NormalNormalNormalPoutineTestCase):
             assert_equal(model_trace.nodes[name]["value"], tr2.nodes[name]["value"])
 
 
-class BlockPoutineTests(NormalNormalNormalPoutineTestCase):
+class BlockHandlerTests(NormalNormalNormalHandlerTestCase):
 
     def test_block_full(self):
         model_trace = poutine.trace(poutine.block(self.model)).get_trace()
@@ -195,15 +195,15 @@ class BlockPoutineTests(NormalNormalNormalPoutineTestCase):
         assert "obs" not in guide_trace
 
 
-class QueuePoutineDiscreteTest(TestCase):
+class QueueHandlerDiscreteTest(TestCase):
 
     def setUp(self):
 
         # simple Gaussian-mixture HMM
         def model():
-            ps = pyro.param("ps", torch.tensor([[0.8], [0.3]]))
-            mu = pyro.param("mu", torch.tensor([[-0.1], [0.9]]))
-            sigma = torch.ones(1, 1)
+            probs = pyro.param("probs", torch.tensor([[0.8], [0.3]]))
+            loc = pyro.param("loc", torch.tensor([[-0.1], [0.9]]))
+            scale = torch.ones(1, 1)
 
             latents = [torch.ones(1)]
             observes = []
@@ -211,12 +211,12 @@ class QueuePoutineDiscreteTest(TestCase):
 
                 latents.append(
                     pyro.sample("latent_{}".format(str(t)),
-                                Bernoulli(ps[latents[-1][0].long().data])))
+                                Bernoulli(probs[latents[-1][0].long().data])))
 
                 observes.append(
-                    pyro.observe("observe_{}".format(str(t)),
-                                 Normal(mu[latents[-1][0].long().data], sigma),
-                                 pyro.ones(1)))
+                    pyro.sample("observe_{}".format(str(t)),
+                                Normal(loc[latents[-1][0].long().data], scale),
+                                obs=torch.ones(1)))
             return latents
 
         self.sites = ["observe_{}".format(str(t)) for t in range(3)] + \
@@ -268,57 +268,57 @@ class Model(nn.Module):
         return self.fc(x)
 
 
-class LiftPoutineTests(TestCase):
+class LiftHandlerTests(TestCase):
 
     def setUp(self):
         pyro.clear_param_store()
 
-        def mu1_prior(tensor, *args, **kwargs):
+        def loc1_prior(tensor, *args, **kwargs):
             flat_tensor = tensor.view(-1)
             m = torch.zeros(flat_tensor.size(0))
             s = torch.ones(flat_tensor.size(0))
             return Normal(m, s).sample().view(tensor.size())
 
-        def sigma1_prior(tensor, *args, **kwargs):
+        def scale1_prior(tensor, *args, **kwargs):
             flat_tensor = tensor.view(-1)
             m = torch.zeros(flat_tensor.size(0))
             s = torch.ones(flat_tensor.size(0))
-            return Normal(m, s).sample().view(tensor.size())
+            return Normal(m, s).sample().view(tensor.size()).exp()
 
-        def mu2_prior(tensor, *args, **kwargs):
+        def loc2_prior(tensor, *args, **kwargs):
             flat_tensor = tensor.view(-1)
             m = torch.zeros(flat_tensor.size(0))
             return Bernoulli(m).sample().view(tensor.size())
 
-        def sigma2_prior(tensor, *args, **kwargs):
-            return sigma1_prior(tensor)
+        def scale2_prior(tensor, *args, **kwargs):
+            return scale1_prior(tensor)
 
         def bias_prior(tensor, *args, **kwargs):
-            return mu2_prior(tensor)
+            return loc2_prior(tensor)
 
         def weight_prior(tensor, *args, **kwargs):
-            return sigma1_prior(tensor)
+            return scale1_prior(tensor)
 
         def stoch_fn(tensor, *args, **kwargs):
-            mu = torch.zeros(tensor.size())
-            sigma = torch.ones(tensor.size())
-            return pyro.sample("sample", Normal(mu, sigma))
+            loc = torch.zeros(tensor.size())
+            scale = torch.ones(tensor.size())
+            return pyro.sample("sample", Normal(loc, scale))
 
         def guide():
-            mu1 = pyro.param("mu1", torch.randn(2, requires_grad=True))
-            sigma1 = pyro.param("sigma1", torch.ones(2, requires_grad=True))
-            pyro.sample("latent1", Normal(mu1, sigma1))
+            loc1 = pyro.param("loc1", torch.randn(2, requires_grad=True))
+            scale1 = pyro.param("scale1", torch.ones(2, requires_grad=True))
+            pyro.sample("latent1", Normal(loc1, scale1))
 
-            mu2 = pyro.param("mu2", torch.randn(2, requires_grad=True))
-            sigma2 = pyro.param("sigma2", torch.ones(2, requires_grad=True))
-            latent2 = pyro.sample("latent2", Normal(mu2, sigma2))
+            loc2 = pyro.param("loc2", torch.randn(2, requires_grad=True))
+            scale2 = pyro.param("scale2", torch.ones(2, requires_grad=True))
+            latent2 = pyro.sample("latent2", Normal(loc2, scale2))
             return latent2
 
         self.model = Model()
         self.guide = guide
-        self.prior = mu1_prior
-        self.prior_dict = {"mu1": mu1_prior, "sigma1": sigma1_prior, "mu2": mu2_prior, "sigma2": sigma2_prior}
-        self.partial_dict = {"mu1": mu1_prior, "sigma1": sigma1_prior}
+        self.prior = scale1_prior
+        self.prior_dict = {"loc1": loc1_prior, "scale1": scale1_prior, "loc2": loc2_prior, "scale2": scale2_prior}
+        self.partial_dict = {"loc1": loc1_prior, "scale1": scale1_prior}
         self.nn_prior = {"fc.bias": bias_prior, "fc.weight": weight_prior}
         self.fn = stoch_fn
         self.data = torch.randn(2, 2)
@@ -327,7 +327,7 @@ class LiftPoutineTests(TestCase):
         tr = poutine.trace(self.guide).get_trace()
         lifted_tr = poutine.trace(poutine.lift(self.guide, prior=self.prior)).get_trace()
         for name in tr.nodes.keys():
-            if name in ('mu1', 'mu2', 'sigma1', 'sigma2'):
+            if name in ('loc1', 'loc2', 'scale1', 'scale2'):
                 assert name not in lifted_tr
             else:
                 assert name in lifted_tr
@@ -337,7 +337,7 @@ class LiftPoutineTests(TestCase):
         lifted_tr = poutine.trace(poutine.lift(self.guide, prior=self.prior_dict)).get_trace()
         for name in tr.nodes.keys():
             assert name in lifted_tr
-            if name in {'sigma1', 'mu1', 'sigma2', 'mu2'}:
+            if name in {'scale1', 'loc1', 'scale2', 'loc2'}:
                 assert name + "_prior" == lifted_tr.nodes[name]['fn'].__name__
             if tr.nodes[name]["type"] == "param":
                 assert lifted_tr.nodes[name]["type"] == "sample"
@@ -348,11 +348,11 @@ class LiftPoutineTests(TestCase):
         lifted_tr = poutine.trace(poutine.lift(self.guide, prior=self.partial_dict)).get_trace()
         for name in tr.nodes.keys():
             assert name in lifted_tr
-            if name in ('sigma1', 'mu1'):
+            if name in ('scale1', 'loc1'):
                 assert name + "_prior" == lifted_tr.nodes[name]['fn'].__name__
                 assert lifted_tr.nodes[name]["type"] == "sample"
                 assert not lifted_tr.nodes[name]["is_observed"]
-            if name in ('sigma2', 'mu2'):
+            if name in ('scale2', 'loc2'):
                 assert lifted_tr.nodes[name]["type"] == "param"
 
     def test_random_module(self):
@@ -376,19 +376,19 @@ class LiftPoutineTests(TestCase):
                 assert not lifted_tr.nodes[key_name]["is_observed"]
 
 
-class QueuePoutineMixedTest(TestCase):
+class QueueHandlerMixedTest(TestCase):
 
     def setUp(self):
 
         # Simple model with 1 continuous + 1 discrete + 1 continuous variable.
         def model():
             p = torch.tensor([0.5])
-            mu = torch.zeros(1)
-            sigma = torch.ones(1)
+            loc = torch.zeros(1)
+            scale = torch.ones(1)
 
-            x = pyro.sample("x", Normal(mu, sigma))  # Before the discrete variable.
+            x = pyro.sample("x", Normal(loc, scale))  # Before the discrete variable.
             y = pyro.sample("y", Bernoulli(p))
-            z = pyro.sample("z", Normal(mu, sigma))  # After the discrete variable.
+            z = pyro.sample("z", Normal(loc, scale))  # After the discrete variable.
             return dict(x=x, y=y, z=z)
 
         self.sites = ["x", "y", "z", "_INPUT", "_RETURN"]
@@ -426,23 +426,23 @@ class QueuePoutineMixedTest(TestCase):
         assert values[0]["z"] != values[1]["z"]  # Almost surely true.
 
 
-class IndirectLambdaPoutineTests(TestCase):
+class IndirectLambdaHandlerTests(TestCase):
 
     def setUp(self):
 
         def model(batch_size_outer=2, batch_size_inner=2):
             data = [[torch.ones(1)] * 2] * 2
-            mu_latent = pyro.sample("mu_latent", dist.Normal(torch.zeros(1), torch.ones(1)))
+            loc_latent = pyro.sample("loc_latent", dist.Normal(torch.zeros(1), torch.ones(1)))
             for i in pyro.irange("irange_outer", 2, batch_size_outer):
                 for j in pyro.irange("irange_inner_%d" % i, 2, batch_size_inner):
-                    pyro.sample("z_%d_%d" % (i, j), dist.Normal(mu_latent + data[i][j], torch.ones(1)))
+                    pyro.sample("z_%d_%d" % (i, j), dist.Normal(loc_latent + data[i][j], torch.ones(1)))
 
         self.model = model
-        self.expected_nodes = set(["z_0_0", "z_0_1", "z_1_0", "z_1_1", "mu_latent",
+        self.expected_nodes = set(["z_0_0", "z_0_1", "z_1_0", "z_1_1", "loc_latent",
                                    "_INPUT", "_RETURN"])
         self.expected_edges = set([
-            ("mu_latent", "z_0_0"), ("mu_latent", "z_0_1"),
-            ("mu_latent", "z_1_0"), ("mu_latent", "z_1_1"),
+            ("loc_latent", "z_0_0"), ("loc_latent", "z_0_1"),
+            ("loc_latent", "z_1_0"), ("loc_latent", "z_1_1"),
         ])
 
     def test_graph_structure(self):
@@ -470,7 +470,7 @@ class IndirectLambdaPoutineTests(TestCase):
         _test_scale_factor(2, 1, [2.0] * 2)
 
 
-class ConditionPoutineTests(NormalNormalNormalPoutineTestCase):
+class ConditionHandlerTests(NormalNormalNormalHandlerTestCase):
 
     def test_condition(self):
         data = {"latent2": torch.randn(2)}
@@ -533,19 +533,19 @@ class ConditionPoutineTests(NormalNormalNormalPoutineTestCase):
         assert eq(sample_from_do_model, torch.zeros(1))
 
 
-class EscapePoutineTests(TestCase):
+class EscapeHandlerTests(TestCase):
 
     def setUp(self):
 
         # Simple model with 1 continuous + 1 discrete + 1 continuous variable.
         def model():
             p = torch.tensor([0.5])
-            mu = torch.zeros(1)
-            sigma = torch.ones(1)
+            loc = torch.zeros(1)
+            scale = torch.ones(1)
 
-            x = pyro.sample("x", Normal(mu, sigma))  # Before the discrete variable.
+            x = pyro.sample("x", Normal(loc, scale))  # Before the discrete variable.
             y = pyro.sample("y", Bernoulli(p))
-            z = pyro.sample("z", Normal(mu, sigma))  # After the discrete variable.
+            z = pyro.sample("z", Normal(loc, scale))  # After the discrete variable.
             return dict(x=x, y=y, z=z)
 
         self.sites = ["x", "y", "z", "_INPUT", "_RETURN"]
@@ -584,7 +584,7 @@ class EscapePoutineTests(TestCase):
                 assert "x" not in tem.trace
 
 
-class InferConfigPoutineTests(TestCase):
+class InferConfigHandlerTests(TestCase):
     def setUp(self):
         def model():
             pyro.param("p", torch.zeros(1, requires_grad=True))
@@ -622,13 +622,13 @@ def test_enumerate_poutine(depth, first_available_dim):
         for i in range(depth):
             pyro.sample("a_{}".format(i), Bernoulli(0.5), infer={"enumerate": "parallel"})
 
-    model = poutine.EnumeratePoutine(model, first_available_dim)
+    model = poutine.EnumerateMessenger(first_available_dim)(model)
     model = poutine.trace(model)
 
     for i in range(num_particles):
         tr = model.get_trace()
-        tr.compute_batch_log_pdf()
-        log_prob = sum(site["batch_log_pdf"] for name, site in tr.iter_stochastic_nodes())
+        tr.compute_log_prob()
+        log_prob = sum(site["log_prob"] for name, site in tr.iter_stochastic_nodes())
         actual_shape = log_prob.shape
         expected_shape = (2,) * depth
         if depth:
@@ -645,7 +645,7 @@ def test_replay_enumerate_poutine(depth, first_available_dim):
     def guide():
         pyro.sample("y", y_dist, infer={"enumerate": "parallel"})
 
-    guide = poutine.EnumeratePoutine(guide, depth + first_available_dim)
+    guide = poutine.EnumerateMessenger(depth + first_available_dim)(guide)
     guide = poutine.trace(guide)
     guide_trace = guide.get_trace()
 
@@ -657,15 +657,15 @@ def test_replay_enumerate_poutine(depth, first_available_dim):
         for i in range(depth):
             pyro.sample("b_{}".format(i), Bernoulli(0.5), infer={"enumerate": "parallel"})
 
-    model = poutine.EnumeratePoutine(model, first_available_dim)
+    model = poutine.EnumerateMessenger(first_available_dim)(model)
     model = poutine.replay(model, guide_trace)
     model = poutine.trace(model)
 
     for i in range(num_particles):
         tr = model.get_trace()
         assert tr.nodes["y"]["value"] is guide_trace.nodes["y"]["value"]
-        tr.compute_batch_log_pdf()
-        log_prob = sum(site["batch_log_pdf"] for name, site in tr.iter_stochastic_nodes())
+        tr.compute_log_prob()
+        log_prob = sum(site["log_prob"] for name, site in tr.iter_stochastic_nodes())
         actual_shape = log_prob.shape
         expected_shape = (2,) * depth + (3,) + (2,) * depth + (1,) * first_available_dim
         assert actual_shape == expected_shape, 'error on iteration {}'.format(i)

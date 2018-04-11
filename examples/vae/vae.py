@@ -1,4 +1,5 @@
 import argparse
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,10 +9,9 @@ import pyro
 import pyro.distributions as dist
 from pyro.infer import SVI
 from pyro.optim import Adam
-from utils.vae_plots import plot_llk, mnist_test_tsne, plot_vae_samples
 from utils.mnist_cached import MNISTCached as MNIST
 from utils.mnist_cached import setup_data_loaders
-
+from utils.vae_plots import mnist_test_tsne, plot_llk, plot_vae_samples
 
 fudge = 1e-7
 
@@ -31,14 +31,14 @@ class Encoder(nn.Module):
     def forward(self, x):
         # define the forward computation on the image x
         # first shape the mini-batch to have pixels in the rightmost dimension
-        x = x.view(-1, 784)
+        x = x.reshape(-1, 784)
         # then compute the hidden units
         hidden = self.softplus(self.fc1(x))
         # then return a mean vector and a (positive) square root covariance
         # each of size batch_size x z_dim
-        z_mu = self.fc21(hidden)
-        z_sigma = torch.exp(self.fc22(hidden))
-        return z_mu, z_sigma
+        z_loc = self.fc21(hidden)
+        z_scale = torch.exp(self.fc22(hidden))
+        return z_loc, z_scale
 
 
 # define the PyTorch module that parameterizes the
@@ -60,8 +60,8 @@ class Decoder(nn.Module):
         # return the parameter for the output Bernoulli
         # each is of size batch_size x 784
         # fixing numerical instabilities of sigmoid with a fudge
-        mu_img = (self.sigmoid(self.fc21(hidden))+fudge) * (1-2*fudge)
-        return mu_img
+        loc_img = (self.sigmoid(self.fc21(hidden))+fudge) * (1-2*fudge)
+        return loc_img
 
 
 # define a PyTorch module for the VAE
@@ -87,15 +87,14 @@ class VAE(nn.Module):
         pyro.module("decoder", self.decoder)
         with pyro.iarange("data", x.size(0)):
             # setup hyperparameters for prior p(z)
-            # the type_as ensures we get cuda Tensors if x is on gpu
-            z_mu = torch.zeros([x.size(0), self.z_dim]).type_as(x)
-            z_sigma = torch.ones([x.size(0), self.z_dim]).type_as(x)
+            z_loc = x.new_zeros(torch.Size((x.size(0), self.z_dim)))
+            z_scale = x.new_ones(torch.Size((x.size(0), self.z_dim)))
             # sample from prior (value will be sampled by guide when computing the ELBO)
-            z = pyro.sample("latent", dist.Normal(z_mu, z_sigma).reshape(extra_event_dims=1))
+            z = pyro.sample("latent", dist.Normal(z_loc, z_scale).reshape(extra_event_dims=1))
             # decode the latent code z
-            mu_img = self.decoder.forward(z)
+            loc_img = self.decoder.forward(z)
             # score against actual images
-            pyro.sample("obs", dist.Bernoulli(mu_img).reshape(extra_event_dims=1), obs=x.view(-1, 784))
+            pyro.sample("obs", dist.Bernoulli(loc_img).reshape(extra_event_dims=1), obs=x.reshape(-1, 784))
 
     # define the guide (i.e. variational distribution) q(z|x)
     def guide(self, x):
@@ -103,28 +102,28 @@ class VAE(nn.Module):
         pyro.module("encoder", self.encoder)
         with pyro.iarange("data", x.size(0)):
             # use the encoder to get the parameters used to define q(z|x)
-            z_mu, z_sigma = self.encoder.forward(x)
+            z_loc, z_scale = self.encoder.forward(x)
             # sample the latent code z
-            pyro.sample("latent", dist.Normal(z_mu, z_sigma).reshape(extra_event_dims=1))
+            pyro.sample("latent", dist.Normal(z_loc, z_scale).reshape(extra_event_dims=1))
 
     # define a helper function for reconstructing images
     def reconstruct_img(self, x):
         # encode image x
-        z_mu, z_sigma = self.encoder(x)
+        z_loc, z_scale = self.encoder(x)
         # sample in latent space
-        z = dist.Normal(z_mu, z_sigma).sample()
+        z = dist.Normal(z_loc, z_scale).sample()
         # decode the image (note we don't sample in image space)
-        mu_img = self.decoder(z)
-        return mu_img
+        loc_img = self.decoder(z)
+        return loc_img
 
     def model_sample(self, batch_size=1):
         # sample the handwriting style from the constant prior distribution
-        prior_mu = torch.zeros([batch_size, self.z_dim])
-        prior_sigma = torch.ones([batch_size, self.z_dim])
-        zs = pyro.sample("z", dist.Normal(prior_mu, prior_sigma))
-        mu = self.decoder.forward(zs)
-        xs = pyro.sample("sample", dist.Bernoulli(mu))
-        return xs, mu
+        prior_loc = torch.zeros([batch_size, self.z_dim])
+        prior_scale = torch.ones([batch_size, self.z_dim])
+        zs = pyro.sample("z", dist.Normal(prior_loc, prior_scale))
+        loc = self.decoder.forward(zs)
+        xs = pyro.sample("sample", dist.Bernoulli(loc))
+        return xs, loc
 
 
 def main(args):
@@ -187,9 +186,9 @@ def main(args):
                         for index in reco_indices:
                             test_img = x[index, :]
                             reco_img = vae.reconstruct_img(test_img)
-                            vis.image(test_img.contiguous().view(28, 28).detach().cpu().numpy(),
+                            vis.image(test_img.reshape(28, 28).detach().cpu().numpy(),
                                       opts={'caption': 'test image'})
-                            vis.image(reco_img.contiguous().view(28, 28).detach().cpu().numpy(),
+                            vis.image(reco_img.reshape(28, 28).detach().cpu().numpy(),
                                       opts={'caption': 'reconstructed image'})
 
             # report test diagnostics
