@@ -47,7 +47,10 @@ class DynAIR(nn.Module):
 
         self.y_size = 50
         self.z_size = 50
-        self.w_size = 3 # (scale, x, y) = (softplus(w[0]), w[1], w[2])
+        self.w_size = 2 # (x, y)
+        # This may need increasing /slightly/ to allow for the
+        # rotation of the avatars.
+        self.window_scale = 0.25
 
         self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
@@ -69,11 +72,8 @@ class DynAIR(nn.Module):
         # better for the cubes data set. (Though this would makes less
         # sense if we allowed objects to begin off screen.)
 
-        # TODO: This is probably too extreme. Adjusted prior scale
-        # from {mean=log(0.3), sd=0.7} to this while attempting to
-        # make optimising for multiple objects work.
-        self.w_0_prior_mean = Variable(torch.Tensor([np.log(0.1), 0, 0]))
-        self.w_0_prior_sd = Variable(torch.Tensor([0.05, 0.7, 0.7]),
+        self.w_0_prior_mean = Variable(torch.Tensor([0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.7, 0.7]),
                                      requires_grad=False)
         if use_cuda:
             self.w_0_prior_mean = self.w_0_prior_mean.cuda()
@@ -326,7 +326,7 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-        theta_inv = expand_theta(w_to_theta_inv(w))
+        theta_inv = expand_theta(w2_to_theta_inv(w, self.window_scale))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
         # TODO: Consider using "border" mode for padding.
         return grid_sample(images, grid).view(n, -1)
@@ -335,7 +335,7 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(windows, (n, self.x_obj_size))
-        theta = expand_theta(w_to_theta(w))
+        theta = expand_theta(w2_to_theta(w, self.window_scale))
         assert_size(theta, (n, 2, 3))
         grid = affine_grid(theta, torch.Size((n, self.num_chan+1, self.image_size, self.image_size)))
         # first arg to grid sample should be (n, c, in_w, in_h)
@@ -407,6 +407,18 @@ def w_to_theta_inv(w):
     out = torch.cat((scale, xy), 1)
     return out
 
+
+def w2_to_theta(w, scale):
+    # Takes w = (x, y) & scale to parameter theta of the spatial
+    # transform.
+    batch_size = w.size(0)
+    scale_inv = torch.tensor(1.0 / scale).type_as(w).expand(batch_size, 1)
+    return torch.cat((scale_inv, w), 1)
+
+def w2_to_theta_inv(w, scale):
+    batch_size = w.size(0)
+    scale = torch.tensor(scale).type_as(w).expand(batch_size, 1)
+    return torch.cat((scale, w), 1)
 
 
 def assert_size(t, expected_size):
