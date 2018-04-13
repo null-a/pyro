@@ -89,8 +89,7 @@ class DynAIR(nn.Module):
         # Parameters.
         self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
         self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
-        self.guide_w_init = nn.ParameterList(
-            [nn.Parameter(torch.zeros(self.w_size)) for _ in range(self.max_obj_count)])
+        self.guide_w_init = Variable(self.prototype.new_zeros(self.w_size))
         self.guide_z_init = nn.ParameterList(
             [nn.Parameter(torch.zeros(self.z_size)) for _ in range(self.max_obj_count)])
 
@@ -273,7 +272,7 @@ class DynAIR(nn.Module):
         ws = mk_matrix(self.seq_length, self.max_obj_count)
         zs = mk_matrix(self.seq_length, self.max_obj_count)
 
-        w_init = [batch_expand(w_init_i, batch_size) for w_init_i in self.guide_w_init]
+        w_init = batch_expand(self.guide_w_init, batch_size)
         z_init = [batch_expand(z_init_i, batch_size) for z_init_i in self.guide_z_init]
         w_t_init = batch_expand(self.guide_w_t_init, batch_size)
         z_t_init = batch_expand(self.guide_z_t_init, batch_size)
@@ -296,7 +295,7 @@ class DynAIR(nn.Module):
 
                 for i in range(self.max_obj_count):
 
-                    w_prev_i = ws[t-1][i] if t > 0 else w_init[i]
+                    w_prev_i = ws[t-1][i] if t > 0 else w_init
                     z_prev_i = zs[t-1][i] if t > 0 else z_init[i]
                     w_t_prev = ws[t][i-1] if i > 0 else w_t_init
                     z_t_prev = zs[t][i-1] if i > 0 else z_t_init
