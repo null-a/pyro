@@ -137,7 +137,7 @@ class DynAIR(nn.Module):
         # Guide modules:
         obj_rnn_hid_size = 200
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size, obj_rnn_hid_size)
+        self.z_param = mod.ParamZ([200], [200, 200], self.w_size, self.x_att_size, self.z_size, obj_rnn_hid_size)
         self.w_param = mod.ParamW(obj_rnn_hid_size, [], self.x_embed_size, self.w_size, self.z_size)
         self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
@@ -149,7 +149,7 @@ class DynAIR(nn.Module):
         # windows. It's probably best to avoid if possible, since it
         # plausibly slows down optimisation?
 
-        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=0.0)
+        self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=0.0)
         self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
