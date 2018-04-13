@@ -328,6 +328,7 @@ class DynAIR(nn.Module):
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
         theta_inv = expand_theta(w_to_theta_inv(w))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
+        # TODO: Consider using "border" mode for padding.
         return grid_sample(images, grid).view(n, -1)
 
     def window_to_image(self, w, windows):
