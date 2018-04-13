@@ -180,17 +180,17 @@ class ParamW(nn.Module):
 # inspiration?
 
 class ParamZ(nn.Module):
-    def __init__(self, x_att_hids, hids, w_size, x_att_size, z_size):
+    def __init__(self, x_att_hids, hids, w_size, x_att_size, z_size, obj_rnn_hid_size):
         super(ParamZ, self).__init__()
         self.col_widths = [z_size, z_size]
         self.x_att_mlp = MLP(x_att_size, x_att_hids, nn.ReLU, True)
-        in_size = w_size + x_att_hids[-1] + z_size
+        in_size = w_size + x_att_hids[-1] + z_size + obj_rnn_hid_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, w, x_att, z_prev):
+    def forward(self, w, x_att, z_prev, obj_rnn_hid):
         x_att_flat = x_att.view(x_att.size(0), -1)
         x_att_h = self.x_att_mlp(x_att_flat)
-        out = self.mlp(torch.cat((w, x_att_h, z_prev), 1))
+        out = self.mlp(torch.cat((w, x_att_h, z_prev, obj_rnn_hid), 1))
         cols = split_at(out, self.col_widths)
         z_mean = cols[0]
         z_sd = softplus(cols[1])

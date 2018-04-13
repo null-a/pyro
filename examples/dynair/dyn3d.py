@@ -101,9 +101,10 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
+        obj_rnn_hid_size = 200
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size)
-        self.w_param = mod.ParamW(200, [], self.x_embed_size, self.w_size, self.z_size)
+        self.z_param = mod.ParamZ([100, 100], [100], self.w_size, self.x_att_size, self.z_size, obj_rnn_hid_size)
+        self.w_param = mod.ParamW(obj_rnn_hid_size, [], self.x_embed_size, self.w_size, self.z_size)
         self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
 
@@ -305,7 +306,7 @@ class DynAIR(nn.Module):
                     with poutine.scale(None, mask):
                         w, rnn_hids = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hids_prev)
                         x_att = self.image_to_window(w, x)
-                        z = self.guide_z(t, i, w, x_att, z_prev_i)
+                        z = self.guide_z(t, i, w, x_att, z_prev_i, rnn_hids[-1])
 
                     # Zero out unused samples here. This isn't necessary
                     # for correctness, but might help spot any mistakes
@@ -326,8 +327,8 @@ class DynAIR(nn.Module):
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, rnn_hid
 
-    def guide_z(self, t, i, w, x_att, z_prev_i):
-        z_mean, z_sd = self.z_param(w, x_att, z_prev_i)
+    def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
+        z_mean, z_sd = self.z_param(w, x_att, z_prev_i, obj_rnn_hid)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def image_to_window(self, w, images):
