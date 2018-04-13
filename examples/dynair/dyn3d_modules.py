@@ -44,7 +44,8 @@ class WTransition(nn.Module):
     def __init__(self, z_size, w_size, hid_size):
         super(WTransition, self).__init__()
         self.w_mean_net = MLP(z_size + w_size, [hid_size, w_size], nn.ReLU)
-        self._w_sd = nn.Parameter(torch.zeros(w_size))
+        # Initialize to ~0.1 (after softplus).
+        self._w_sd = nn.Parameter(torch.ones(w_size) * -2.25)
 
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)
@@ -115,6 +116,22 @@ class ParamW(nn.Module):
         self.col_widths = [w_size, w_size]
         self.mlp = MLP(rnn_hid_size, hids + [sum(self.col_widths)], nn.ReLU)
 
+        # Adjust the init. of the parameter MLP in an attempt to:
+
+        # 1) Have the w delta output by the network be close to zero
+        # at the start of optimisation. The motivation is that we want
+        # minimise drift, in the hope that this helps prevent the
+        # guide moving all of the windows out of frame during the
+        # first few steps. (Because I assume this hurts optimisation.)
+
+        # 2) Have the sd start out at around 0.1 for much the same
+        # reason. Here we match the sd the initial sd used in the
+        # model. (Is the latter sensible/helpful?)
+
+        nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
+        self.mlp.seq[-1].bias.data *= 0.0
+        self.mlp.seq[-1].bias.data[w_size:] -= 2.25
+
         self.rnn_hid_init = nn.Parameter(torch.zeros(rnn_hid_size))
         nn.init.normal(self.rnn_hid_init, std=0.01)
 
@@ -133,7 +150,7 @@ class ParamW(nn.Module):
 
         out = self.mlp(hid)
         cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
+        w_mean = w_prev_i + cols[0]
         w_sd = softplus(cols[1])
 
         return w_mean, w_sd, hid
