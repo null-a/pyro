@@ -54,10 +54,6 @@ class WTransition(nn.Module):
         w_sd = softplus(self._w_sd).expand_as(w_mean)
         return w_mean, w_sd
 
-# TODO: Use ResNet style here. Will encourage z to remain close to
-# previous values. Initialise similarly to w. (i.e. init transition
-# and guide with similar sd, use small weights.) Also consider having
-# a distinct guide for the first step, also like w.
 class ZTransition(nn.Module):
     def __init__(self, z_size, hid_size):
         super(ZTransition, self).__init__()
@@ -66,7 +62,7 @@ class ZTransition(nn.Module):
         self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
 
     def forward(self, z_prev):
-        z_mean = self.z_mean_net(z_prev)
+        z_mean = z_prev + self.z_mean_net(z_prev)
         z_sd = softplus(self._z_sd).expand_as(z_mean)
         return z_mean, z_sd
 
@@ -191,12 +187,17 @@ class ParamZ(nn.Module):
         in_size = w_size + x_att_hids[-1] + z_size + obj_rnn_hid_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
+        nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
+        self.mlp.seq[-1].bias.data *= 0.0
+        self.mlp.seq[-1].bias.data[z_size:] -= 2.25
+
+
     def forward(self, w, x_att, z_prev, obj_rnn_hid):
         x_att_flat = x_att.view(x_att.size(0), -1)
         x_att_h = self.x_att_mlp(x_att_flat)
         out = self.mlp(torch.cat((w, x_att_h, z_prev, obj_rnn_hid), 1))
         cols = split_at(out, self.col_widths)
-        z_mean = cols[0]
+        z_mean = z_prev + cols[0]
         z_sd = softplus(cols[1])
         return z_mean, z_sd
 

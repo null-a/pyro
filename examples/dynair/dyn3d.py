@@ -371,7 +371,13 @@ class DynAIR(nn.Module):
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
         theta_inv = expand_theta(w2_to_theta_inv(w, self.window_scale))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
+
         # TODO: Consider using "border" mode for padding.
+        # Interestingly, doing so seems to make it more likely that
+        # the windows wander out of frame at init. Is the presence of
+        # the black border working to discourage this from happening
+        # perhaps? Maybe work on init. some more so this *can* be
+        # used.
         return grid_sample(images, grid).view(n, -1)
 
     def window_to_image(self, w, windows):
