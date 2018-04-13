@@ -490,7 +490,7 @@ def run_svi(data, args):
     svi = SVI(dynair.model, dynair.guide,
               optim.Adam(per_param_optim_args),
               loss='ELBO',
-              param_hook=clip_grads,
+              # param_hook=clip_grads,
               trace_graph=False) # We don't have discrete choices.
 
     for i in range(10**6):
