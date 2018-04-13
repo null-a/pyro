@@ -478,6 +478,28 @@ def clip_grads(params):
     #norm_after = clip_grad_norm(params, float('inf'))
     #print('norm={}, norm_after={}'.format(norm, norm_after))
 
+def run_vis(X, Y, dynair, vis, epoch, step):
+    n = X.size(0)
+
+    frames, wss, extra_frames, extra_wss = dynair.infer(X, Y, 15)
+
+    frames = frames_to_tensor(frames)
+    ws = latents_to_tensor(wss)
+    extra_frames = frames_to_tensor(extra_frames)
+    extra_ws = latents_to_tensor(extra_wss)
+
+    for k in range(n):
+        out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y[k])
+        vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
+                   opts=dict(title='input {} after epoch {} step {}'.format(k, epoch, step)))
+        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
+                   opts=dict(title='recon {} after epoch {} step {}'.format(k, epoch, step)))
+
+        out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y[k])
+        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
+                   opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
+
+
 def run_svi(data, args):
     t0 = time.time()
     vis = visdom.Visdom()
@@ -488,6 +510,11 @@ def run_svi(data, args):
     batch_size = 25
     X_train, X_test = split(X, batch_size, 39, 1)
     Y_train, Y_test = split(Y, batch_size, 39, 1)
+
+    # Produce visualization for train & test data points.
+    ix = 40
+    X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
+    Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
 
     def per_param_optim_args(module_name, param_name):
         return {'lr': 1e-4}
@@ -507,28 +534,11 @@ def run_svi(data, args):
             elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
             elapsed = str(timedelta(seconds=time.time()- t0))
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
+            if i == 0:
+                run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
-        if i < 50 or (i+1) % 50 == 0:
-            ix = 40
-            # Produce visualization for train & test data points.
-            X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
-            Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
-            n = X_vis.size(0)
-
-            frames, wss, extra_frames, extra_wss = dynair.infer(X_vis, Y_vis, 15)
-
-            frames = frames_to_tensor(frames)
-            ws = latents_to_tensor(wss)
-            extra_frames = frames_to_tensor(extra_frames)
-            extra_ws = latents_to_tensor(extra_wss)
-
-            for k in range(n):
-                out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y_vis[k])
-                vis.images(frames_to_rgb_list(X_vis[k].cpu()), nrow=10, opts=dict(title='input {} at epoch {}'.format(k, i)))
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=10, opts=dict(title='recon {} at epoch {}'.format(k, i)))
-
-                out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y_vis[k])
-                vis.images(frames_to_rgb_list(out.cpu()), nrow=10, opts=dict(title='extra {} at epoch {}'.format(k, i)))
+        if 0 < i and (i < 50 or (i+1) % 50 == 0):
+            run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
         if (i+1) % 50 == 0:
             #print('Saving parameters...')
