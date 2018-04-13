@@ -54,6 +54,10 @@ class WTransition(nn.Module):
         w_sd = softplus(self._w_sd).expand_as(w_mean)
         return w_mean, w_sd
 
+# TODO: Use ResNet style here. Will encourage z to remain close to
+# previous values. Initialise similarly to w. (i.e. init transition
+# and guide with similar sd, use small weights.) Also consider having
+# a distinct guide for the first step, also like w.
 class ZTransition(nn.Module):
     def __init__(self, z_size, hid_size):
         super(ZTransition, self).__init__()

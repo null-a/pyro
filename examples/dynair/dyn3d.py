@@ -89,7 +89,42 @@ class DynAIR(nn.Module):
         # Parameters.
         self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
         self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
+
+        # TODO: I'm not entirely happy using the same guide for the
+        # first step as subsequent steps, since each requires a
+        # somewhat different computation. The first requires computing
+        # an absolute position, and the latter computing a delta,
+        # given the previous position.
+
+        # It's possible that the guide can use z_init to spot when
+        # it's at the first step, and output a position based on the
+        # input frame only. (Ignoring the uninformative w_prev.) But
+        # consider using a separate RNN (or separate first layer of
+        # the RNN) for this first step? (What about x_embed? Share
+        # still?)
+
+        # An argument against this is that when we have videos in
+        # which objects don't appear until after the first frame,
+        # we'll face a similar situation at later frames as we do now.
+        # This suggests we need to use the same guide for w at all
+        # steps, since special casing just the first step isn't
+        # sufficient. (Though in that case, we'd maybe have some kind
+        # of precence variables, which may change things? e.g. With a
+        # discrete choice we might compute the first w only when we
+        # decide to add an object.)
+
+        # If the guide works by accumulating evidence over time, then
+        # this does kinda make sense. z might tell the guide something
+        # about how confident it is that it's "locked on" to an
+        # object, and this can then be used to modulate between
+        # looking at the input only, and outputting a delta of the
+        # previous w. (Though as discussed elsewhere, this is an odd
+        # use of z.)
+
         self.guide_w_init = Variable(self.prototype.new_zeros(self.w_size))
+
+        # TODO: Consider sharing across objects?
+        # TODO: Small init.
         self.guide_z_init = nn.ParameterList(
             [nn.Parameter(torch.zeros(self.z_size)) for _ in range(self.max_obj_count)])
 
