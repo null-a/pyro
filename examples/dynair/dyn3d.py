@@ -88,6 +88,7 @@ class DynAIR(nn.Module):
 
         # Parameters.
         self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
+        self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
         self.guide_w_init = nn.ParameterList(
             [nn.Parameter(torch.zeros(self.w_size)) for _ in range(self.max_obj_count)])
         self.guide_z_init = nn.ParameterList(
@@ -274,6 +275,7 @@ class DynAIR(nn.Module):
         w_init = [batch_expand(w_init_i, batch_size) for w_init_i in self.guide_w_init]
         z_init = [batch_expand(z_init_i, batch_size) for z_init_i in self.guide_z_init]
         w_t_init = batch_expand(self.guide_w_t_init, batch_size)
+        z_t_init = batch_expand(self.guide_z_t_init, batch_size)
 
         with pyro.iarange('data'):
 
@@ -286,7 +288,7 @@ class DynAIR(nn.Module):
 
                 x = batch[:, t]
                 x_embed = self.x_embed(x)
-                rnn_hid_prev = None
+                rnn_hids_prev = None
 
                 # As in the model, we'll sample max_obj_count objects for
                 # all sequences, and ignore the ones we don't need.
@@ -296,11 +298,12 @@ class DynAIR(nn.Module):
                     w_prev_i = ws[t-1][i] if t > 0 else w_init[i]
                     z_prev_i = zs[t-1][i] if t > 0 else z_init[i]
                     w_t_prev = ws[t][i-1] if i > 0 else w_t_init
+                    z_t_prev = zs[t][i-1] if i > 0 else z_t_init
 
                     mask = Variable((obj_counts > i).float())
 
                     with poutine.scale(None, mask):
-                        w, rnn_hid = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+                        w, rnn_hids = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hids_prev)
                         x_att = self.image_to_window(w, x)
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
@@ -310,7 +313,7 @@ class DynAIR(nn.Module):
                     ws[t][i] = w * mask.view(-1, 1)
                     zs[t][i] = z * mask.view(-1, 1)
 
-                    rnn_hid_prev = rnn_hid
+                    rnn_hids_prev = rnn_hids
 
         return ws, zs, y
 
@@ -318,8 +321,8 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
 
-    def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev):
-        w_mean, w_sd, rnn_hid = self.w_param(x_embed, w_prev_i, z_prev_i, w_t_prev, rnn_hid_prev)
+    def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
+        w_mean, w_sd, rnn_hid = self.w_param(x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev)
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, rnn_hid
 
