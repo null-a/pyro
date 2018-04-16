@@ -149,7 +149,7 @@ class DynAIR(nn.Module):
         # windows. It's probably best to avoid if possible, since it
         # plausibly slows down optimisation?
 
-        self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=0.0)
+        self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
