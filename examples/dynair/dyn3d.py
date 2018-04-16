@@ -26,9 +26,11 @@ import time
 from datetime import timedelta
 
 class DynAIR(nn.Module):
-    def __init__(self, use_cuda=False):
+    def __init__(self, dedicated_t0_guide=True, use_cuda=False):
 
         super(DynAIR, self).__init__()
+
+        self.dedicated_t0_guide = dedicated_t0_guide
 
         # TODO: Could all the tensors created from the prototype be
         # replaced with `Parameter(..., requires_grad=False)` so that
@@ -123,11 +125,11 @@ class DynAIR(nn.Module):
         # previous w. (Though as discussed elsewhere, this is an odd
         # use of z.)
 
-        self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
-
-        # TODO: Small init.
-        self.guide_w_z_init = nn.Parameter(torch.zeros(self.z_size))
-        self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
+        if not self.dedicated_t0_guide:
+            self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
+            # TODO: Small init.
+            self.guide_w_z_init = nn.Parameter(torch.zeros(self.z_size))
+            self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
 
         # Modules
 
@@ -140,7 +142,17 @@ class DynAIR(nn.Module):
                                   self.z_size)
         self.w_param = mod.ParamW(
             self.x_embed_size + self.w_size + self.z_size, # input size
-            self.obj_rnn_hid_size, [], self.w_size, self.z_size)
+            self.obj_rnn_hid_size, [], self.w_size, self.z_size,
+            sd_bias=-2.25)
+
+        if self.dedicated_t0_guide:
+            self.z0_param = mod.ParamZ([200, 200],
+                                      self.w_size + self.x_att_embed_size + self.obj_rnn_hid_size, # input size
+                                      self.z_size)
+            self.w0_param = mod.ParamW(
+                self.x_embed_size, # input size
+                self.obj_rnn_hid_size, [], self.w_size, self.z_size,
+                sd_bias=0.0) # TODO: This could probably stand to be increased a little.
 
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
@@ -357,23 +369,29 @@ class DynAIR(nn.Module):
 
     def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
         batch_size = x_embed.size(0)
-        if t == 0:
-            assert w_prev_i is None and z_prev_i is None
-            w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
-            z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
-        w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
-        w_mean = w_prev_i + w_delta
+        if t == 0 and self.dedicated_t0_guide:
+            w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
+        else:
+            if t == 0:
+                assert w_prev_i is None and z_prev_i is None
+                w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
+                z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
+            w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
+            w_mean = w_prev_i + w_delta
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, rnn_hid
 
     def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
         batch_size = w.size(0)
-        if t == 0:
-            assert z_prev_i is None
-            z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
         x_att_embed = self.x_att_embed(x_att)
-        z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i, obj_rnn_hid), 1))
-        z_mean = z_prev_i + z_delta
+        if t == 0 and self.dedicated_t0_guide:
+            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed, obj_rnn_hid), 1))
+        else:
+            if t == 0:
+                assert z_prev_i is None
+                z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
+            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i, obj_rnn_hid), 1))
+            z_mean = z_prev_i + z_delta
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def image_to_window(self, w, images):

@@ -107,7 +107,7 @@ class EmbedX(nn.Module):
 # more accurately.
 
 class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size):
+    def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size, sd_bias=0.0):
         super(ParamW, self).__init__()
 
         self.input_size = input_size
@@ -151,7 +151,7 @@ class ParamW(nn.Module):
 
         nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
         self.mlp.seq[-1].bias.data *= 0.0
-        self.mlp.seq[-1].bias.data[w_size:] -= 2.25
+        self.mlp.seq[-1].bias.data[w_size:] += sd_bias
 
     def forward(self, inp, w_t_prev, z_t_prev, rnn_hids_prev):
         batch_size = inp.size(0)
