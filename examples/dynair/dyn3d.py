@@ -85,10 +85,9 @@ class DynAIR(nn.Module):
 
         self.likelihood_sd = 0.3
 
-
         # Parameters.
-        self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
-        self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
+        # self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
+        # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
         # TODO: I'm not entirely happy using the same guide for the
         # first step as subsequent steps, since each requires a
@@ -121,13 +120,11 @@ class DynAIR(nn.Module):
         # previous w. (Though as discussed elsewhere, this is an odd
         # use of z.)
 
-        self.guide_w_init = Variable(self.prototype.new_zeros(self.w_size))
+        self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
 
-        # TODO: Consider sharing across objects?
         # TODO: Small init.
-        self.guide_z_init = nn.ParameterList(
-            [nn.Parameter(torch.zeros(self.z_size)) for _ in range(self.max_obj_count)])
-
+        self.guide_w_z_init = nn.Parameter(torch.zeros(self.z_size))
+        self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
 
         # Modules
 
@@ -138,7 +135,9 @@ class DynAIR(nn.Module):
         obj_rnn_hid_size = 200
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([200], [200, 200], self.w_size, self.x_att_size, self.z_size, obj_rnn_hid_size)
-        self.w_param = mod.ParamW(obj_rnn_hid_size, [], self.x_embed_size, self.w_size, self.z_size)
+        self.w_param = mod.ParamW(
+            self.x_embed_size + self.w_size + self.z_size, # input size
+            obj_rnn_hid_size, [], self.w_size, self.z_size)
         self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
 
@@ -307,11 +306,6 @@ class DynAIR(nn.Module):
         ws = mk_matrix(self.seq_length, self.max_obj_count)
         zs = mk_matrix(self.seq_length, self.max_obj_count)
 
-        w_init = batch_expand(self.guide_w_init, batch_size)
-        z_init = [batch_expand(z_init_i, batch_size) for z_init_i in self.guide_z_init]
-        w_t_init = batch_expand(self.guide_w_t_init, batch_size)
-        z_t_init = batch_expand(self.guide_z_t_init, batch_size)
-
         with pyro.iarange('data'):
 
             # NOTE: Here we're guiding y based on the contents of the
@@ -330,10 +324,10 @@ class DynAIR(nn.Module):
 
                 for i in range(self.max_obj_count):
 
-                    w_prev_i = ws[t-1][i] if t > 0 else w_init
-                    z_prev_i = zs[t-1][i] if t > 0 else z_init[i]
-                    w_t_prev = ws[t][i-1] if i > 0 else w_t_init
-                    z_t_prev = zs[t][i-1] if i > 0 else z_t_init
+                    w_prev_i = ws[t-1][i] if t > 0 else None
+                    z_prev_i = zs[t-1][i] if t > 0 else None
+                    w_t_prev = ws[t][i-1] if i > 0 else None
+                    z_t_prev = zs[t][i-1] if i > 0 else None
 
                     mask = Variable((obj_counts > i).float())
 
@@ -357,11 +351,20 @@ class DynAIR(nn.Module):
         return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
 
     def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
-        w_mean, w_sd, rnn_hid = self.w_param(x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev)
+        batch_size = x_embed.size(0)
+        if w_prev_i is None:
+            w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
+        if z_prev_i is None:
+            z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
+        w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
+        w_mean = w_prev_i + w_delta
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, rnn_hid
 
     def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
+        batch_size = w.size(0)
+        if z_prev_i is None:
+            z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
         z_mean, z_sd = self.z_param(w, x_att, z_prev_i, obj_rnn_hid)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 

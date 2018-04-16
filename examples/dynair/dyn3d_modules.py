@@ -107,10 +107,14 @@ class EmbedX(nn.Module):
 # more accurately.
 
 class ParamW(nn.Module):
-    def __init__(self, rnn_hid_size, hids, x_embed_size, w_size, z_size):
+    def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size):
         super(ParamW, self).__init__()
 
-        rnn_input_size = x_embed_size + w_size * 2 + z_size * 2
+        self.input_size = input_size
+        self.w_size = w_size
+        self.z_size = z_size
+
+        rnn_input_size = input_size + w_size + z_size
 
         self.rnns = nn.ModuleList([
             nn.RNNCell(rnn_input_size, rnn_hid_size),
@@ -130,6 +134,9 @@ class ParamW(nn.Module):
         self.col_widths = [w_size, w_size]
         self.mlp = MLP(rnn_hid_size, hids + [sum(self.col_widths)], nn.ReLU)
 
+        self.w_t_prev_init = nn.Parameter(torch.zeros(w_size))
+        self.z_t_prev_init = nn.Parameter(torch.zeros(z_size))
+
         # Adjust the init. of the parameter MLP in an attempt to:
 
         # 1) Have the w delta output by the network be close to zero
@@ -146,10 +153,9 @@ class ParamW(nn.Module):
         self.mlp.seq[-1].bias.data *= 0.0
         self.mlp.seq[-1].bias.data[w_size:] -= 2.25
 
-    def forward(self, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hids_prev):
-        batch_size = x_embed.size(0)
-
-        inp = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
+    def forward(self, inp, w_t_prev, z_t_prev, rnn_hids_prev):
+        batch_size = inp.size(0)
+        assert inp.size(1) == self.input_size
 
         if rnn_hids_prev is None:
             hids_prev = [rnn_hid_init.expand(batch_size, -1)
@@ -157,10 +163,16 @@ class ParamW(nn.Module):
         else:
             hids_prev = rnn_hids_prev
 
-        hids = self.apply_rnn_stack(hids_prev, inp)
+        if w_t_prev is None:
+            w_t_prev = self.w_t_prev_init.expand(batch_size, self.w_size)
+        if z_t_prev is None:
+            z_t_prev = self.z_t_prev_init.expand(batch_size, self.z_size)
+
+        rnn_input = torch.cat((inp, w_t_prev, z_t_prev), 1)
+        hids = self.apply_rnn_stack(hids_prev, rnn_input)
         out = self.mlp(hids[-1])
         cols = split_at(out, self.col_widths)
-        w_mean = w_prev_i + cols[0]
+        w_mean = cols[0]
         w_sd = softplus(cols[1])
 
         return w_mean, w_sd, hids
