@@ -357,9 +357,9 @@ class DynAIR(nn.Module):
 
     def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
         batch_size = x_embed.size(0)
-        if w_prev_i is None:
+        if t == 0:
+            assert w_prev_i is None and z_prev_i is None
             w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
-        if z_prev_i is None:
             z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
         w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
         w_mean = w_prev_i + w_delta
@@ -368,7 +368,8 @@ class DynAIR(nn.Module):
 
     def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
         batch_size = w.size(0)
-        if z_prev_i is None:
+        if t == 0:
+            assert z_prev_i is None
             z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
         x_att_embed = self.x_att_embed(x_att)
         z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i, obj_rnn_hid), 1))
