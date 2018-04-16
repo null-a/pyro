@@ -57,6 +57,7 @@ class DynAIR(nn.Module):
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
         self.x_embed_size = 800
+        self.x_att_embed_size = 200
 
         # bkg_rgb = self.prototype.new_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.prototype.new_ones(1, self.image_size, self.image_size)
@@ -134,12 +135,15 @@ class DynAIR(nn.Module):
         # Guide modules:
         obj_rnn_hid_size = 200
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.z_param = mod.ParamZ([200], [200, 200], self.w_size, self.x_att_size, self.z_size, obj_rnn_hid_size)
+        self.z_param = mod.ParamZ([200, 200],
+                                  self.w_size + self.x_att_embed_size + self.z_size + obj_rnn_hid_size, # input size
+                                  self.z_size)
         self.w_param = mod.ParamW(
             self.x_embed_size + self.w_size + self.z_size, # input size
             obj_rnn_hid_size, [], self.w_size, self.z_size)
-        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
 
+        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
+        self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
         # TODO: Consider using init. that outputs black/transparent images.
@@ -365,7 +369,9 @@ class DynAIR(nn.Module):
         batch_size = w.size(0)
         if z_prev_i is None:
             z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
-        z_mean, z_sd = self.z_param(w, x_att, z_prev_i, obj_rnn_hid)
+        x_att_embed = self.x_att_embed(x_att)
+        z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i, obj_rnn_hid), 1))
+        z_mean = z_prev_i + z_delta
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def image_to_window(self, w, images):

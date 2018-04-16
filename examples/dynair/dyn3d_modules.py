@@ -188,28 +188,34 @@ class ParamW(nn.Module):
         return hids
 
 
+
+class EmbedXAtt(nn.Module):
+    def __init__(self, hids, x_att_embed_size, x_att_size):
+        super(EmbedXAtt, self).__init__()
+        self.mlp = MLP(x_att_size, hids + [x_att_embed_size], nn.ReLU, True)
+
+    def forward(self, x_att):
+        x_att_flat = x_att.view(x_att.size(0), -1)
+        return self.mlp(x_att_flat)
+
+
 # TODO: Similarly, what should this look like. Re-visit DMM for
 # inspiration?
 
 class ParamZ(nn.Module):
-    def __init__(self, x_att_hids, hids, w_size, x_att_size, z_size, obj_rnn_hid_size):
+    def __init__(self, hids, in_size, z_size):
         super(ParamZ, self).__init__()
         self.col_widths = [z_size, z_size]
-        self.x_att_mlp = MLP(x_att_size, x_att_hids, nn.ReLU, True)
-        in_size = w_size + x_att_hids[-1] + z_size + obj_rnn_hid_size
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
         nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
         self.mlp.seq[-1].bias.data *= 0.0
         self.mlp.seq[-1].bias.data[z_size:] -= 2.25
 
-
-    def forward(self, w, x_att, z_prev, obj_rnn_hid):
-        x_att_flat = x_att.view(x_att.size(0), -1)
-        x_att_h = self.x_att_mlp(x_att_flat)
-        out = self.mlp(torch.cat((w, x_att_h, z_prev, obj_rnn_hid), 1))
+    def forward(self, inp):
+        out = self.mlp(inp)
         cols = split_at(out, self.col_widths)
-        z_mean = z_prev + cols[0]
+        z_mean = cols[0]
         z_sd = softplus(cols[1])
         return z_mean, z_sd
 
