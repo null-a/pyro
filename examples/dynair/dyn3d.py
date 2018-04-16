@@ -59,6 +59,8 @@ class DynAIR(nn.Module):
         self.x_embed_size = 800
         self.x_att_embed_size = 200
 
+        self.obj_rnn_hid_size = 200
+
         # bkg_rgb = self.prototype.new_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.prototype.new_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
@@ -133,15 +135,14 @@ class DynAIR(nn.Module):
         # MLP so that I have something to test.)
 
         # Guide modules:
-        obj_rnn_hid_size = 200
-        self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.z_param = mod.ParamZ([200, 200],
-                                  self.w_size + self.x_att_embed_size + self.z_size + obj_rnn_hid_size, # input size
+                                  self.w_size + self.x_att_embed_size + self.z_size + self.obj_rnn_hid_size, # input size
                                   self.z_size)
         self.w_param = mod.ParamW(
             self.x_embed_size + self.w_size + self.z_size, # input size
-            obj_rnn_hid_size, [], self.w_size, self.z_size)
+            self.obj_rnn_hid_size, [], self.w_size, self.z_size)
 
+        self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
         self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
