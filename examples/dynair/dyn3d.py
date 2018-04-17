@@ -264,14 +264,18 @@ class DynAIR(nn.Module):
 
     def model_emission(self, zs, ws, bkg, obj_counts):
         #batch_size = z.size(0)
-        #assert z.size(0) == w.size(0)
         acc = bkg
         for i, (z, w) in enumerate(zip(zs, ws)):
-            assert z.size(0) == w.size(0)
-            mask = Variable((obj_counts > i).float())
-            x_att = self.decode_obj(z) * mask.view(-1, 1)
-            acc = over(self.window_to_image(w, x_att), acc)
+            mask = tuple((obj_counts > i).tolist())
+            acc = self.model_composite_object(z, w, mask, acc)
         return acc
+
+    def model_composite_object(self, z, w, mask, image_so_far):
+        assert type(mask) == tuple # to facilitate caching on the mask
+        assert z.size(0) == w.size(0) == image_so_far.size(0)
+        mask = Variable(torch.Tensor(mask).type_as(z)) # move to gpu
+        x_att = self.decode_obj(z) * mask.view(-1, 1)
+        return over(self.window_to_image(w, x_att), image_so_far)
 
 
     # ==GUIDE==================================================
@@ -318,7 +322,7 @@ class DynAIR(nn.Module):
                     mask = Variable((obj_counts > i).float())
 
                     with poutine.scale(None, mask):
-                        w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, w_guide_state_prev)
+                        w, w_guide_state = self.guide_w(t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, w_guide_state_prev)
                         x_att = self.image_to_window(w, x)
 
                         # TODO: If I decide to bring back the idea of
@@ -367,7 +371,7 @@ class DynAIR(nn.Module):
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, w_guide_state
 
-    def guide_w_image_so_far(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, image_so_far_prev):
+    def guide_w_image_so_far(self, t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, image_so_far_prev):
         batch_size = x.size(0)
 
         if i == 0:
@@ -378,8 +382,9 @@ class DynAIR(nn.Module):
             assert w_t_prev is not None
             assert z_t_prev is not None
             # Add previous object to image so far.
-            x_att = self.decode_obj(z_t_prev) # TODO: * mask?, careful with caching.
-            image_so_far = over(self.window_to_image(w_t_prev, x_att), image_so_far_prev)
+            image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
+                                                       tuple(mask.tolist()),
+                                                       image_so_far_prev)
 
         if t == 0:
             assert w_prev_i is None and z_prev_i is None
@@ -393,7 +398,7 @@ class DynAIR(nn.Module):
         w_mean = w_prev_i + w_delta
         return w_mean, w_sd, image_so_far
 
-    def guide_w_rnn(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
+    def guide_w_rnn(self, t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
         batch_size = x.size(0)
 
         # TODO: Requires caching to avoid repeated computation.
