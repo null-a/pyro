@@ -101,7 +101,7 @@ class DynAIR(nn.Module):
 
         # Guide modules:
         self.z_param = mod.ParamZ([200, 200],
-                                  self.w_size + self.x_att_embed_size + self.z_size + self.obj_rnn_hid_size, # input size
+                                  self.w_size + self.x_att_embed_size + self.z_size, # input size
                                   self.z_size)
         self.w_param = mod.ParamW(
             self.x_embed_size + self.w_size + self.z_size, # input size
@@ -110,7 +110,7 @@ class DynAIR(nn.Module):
 
         if self.dedicated_t0_guide:
             self.z0_param = mod.ParamZ([200, 200],
-                                      self.w_size + self.x_att_embed_size + self.obj_rnn_hid_size, # input size
+                                      self.w_size + self.x_att_embed_size, # input size
                                       self.z_size)
             self.w0_param = mod.ParamW(
                 self.x_embed_size, # input size
@@ -309,7 +309,7 @@ class DynAIR(nn.Module):
                     with poutine.scale(None, mask):
                         w, rnn_hids = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hids_prev)
                         x_att = self.image_to_window(w, x)
-                        z = self.guide_z(t, i, w, x_att, z_prev_i, rnn_hids[-1])
+                        z = self.guide_z(t, i, w, x_att, z_prev_i)
 
                     # Zero out unused samples here. This isn't necessary
                     # for correctness, but might help spot any mistakes
@@ -340,15 +340,16 @@ class DynAIR(nn.Module):
         return w, rnn_hid
 
     def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
+    def guide_z(self, t, i, w, x_att, z_prev_i):
         batch_size = w.size(0)
         x_att_embed = self.x_att_embed(x_att)
         if t == 0 and self.dedicated_t0_guide:
-            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed, obj_rnn_hid), 1))
+            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
         else:
             if t == 0:
                 assert z_prev_i is None
                 z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
-            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i, obj_rnn_hid), 1))
+            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
             z_mean = z_prev_i + z_delta
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
