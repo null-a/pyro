@@ -96,6 +96,20 @@ class EmbedX(nn.Module):
         return self.mlp(x_flat)
 
 
+class ParamWISF(nn.Module):
+    def __init__(self, input_size, hids, w_size):
+        super(ParamWISF, self).__init__()
+        self.col_widths = [w_size, w_size]
+        self.mlp = MLP(input_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, inp):
+        out = self.mlp(inp)
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+
 class ParamW(nn.Module):
     def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size, sd_bias=0.0):
         super(ParamW, self).__init__()

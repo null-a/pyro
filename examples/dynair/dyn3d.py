@@ -24,13 +24,20 @@ import argparse
 from collections import defaultdict
 import time
 from datetime import timedelta
+import enum
+
+class GuideArch(enum.Enum):
+    rnn = enum.auto()
+    rnnt0 = enum.auto() # dedicate nets for step t=0
+    isf = enum.auto()   # image-so-far
+
 
 class DynAIR(nn.Module):
-    def __init__(self, dedicated_t0_guide=True, use_cuda=False):
+    def __init__(self, guide_arch=GuideArch.isf, use_cuda=False):
 
         super(DynAIR, self).__init__()
 
-        self.dedicated_t0_guide = dedicated_t0_guide
+        self.guide_arch = guide_arch
 
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.use_cuda = use_cuda
@@ -91,7 +98,7 @@ class DynAIR(nn.Module):
         # self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
         # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
-        if not self.dedicated_t0_guide:
+        if self.guide_arch in [GuideArch.rnn, GuideArch.isf]:
             self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
             # TODO: Small init.
             self.guide_w_z_init = nn.Parameter(torch.zeros(self.z_size))
@@ -103,12 +110,16 @@ class DynAIR(nn.Module):
         self.z_param = mod.ParamZ([200, 200],
                                   self.w_size + self.x_att_embed_size + self.z_size, # input size
                                   self.z_size)
-        self.w_param = mod.ParamW(
-            self.x_embed_size + self.w_size + self.z_size, # input size
-            self.obj_rnn_hid_size, [], self.w_size, self.z_size,
-            sd_bias=-2.25)
 
-        if self.dedicated_t0_guide:
+        if self.guide_arch == GuideArch.isf:
+            self.w_param_isf = mod.ParamWISF(self.x_size + self.w_size + self.z_size, [500, 200], self.w_size)
+        else:
+            self.w_param = mod.ParamW(
+                self.x_embed_size + self.w_size + self.z_size, # input size
+                self.obj_rnn_hid_size, [], self.w_size, self.z_size,
+                sd_bias=-2.25)
+
+        if self.guide_arch == GuideArch.rnnt0:
             self.z0_param = mod.ParamZ([200, 200],
                                       self.w_size + self.x_att_embed_size, # input size
                                       self.z_size)
@@ -118,7 +129,8 @@ class DynAIR(nn.Module):
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
 
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
+        if not self.guide_arch == GuideArch.isf:
+            self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
         self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
@@ -291,8 +303,7 @@ class DynAIR(nn.Module):
             for t in range(self.seq_length):
 
                 x = batch[:, t]
-                x_embed = self.x_embed(x)
-                rnn_hids_prev = None
+                w_guide_state_prev = None
 
                 # As in the model, we'll sample max_obj_count objects for
                 # all sequences, and ignore the ones we don't need.
@@ -307,8 +318,33 @@ class DynAIR(nn.Module):
                     mask = Variable((obj_counts > i).float())
 
                     with poutine.scale(None, mask):
-                        w, rnn_hids = self.guide_w(t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hids_prev)
+                        w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, w_guide_state_prev)
                         x_att = self.image_to_window(w, x)
+
+                        # TODO: If I decide to bring back the idea of
+                        # feeding the top layer of the RNN hidden
+                        # state into the guide for z, I might
+                        # implement it like so: Have guide_w return a
+                        # `summary_for_guide_z` value which we pass
+                        # below. For the RNN guide this would just
+                        # return the top layer of hiddens. For
+                        # image-so-far we could:
+
+                        # 1. `return None`, which
+                        # guide_z would need updating to handle).
+
+                        # 2. Add an RNN to image to far that
+                        # incorporates sampled w and z, and return its
+                        # hidden states as `summary_for_z`.
+
+                        # 3. Use w to crop a window from image-so-far,
+                        # and pass that as an extra input to guide_z.
+                        # If the idea is to help the guide when there
+                        # are multiple object within the window, it
+                        # seems like this could work, and it's more in
+                        # keeping with the rest of the image-so-far
+                        # style.
+
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
                     # Zero out unused samples here. This isn't necessary
@@ -317,7 +353,7 @@ class DynAIR(nn.Module):
                     ws[t][i] = w * mask.view(-1, 1)
                     zs[t][i] = z * mask.view(-1, 1)
 
-                    rnn_hids_prev = rnn_hids
+                    w_guide_state_prev = w_guide_state
 
         return ws, zs, y
 
@@ -325,9 +361,45 @@ class DynAIR(nn.Module):
         y_mean, y_sd = self.y_param(x0)
         return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
 
-    def guide_w(self, t, i, x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
-        batch_size = x_embed.size(0)
-        if t == 0 and self.dedicated_t0_guide:
+    def guide_w(self, t, i, *args, **kwargs):
+        guide_w_params = self.guide_w_image_so_far if self.guide_arch == GuideArch.isf else self.guide_w_rnn
+        w_mean, w_sd, w_guide_state = guide_w_params(t, i, *args, **kwargs)
+        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
+        return w, w_guide_state
+
+    def guide_w_image_so_far(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, image_so_far_prev):
+        batch_size = x.size(0)
+
+        if i == 0:
+            assert image_so_far_prev is None
+            image_so_far = self.decode_bkg(y)
+        else:
+            assert image_so_far_prev is not None
+            assert w_t_prev is not None
+            assert z_t_prev is not None
+            # Add previous object to image so far.
+            x_att = self.decode_obj(z_t_prev) # TODO: * mask?, careful with caching.
+            image_so_far = over(self.window_to_image(w_t_prev, x_att), image_so_far_prev)
+
+        if t == 0:
+            assert w_prev_i is None and z_prev_i is None
+            w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
+            z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
+
+        # For simplicity, feed `x - image_so_far` into the net, though
+        # note that alternatives exist.
+        diff = (x - image_so_far).reshape(batch_size, -1)
+        w_delta, w_sd = self.w_param_isf(torch.cat((diff, w_prev_i, z_prev_i), 1))
+        w_mean = w_prev_i + w_delta
+        return w_mean, w_sd, image_so_far
+
+    def guide_w_rnn(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
+        batch_size = x.size(0)
+
+        # TODO: Requires caching to avoid repeated computation.
+        x_embed = self.x_embed(x)
+
+        if t == 0 and self.guide_arch == GuideArch.rnnt0:
             w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
         else:
             if t == 0:
@@ -336,14 +408,13 @@ class DynAIR(nn.Module):
                 z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
             w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
             w_mean = w_prev_i + w_delta
-        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
-        return w, rnn_hid
 
-    def guide_z(self, t, i, w, x_att, z_prev_i, obj_rnn_hid):
+        return w_mean, w_sd, rnn_hid
+
     def guide_z(self, t, i, w, x_att, z_prev_i):
         batch_size = w.size(0)
         x_att_embed = self.x_att_embed(x_att)
-        if t == 0 and self.dedicated_t0_guide:
+        if t == 0 and self.guide_arch == GuideArch.rnnt0:
             z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
         else:
             if t == 0:
