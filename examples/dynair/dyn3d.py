@@ -155,7 +155,7 @@ class DynAIR(nn.Module):
         # Model modules:
 
         self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
-        self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
+        self._decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
         self.z_transition = mod.ZTransition(self.z_size, 50)
@@ -172,6 +172,12 @@ class DynAIR(nn.Module):
         self.cache = dict()
         self.cache_stats = defaultdict(lambda: dict(miss=0, hit=0))
 
+    # We wrap `_decode_bkg` here to enable caching without
+    # interferring with the magic behaviour that comes from having an
+    # `nn.Module` as a property of the model class.
+    @cached
+    def decode_bkg(self, *args, **kwargs):
+        return self._decode_bkg(*args, **kwargs)
 
     # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, obj_counts, do_likelihood=True):
@@ -284,10 +290,8 @@ class DynAIR(nn.Module):
                     z = self.model_sample_z_0(i, batch_size)
                     w = self.model_sample_w_0(i, batch_size)
 
-            # Zero out unused samples here. This isn't necessary for
-            # correctness, but might help spot any mistakes elsewhere.
-            zs.append(z * mask.view(-1, 1))
-            ws.append(w * mask.view(-1, 1))
+            zs.append(z)
+            ws.append(w)
 
         return zs, ws
 
@@ -299,6 +303,7 @@ class DynAIR(nn.Module):
             acc = self.model_composite_object(z, w, mask, acc)
         return acc
 
+    @cached
     def model_composite_object(self, z, w, mask, image_so_far):
         assert type(mask) == tuple # to facilitate caching on the mask
         assert z.size(0) == w.size(0) == image_so_far.size(0)
@@ -337,6 +342,7 @@ class DynAIR(nn.Module):
 
                 x = batch[:, t]
                 w_guide_state_prev = None
+                mask_prev = None
 
                 # As in the model, we'll sample max_obj_count objects for
                 # all sequences, and ignore the ones we don't need.
@@ -351,7 +357,7 @@ class DynAIR(nn.Module):
                     mask = Variable((obj_counts > i).float())
 
                     with poutine.scale(None, mask):
-                        w, w_guide_state = self.guide_w(t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, w_guide_state_prev)
+                        w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
                         x_att = self.image_to_window(w, x)
 
                         # TODO: If I decide to bring back the idea of
@@ -380,13 +386,11 @@ class DynAIR(nn.Module):
 
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
-                    # Zero out unused samples here. This isn't necessary
-                    # for correctness, but might help spot any mistakes
-                    # elsewhere.
-                    ws[t][i] = w * mask.view(-1, 1)
-                    zs[t][i] = z * mask.view(-1, 1)
+                    ws[t][i] = w
+                    zs[t][i] = z
 
                     w_guide_state_prev = w_guide_state
+                    mask_prev = mask
 
         return ws, zs, y
 
@@ -400,11 +404,12 @@ class DynAIR(nn.Module):
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, w_guide_state
 
-    def guide_w_image_so_far(self, t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, image_so_far_prev):
+    def guide_w_image_so_far(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
         batch_size = x.size(0)
 
         if i == 0:
             assert image_so_far_prev is None
+            assert mask_prev is None
             image_so_far = self.decode_bkg(y)
         else:
             assert image_so_far_prev is not None
@@ -412,7 +417,7 @@ class DynAIR(nn.Module):
             assert z_t_prev is not None
             # Add previous object to image so far.
             image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
-                                                       tuple(mask.tolist()),
+                                                       tuple(mask_prev.tolist()),
                                                        image_so_far_prev)
 
         if t == 0:
@@ -427,7 +432,7 @@ class DynAIR(nn.Module):
         w_mean = w_prev_i + w_delta
         return w_mean, w_sd, image_so_far
 
-    def guide_w_rnn(self, t, i, mask, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, rnn_hid_prev):
+    def guide_w_rnn(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
         batch_size = x.size(0)
 
         # TODO: Requires caching to avoid repeated computation.
@@ -666,6 +671,8 @@ def run_svi(data, args):
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             if i == 0:
                 run_vis(X_vis, Y_vis, dynair, vis, i, j)
+
+            #print(dynair.cache_stats)
 
         if 0 < i and (i < 50 or (i+1) % 50 == 0):
             run_vis(X_vis, Y_vis, dynair, vis, i, j)
