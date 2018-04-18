@@ -130,6 +130,10 @@ class DynAIR(nn.Module):
                                   self.w_size + self.x_att_embed_size + self.z_size, # input size
                                   self.z_size)
 
+        # TODO: This is a mess. Can I split out a separate module for
+        # the w guide, in order to keep all the state (parameters &
+        # modules) better organised?
+
         if self.guide_arch == GuideArch.isf:
             self.w_param_isf = mod.ParamWISF(self.x_size + self.w_size + self.z_size, [500, 200, 200], self.w_size)
         else:
@@ -423,6 +427,9 @@ class DynAIR(nn.Module):
             image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
                                                        tuple(mask_prev.tolist()),
                                                        image_so_far_prev)
+
+        # TODO: Should we be preventing gradients from flowing back
+        # from the guide through image_so_far?
 
         if t == 0:
             assert w_prev_i is None and z_prev_i is None
