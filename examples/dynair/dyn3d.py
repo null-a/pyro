@@ -40,21 +40,33 @@ def cached(f):
     def cached_f(self, *args, **kwargs):
         assert len(kwargs) == 0, 'kwargs not supported'
         key = (name,) + args
-        if key in self.cache:
-            self.cache_stats[name]['hit'] += 1
-            return self.cache[key]
+        if key in self.cache.store:
+            self.cache.stats[name]['hit'] += 1
+            return self.cache.store[key]
         else:
-            self.cache_stats[name]['miss'] += 1
+            self.cache.stats[name]['miss'] += 1
             out = f(self, *args)
-            self.cache[key] = out
+            self.cache.store[key] = out
             return out
     return cached_f
+
+
+class PropCache():
+    def __init__(self):
+        # TODO: Figure out why this didn't work with a
+        # WeakValueDictionary.
+        # (Since it would be nice to not have to think about clearing
+        # the cache.)
+        self.store = dict()
+        self.stats = defaultdict(lambda: dict(miss=0, hit=0))
 
 
 class DynAIR(nn.Module):
     def __init__(self, guide_arch=GuideArch.isf, use_cuda=False):
 
         super(DynAIR, self).__init__()
+
+        self.cache = PropCache()
 
         self.guide_arch = guide_arch
 
@@ -118,42 +130,28 @@ class DynAIR(nn.Module):
         # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
         if self.guide_arch in [GuideArch.rnn, GuideArch.isf]:
-            self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
-            # TODO: Small init.
-            self.guide_w_z_init = nn.Parameter(torch.zeros(self.z_size))
             self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
 
         # Modules
 
         # Guide modules:
+
+        if self.guide_arch == GuideArch.isf:
+            self.guide_w_params = GuideW_ImageSoFar(self)
+        else:
+            self.guide_w_params = GuideW_ObjRnn(self, self.x_embed_size, self.obj_rnn_hid_size,
+                                                dedicated_t0=self.guide_arch==GuideArch.rnnt0)
+
         self.z_param = mod.ParamZ([200, 200],
                                   self.w_size + self.x_att_embed_size + self.z_size, # input size
                                   self.z_size)
-
-        # TODO: This is a mess. Can I split out a separate module for
-        # the w guide, in order to keep all the state (parameters &
-        # modules) better organised?
-
-        if self.guide_arch == GuideArch.isf:
-            self.w_param_isf = mod.ParamWISF(self.x_size + self.w_size + self.z_size, [500, 200, 200], self.w_size)
-        else:
-            self.w_param = mod.ParamW(
-                self.x_embed_size + self.w_size + self.z_size, # input size
-                self.obj_rnn_hid_size, [], self.w_size, self.z_size,
-                sd_bias=-2.25)
 
         if self.guide_arch == GuideArch.rnnt0:
             self.z0_param = mod.ParamZ([200, 200],
                                       self.w_size + self.x_att_embed_size, # input size
                                       self.z_size)
-            self.w0_param = mod.ParamW(
-                self.x_embed_size, # input size
-                self.obj_rnn_hid_size, [], self.w_size, self.z_size,
-                sd_bias=0.0) # TODO: This could probably stand to be increased a little.
 
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        if not self.guide_arch == GuideArch.isf:
-            self._x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
         self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
@@ -169,12 +167,6 @@ class DynAIR(nn.Module):
         if use_cuda:
             self.cuda()
 
-        # TODO: Figure out why this didn't work with a
-        # WeakValueDictionary.
-        # (Since it would be nice to not have to think about clearing
-        # the cache.)
-        self.cache = dict()
-        self.cache_stats = defaultdict(lambda: dict(miss=0, hit=0))
 
     # We wrap `_decode_bkg` here to enable caching without
     # interferring with the magic behaviour that comes from having an
@@ -182,10 +174,6 @@ class DynAIR(nn.Module):
     @cached
     def decode_bkg(self, *args, **kwargs):
         return self._decode_bkg(*args, **kwargs)
-
-    @cached
-    def x_embed(self, *args, **kwargs):
-        return self._x_embed(*args, **kwargs)
 
     # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, obj_counts, do_likelihood=True):
@@ -220,7 +208,7 @@ class DynAIR(nn.Module):
 
         # It's possible the cache will still need clearing manually,
         # but this catches the common cases of SVI & infer.
-        self.cache.clear()
+        self.cache.store.clear()
 
         return frames, wss, zss
 
@@ -407,58 +395,9 @@ class DynAIR(nn.Module):
         return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
 
     def guide_w(self, t, i, *args, **kwargs):
-        guide_w_params = self.guide_w_image_so_far if self.guide_arch == GuideArch.isf else self.guide_w_rnn
-        w_mean, w_sd, w_guide_state = guide_w_params(t, i, *args, **kwargs)
+        w_mean, w_sd, w_guide_state = self.guide_w_params(t, i, *args, **kwargs)
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, w_guide_state
-
-    def guide_w_image_so_far(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
-        batch_size = x.size(0)
-
-        if i == 0:
-            assert image_so_far_prev is None
-            assert mask_prev is None
-            image_so_far = self.decode_bkg(y)
-        else:
-            assert image_so_far_prev is not None
-            assert w_t_prev is not None
-            assert z_t_prev is not None
-            # Add previous object to image so far.
-            image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
-                                                       tuple(mask_prev.tolist()),
-                                                       image_so_far_prev)
-
-        # TODO: Should we be preventing gradients from flowing back
-        # from the guide through image_so_far?
-
-        if t == 0:
-            assert w_prev_i is None and z_prev_i is None
-            w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
-            z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
-
-        # For simplicity, feed `x - image_so_far` into the net, though
-        # note that alternatives exist.
-        diff = (x - image_so_far).reshape(batch_size, -1)
-        w_delta, w_sd = self.w_param_isf(torch.cat((diff, w_prev_i, z_prev_i), 1))
-        w_mean = w_prev_i + w_delta
-        return w_mean, w_sd, image_so_far
-
-    def guide_w_rnn(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
-        batch_size = x.size(0)
-
-        x_embed = self.x_embed(x)
-
-        if t == 0 and self.guide_arch == GuideArch.rnnt0:
-            w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
-        else:
-            if t == 0:
-                assert w_prev_i is None and z_prev_i is None
-                w_prev_i = batch_expand(self.guide_w_w_init, batch_size)
-                z_prev_i = batch_expand(self.guide_w_z_init, batch_size)
-            w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
-            w_mean = w_prev_i + w_delta
-
-        return w_mean, w_sd, rnn_hid
 
     def guide_z(self, t, i, w, x_att, z_prev_i):
         batch_size = w.size(0)
@@ -516,6 +455,107 @@ class DynAIR(nn.Module):
             extra_zss.append(zs)
 
         return frames, wss, extra_frames, extra_wss
+
+
+class GuideW_ObjRnn(nn.Module):
+    def __init__(self, parent, x_embed_size, rnn_hid_size, dedicated_t0):
+        super(GuideW_ObjRnn, self).__init__()
+
+        # Use parent's cache for simplicity.
+        self.cache = parent.cache
+
+        # TODO: Consider inlining. See if CNN changes things first.
+        # TODO: If so, just pass parent to sub-modules, grab w_size
+        # etc. from that.
+        self._x_embed = mod.EmbedX([800], x_embed_size, parent.x_size)
+
+        self.w_param = mod.ParamW(
+            x_embed_size + parent.w_size + parent.z_size, # input size
+            rnn_hid_size, [], parent.w_size, parent.z_size,
+            sd_bias=-2.25)
+
+        if dedicated_t0:
+            self.w0_param = mod.ParamW(
+                x_embed_size, # input size
+                rnn_hid_size, [], parent.w_size, parent.z_size,
+                sd_bias=0.0) # TODO: This could probably stand to be increased a little.
+        else:
+            self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
+            # TODO: Small init.
+            self.z_init = nn.Parameter(torch.zeros(parent.z_size))
+
+    @cached
+    def x_embed(self, *args, **kwargs):
+        return self._x_embed(*args, **kwargs)
+
+    def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
+        batch_size = x.size(0)
+
+        x_embed = self.x_embed(x)
+
+        if t == 0 and hasattr(self, 'w0_param'):
+            w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
+        else:
+            if t == 0:
+                assert w_prev_i is None and z_prev_i is None
+                w_prev_i = batch_expand(self.w_init, batch_size)
+                z_prev_i = batch_expand(self.z_init, batch_size)
+            w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
+            w_mean = w_prev_i + w_delta
+
+        return w_mean, w_sd, rnn_hid
+
+
+class GuideW_ImageSoFar(nn.Module):
+    def __init__(self, parent):
+        super(GuideW_ImageSoFar, self).__init__()
+
+        self.decode_bkg = parent.decode_bkg
+        self.model_composite_object = parent.model_composite_object
+
+        # TODO: Consider inlining. See if CNN changes things first.
+        # TODO: If so, just pass parent to sub-modules, grab w_size
+        # etc. from that.
+        self.w_param = mod.ParamWISF(parent.x_size + parent.w_size + parent.z_size,
+                                     [500, 200, 200],
+                                     parent.w_size)
+
+        self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
+        self.z_init = nn.Parameter(torch.zeros(parent.z_size))
+
+
+
+    def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
+        batch_size = x.size(0)
+
+        if i == 0:
+            assert image_so_far_prev is None
+            assert mask_prev is None
+            image_so_far = self.decode_bkg(y)
+        else:
+            assert image_so_far_prev is not None
+            assert w_t_prev is not None
+            assert z_t_prev is not None
+            # Add previous object to image so far.
+            image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
+                                                       tuple(mask_prev.tolist()),
+                                                       image_so_far_prev)
+
+        # TODO: Should we be preventing gradients from flowing back
+        # from the guide through image_so_far?
+
+        if t == 0:
+            assert w_prev_i is None and z_prev_i is None
+            w_prev_i = batch_expand(self.w_init, batch_size)
+            z_prev_i = batch_expand(self.z_init, batch_size)
+
+        # For simplicity, feed `x - image_so_far` into the net, though
+        # note that alternatives exist.
+        diff = (x - image_so_far).reshape(batch_size, -1)
+        w_delta, w_sd = self.w_param(torch.cat((diff, w_prev_i, z_prev_i), 1))
+        w_mean = w_prev_i + w_delta
+        return w_mean, w_sd, image_so_far
+
 
 
 def batch_expand(t, b):
@@ -682,7 +722,7 @@ def run_svi(data, args):
             if i == 0:
                 run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
-            #print(dynair.cache_stats)
+            #print(dynair.cache.stats)
 
         if 0 < i and (i < 50 or (i+1) % 50 == 0):
             run_vis(X_vis, Y_vis, dynair, vis, i, j)
