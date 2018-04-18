@@ -96,16 +96,6 @@ class EmbedX(nn.Module):
         return self.mlp(x_flat)
 
 
-# TODO: What would make a good network arch. for this task. (i.e.
-# Locating an object given a hint about where to look and what to look
-# for.)
-
-# Perhaps we could reduce the resolution of x before putting it
-# through the network. Or if that looses useful precision, maybe we
-# could stack windows, having a first stage that uses a low-res input
-# to position the first window, from which we determine the position
-# more accurately.
-
 class ParamW(nn.Module):
     def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size, sd_bias=0.0):
         super(ParamW, self).__init__()
@@ -198,9 +188,6 @@ class EmbedXAtt(nn.Module):
         x_att_flat = x_att.view(x_att.size(0), -1)
         return self.mlp(x_att_flat)
 
-
-# TODO: Similarly, what should this look like. Re-visit DMM for
-# inspiration?
 
 class ParamZ(nn.Module):
     def __init__(self, hids, in_size, z_size):

@@ -32,9 +32,6 @@ class DynAIR(nn.Module):
 
         self.dedicated_t0_guide = dedicated_t0_guide
 
-        # TODO: Could all the tensors created from the prototype be
-        # replaced with `Parameter(..., requires_grad=False)` so that
-        # they are taken care of when we call `cuda` on the module?
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.use_cuda = use_cuda
 
@@ -94,37 +91,6 @@ class DynAIR(nn.Module):
         # self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
         # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
-        # TODO: I'm not entirely happy using the same guide for the
-        # first step as subsequent steps, since each requires a
-        # somewhat different computation. The first requires computing
-        # an absolute position, and the latter computing a delta,
-        # given the previous position.
-
-        # It's possible that the guide can use z_init to spot when
-        # it's at the first step, and output a position based on the
-        # input frame only. (Ignoring the uninformative w_prev.) But
-        # consider using a separate RNN (or separate first layer of
-        # the RNN) for this first step? (What about x_embed? Share
-        # still?)
-
-        # An argument against this is that when we have videos in
-        # which objects don't appear until after the first frame,
-        # we'll face a similar situation at later frames as we do now.
-        # This suggests we need to use the same guide for w at all
-        # steps, since special casing just the first step isn't
-        # sufficient. (Though in that case, we'd maybe have some kind
-        # of precence variables, which may change things? e.g. With a
-        # discrete choice we might compute the first w only when we
-        # decide to add an object.)
-
-        # If the guide works by accumulating evidence over time, then
-        # this does kinda make sense. z might tell the guide something
-        # about how confident it is that it's "locked on" to an
-        # object, and this can then be used to modulate between
-        # looking at the input only, and outputting a delta of the
-        # previous w. (Though as discussed elsewhere, this is an odd
-        # use of z.)
-
         if not self.dedicated_t0_guide:
             self.guide_w_w_init = Variable(self.prototype.new_zeros(self.w_size))
             # TODO: Small init.
@@ -132,9 +98,6 @@ class DynAIR(nn.Module):
             self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
 
         # Modules
-
-        # TODO: Review all arch. of all modules. (Currently just using
-        # MLP so that I have something to test.)
 
         # Guide modules:
         self.z_param = mod.ParamZ([200, 200],
@@ -159,11 +122,6 @@ class DynAIR(nn.Module):
         self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
-        # TODO: Consider using init. that outputs black/transparent images.
-
-        # I'm guessing we can manage without the alpha bias with fixed
-        # windows. It's probably best to avoid if possible, since it
-        # plausibly slows down optimisation?
 
         self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self.decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
