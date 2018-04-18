@@ -149,7 +149,7 @@ class DynAIR(nn.Module):
 
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
         if not self.guide_arch == GuideArch.isf:
-            self.x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
+            self._x_embed = mod.EmbedX([800], self.x_embed_size, self.x_size)
         self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
@@ -178,6 +178,10 @@ class DynAIR(nn.Module):
     @cached
     def decode_bkg(self, *args, **kwargs):
         return self._decode_bkg(*args, **kwargs)
+
+    @cached
+    def x_embed(self, *args, **kwargs):
+        return self._x_embed(*args, **kwargs)
 
     # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, obj_counts, do_likelihood=True):
@@ -435,7 +439,6 @@ class DynAIR(nn.Module):
     def guide_w_rnn(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
         batch_size = x.size(0)
 
-        # TODO: Requires caching to avoid repeated computation.
         x_embed = self.x_embed(x)
 
         if t == 0 and self.guide_arch == GuideArch.rnnt0:
