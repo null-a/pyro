@@ -131,7 +131,7 @@ class DynAIR(nn.Module):
                                   self.z_size)
 
         if self.guide_arch == GuideArch.isf:
-            self.w_param_isf = mod.ParamWISF(self.x_size + self.w_size + self.z_size, [500, 200], self.w_size)
+            self.w_param_isf = mod.ParamWISF(self.x_size + self.w_size + self.z_size, [500, 200, 200], self.w_size)
         else:
             self.w_param = mod.ParamW(
                 self.x_embed_size + self.w_size + self.z_size, # input size
