@@ -529,12 +529,8 @@ class GuideW_ImageSoFar(nn.Module):
         self.decode_bkg = parent.decode_bkg
         self.model_composite_object = parent.model_composite_object
 
-        # TODO: Consider inlining. See if CNN changes things first.
-        # TODO: If so, just pass parent to sub-modules, grab w_size
-        # etc. from that.
-        self.w_param = mod.ParamWISF(parent.x_size + parent.w_size + parent.z_size,
-                                     [500, 200, 200],
-                                     parent.w_size)
+        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(parent)
+        self.w_param = mod.ParamW_Isf_Mlp(parent)
 
         self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
         self.z_init = nn.Parameter(torch.zeros(parent.z_size))
@@ -567,8 +563,8 @@ class GuideW_ImageSoFar(nn.Module):
 
         # For simplicity, feed `x - image_so_far` into the net, though
         # note that alternatives exist.
-        diff = (x - image_so_far).reshape(batch_size, -1)
-        w_delta, w_sd = self.w_param(torch.cat((diff, w_prev_i, z_prev_i), 1))
+        diff = x - image_so_far
+        w_delta, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
         w_mean = w_prev_i + w_delta
         return w_mean, w_sd, image_so_far
 

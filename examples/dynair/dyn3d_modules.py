@@ -96,14 +96,51 @@ class EmbedX(nn.Module):
         return self.mlp(x_flat)
 
 
-class ParamWISF(nn.Module):
-    def __init__(self, input_size, hids, w_size):
-        super(ParamWISF, self).__init__()
-        self.col_widths = [w_size, w_size]
-        self.mlp = MLP(input_size, hids + [sum(self.col_widths)], nn.ReLU)
+class ParamW_Isf_Mlp(nn.Module):
+    def __init__(self, cfg):
+        super(ParamW_Isf_Mlp, self).__init__()
+        self.col_widths = [cfg.w_size, cfg.w_size]
+        self.mlp = MLP(cfg.x_size + cfg.w_size + cfg.z_size,
+                       [500, 200, 200, sum(self.col_widths)], nn.ReLU)
 
-    def forward(self, inp):
-        out = self.mlp(inp)
+    def forward(self, img, w_prev, z_prev):
+        batch_size = img.size(0)
+        flat_img = img.view(batch_size, -1)
+        out = self.mlp(torch.cat((flat_img, w_prev, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+class ParamW_Isf_Cnn_Mixin(nn.Module):
+    def __init__(self, cfg):
+        super(ParamW_Isf_Cnn_Mixin, self).__init__()
+
+        self.col_widths = [cfg.w_size, cfg.w_size]
+
+        # TODO: Think more carefully about this architecture. Consider
+        # switching to inputs of a more convenient size.
+
+        self.cnn = nn.Sequential(
+            nn.Conv2d(cfg.num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2, padding=1), # => 64 x 12 x 12
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 4, stride=2, padding=1), # => 128 x 6 x 6
+            nn.ReLU(),
+            nn.Conv2d(128, 256, 4, stride=2, padding=0), # => 256 x 2 x 2
+            nn.ReLU(),
+        )
+
+        self.mlp = MLP(256 * 2 * 2 + cfg.w_size + cfg.z_size,
+                       [200, 200, sum(self.col_widths)],
+                       nn.ReLU)
+
+
+    def forward(self, img, w_prev, z_prev):
+        batch_size = img.size(0)
+        cnn_out_flat = self.cnn(img).view(batch_size, -1)
+        out = self.mlp(torch.cat((cnn_out_flat, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])
