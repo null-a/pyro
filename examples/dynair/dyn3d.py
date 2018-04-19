@@ -26,6 +26,19 @@ import time
 from datetime import timedelta
 import enum
 
+# TODO: There's no reason the dedicated nets for t=0 for the w and z
+# guides have to be used/not used in unison.
+
+# TODO: Figure out how to conveniently specify the entire guide
+# architecture. Maybe have DynAIR take sub-modules as args, allowing
+# the config. to be varied by instantiating DynAIR with different
+# modules? (Each of which may take its own args?) One problem with
+# that is that sub-modules currently look at their parent for global
+# config. info., so that may need extracting to its own structure.
+# Also, some modules need to call methods on the parent, so that would
+# need wiring up, perhaps in `init` for DynAIR. (By passing `self` to
+# some method on the sub-module in question.)
+
 class GuideArch(enum.Enum):
     rnn = enum.auto()
     rnnt0 = enum.auto() # dedicate nets for step t=0
@@ -435,7 +448,9 @@ class DynAIR(nn.Module):
 
         return frames, wss, extra_frames, extra_wss
 
-
+# TODO: Extend with CNN variants used for guide for w. (Re-use code,
+# since solving same basic problem, i.e. compute parameters from main
+# + side input.)
 class GuideZ(nn.Module):
     def __init__(self, parent, dedicated_t0):
         super(GuideZ, self).__init__()

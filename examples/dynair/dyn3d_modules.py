@@ -32,6 +32,12 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.seq(x)
 
+
+# TODO: Make this into a nn.Module to allow more idiomatic PyTorch
+# usage. With this (and Flatten) a lot of code in `forward` methods
+# can be replaced with the use of `nn.Sequential`. If this doesn't
+# work out, have this return a tuple for more concise usage.
+
 # Split a matrix in a bunch of columns with specified widths.
 def split_at(t, widths):
     assert t.dim() == 2
@@ -110,6 +116,7 @@ class ParamW_Isf_Mlp(nn.Module):
 
     def forward(self, img, w_prev, z_prev):
         batch_size = img.size(0)
+        # TODO: Make a "Flatten" nn.Module.
         flat_img = img.view(batch_size, -1)
         out = self.mlp(torch.cat((flat_img, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
