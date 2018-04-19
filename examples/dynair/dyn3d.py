@@ -94,7 +94,6 @@ class DynAIR(nn.Module):
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
         self.x_embed_size = 800
-        self.x_att_embed_size = 200
 
         self.obj_rnn_hid_size = 200
 
@@ -129,9 +128,6 @@ class DynAIR(nn.Module):
         # self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
         # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
-        if self.guide_arch in [GuideArch.rnn, GuideArch.isf]:
-            self.guide_z_z_init = nn.Parameter(torch.zeros(self.z_size))
-
         # Modules
 
         # Guide modules:
@@ -142,17 +138,9 @@ class DynAIR(nn.Module):
             self.guide_w_params = GuideW_ObjRnn(self, self.x_embed_size, self.obj_rnn_hid_size,
                                                 dedicated_t0=self.guide_arch==GuideArch.rnnt0)
 
-        self.z_param = mod.ParamZ([200, 200],
-                                  self.w_size + self.x_att_embed_size + self.z_size, # input size
-                                  self.z_size)
-
-        if self.guide_arch == GuideArch.rnnt0:
-            self.z0_param = mod.ParamZ([200, 200],
-                                      self.w_size + self.x_att_embed_size, # input size
-                                      self.z_size)
+        self.guide_z_params = GuideZ(self, dedicated_t0=self.guide_arch==GuideArch.rnnt0)
 
         self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
-        self.x_att_embed = mod.EmbedXAtt([], self.x_att_embed_size, self.x_att_size)
 
         # Model modules:
 
@@ -399,17 +387,8 @@ class DynAIR(nn.Module):
         w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
         return w, w_guide_state
 
-    def guide_z(self, t, i, w, x_att, z_prev_i):
-        batch_size = w.size(0)
-        x_att_embed = self.x_att_embed(x_att)
-        if t == 0 and self.guide_arch == GuideArch.rnnt0:
-            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
-        else:
-            if t == 0:
-                assert z_prev_i is None
-                z_prev_i = batch_expand(self.guide_z_z_init, batch_size)
-            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
-            z_mean = z_prev_i + z_delta
+    def guide_z(self, t, i, *args, **kwargs):
+        z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
     def image_to_window(self, w, images):
@@ -455,6 +434,43 @@ class DynAIR(nn.Module):
             extra_zss.append(zs)
 
         return frames, wss, extra_frames, extra_wss
+
+
+class GuideZ(nn.Module):
+    def __init__(self, parent, dedicated_t0):
+        super(GuideZ, self).__init__()
+
+        x_att_embed_size = 200
+
+        self.z_param = mod.ParamZ(
+            [200, 200],
+            parent.w_size + x_att_embed_size + parent.z_size, # input size
+            parent.z_size)
+
+        if dedicated_t0:
+            self.z0_param = mod.ParamZ(
+                [200, 200],
+                parent.w_size + x_att_embed_size, # input size
+                parent.z_size)
+        else:
+            self.z_init = nn.Parameter(torch.zeros(parent.z_size))
+
+        self.x_att_embed = mod.MLP(parent.x_att_size, [x_att_embed_size], nn.ReLU, True)
+
+
+    def forward(self, t, i, w, x_att, z_prev_i):
+        batch_size = w.size(0)
+        x_att_flat = x_att.view(x_att.size(0), -1)
+        x_att_embed = self.x_att_embed(x_att_flat)
+        if t == 0 and hasattr(self, 'z0_param'):
+            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
+        else:
+            if t == 0:
+                assert z_prev_i is None
+                z_prev_i = batch_expand(self.z_init, batch_size)
+            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
+            z_mean = z_prev_i + z_delta
+        return z_mean, z_sd
 
 
 class GuideW_ObjRnn(nn.Module):

@@ -192,17 +192,6 @@ class ParamW(nn.Module):
         return hids
 
 
-
-class EmbedXAtt(nn.Module):
-    def __init__(self, hids, x_att_embed_size, x_att_size):
-        super(EmbedXAtt, self).__init__()
-        self.mlp = MLP(x_att_size, hids + [x_att_embed_size], nn.ReLU, True)
-
-    def forward(self, x_att):
-        x_att_flat = x_att.view(x_att.size(0), -1)
-        return self.mlp(x_att_flat)
-
-
 class ParamZ(nn.Module):
     def __init__(self, hids, in_size, z_size):
         super(ParamZ, self).__init__()
