@@ -106,10 +106,6 @@ class DynAIR(nn.Module):
         self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
-        self.x_embed_size = 800
-
-        self.obj_rnn_hid_size = 200
-
         # bkg_rgb = self.prototype.new_zeros(self.num_chan - 1, self.image_size, self.image_size)
         # bkg_alpha = self.prototype.new_ones(1, self.image_size, self.image_size)
         # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
@@ -148,8 +144,7 @@ class DynAIR(nn.Module):
         if self.guide_arch == GuideArch.isf:
             self.guide_w_params = GuideW_ImageSoFar(self)
         else:
-            self.guide_w_params = GuideW_ObjRnn(self, self.x_embed_size, self.obj_rnn_hid_size,
-                                                dedicated_t0=self.guide_arch==GuideArch.rnnt0)
+            self.guide_w_params = GuideW_ObjRnn(self, dedicated_t0=self.guide_arch==GuideArch.rnnt0)
 
         self.guide_z_params = GuideZ(self, dedicated_t0=self.guide_arch==GuideArch.rnnt0)
 
@@ -489,8 +484,11 @@ class GuideZ(nn.Module):
 
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, parent, x_embed_size, rnn_hid_size, dedicated_t0):
+    def __init__(self, parent, dedicated_t0):
         super(GuideW_ObjRnn, self).__init__()
+
+        x_embed_size = 800
+        rnn_hid_size = 200
 
         # Use parent's cache for simplicity.
         self.cache = parent.cache
