@@ -529,9 +529,15 @@ class GuideW_ImageSoFar(nn.Module):
         self.decode_bkg = parent.decode_bkg
         self.model_composite_object = parent.model_composite_object
 
-        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(parent)
+        # TODO: Figure out how best to specify the desired architecture.
         self.w_param = mod.ParamW_Isf_Mlp(parent)
+        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(parent)
+        #self.w_param = mod.ParamW_Isf_Cnn_AM(parent)
 
+        # TODO: I don't see a problem making this a parameter in the
+        # CNN+AM case, assuming we're computing absolute position. In
+        # other cases it's less clear. OTOH, it's 2/3 real numbers,
+        # and z_init alone can probably do the job.
         self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
         self.z_init = nn.Parameter(torch.zeros(parent.z_size))
 
@@ -565,6 +571,7 @@ class GuideW_ImageSoFar(nn.Module):
         # note that alternatives exist.
         diff = x - image_so_far
         w_delta, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
+        # TODO: Prefer absolute position here?
         w_mean = w_prev_i + w_delta
         return w_mean, w_sd, image_so_far
 
