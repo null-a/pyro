@@ -96,17 +96,6 @@ class ZGatedTransition(nn.Module):
         return z_mean, z_sd
 
 
-class EmbedX(nn.Module):
-    def __init__(self, hids, x_embed_size, x_size):
-        super(EmbedX, self).__init__()
-        self.mlp = MLP(x_size, hids + [x_embed_size], nn.ReLU)
-
-    def forward(self, x):
-        batch_size = x.size(0)
-        x_flat = x.view(batch_size, -1)
-        return self.mlp(x_flat)
-
-
 class ParamW_Isf_Mlp(nn.Module):
     def __init__(self, cfg):
         super(ParamW_Isf_Mlp, self).__init__()

@@ -495,10 +495,7 @@ class GuideW_ObjRnn(nn.Module):
         # Use parent's cache for simplicity.
         self.cache = parent.cache
 
-        # TODO: Consider inlining. See if CNN changes things first.
-        # TODO: If so, just pass parent to sub-modules, grab w_size
-        # etc. from that.
-        self._x_embed = mod.EmbedX([800], x_embed_size, parent.x_size)
+        self._x_embed = mod.MLP(parent.x_size, [800, x_embed_size], nn.ReLU)
 
         self.w_param = mod.ParamW(
             x_embed_size + parent.w_size + parent.z_size, # input size
@@ -522,7 +519,8 @@ class GuideW_ObjRnn(nn.Module):
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
         batch_size = x.size(0)
 
-        x_embed = self.x_embed(x)
+        x_flat = x.view(batch_size, -1)
+        x_embed = self.x_embed(x_flat)
 
         if t == 0 and hasattr(self, 'w0_param'):
             w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
