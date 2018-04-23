@@ -171,7 +171,6 @@ class ParamW_Isf_Cnn_AM(nn.Module):
 
         self.col_widths = [cfg.w_size, cfg.w_size]
 
-        # TODO: An benefit to adding a sigmoid to the output here?
         # TODO: Could use transposed convolution here?
         # TODO: Check appropriateness of hidden sizes here.
         self.am_mlp = MLP(cfg.w_size + cfg.z_size, [200, 200, cfg.x_size], nn.ReLU)
