@@ -327,7 +327,6 @@ class DynAIR(nn.Module):
 
             # NOTE: Here we're guiding y based on the contents of the
             # first frame only.
-            # TODO: Implement a better guide for y.
             y = self.guide_y(batch[:, 0])
 
             for t in range(self.seq_length):
@@ -351,31 +350,6 @@ class DynAIR(nn.Module):
                     with poutine.scale(None, mask):
                         w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
                         x_att = self.image_to_window(w, x)
-
-                        # TODO: If I decide to bring back the idea of
-                        # feeding the top layer of the RNN hidden
-                        # state into the guide for z, I might
-                        # implement it like so: Have guide_w return a
-                        # `summary_for_guide_z` value which we pass
-                        # below. For the RNN guide this would just
-                        # return the top layer of hiddens. For
-                        # image-so-far we could:
-
-                        # 1. `return None`, which
-                        # guide_z would need updating to handle).
-
-                        # 2. Add an RNN to image to far that
-                        # incorporates sampled w and z, and return its
-                        # hidden states as `summary_for_z`.
-
-                        # 3. Use w to crop a window from image-so-far,
-                        # and pass that as an extra input to guide_z.
-                        # If the idea is to help the guide when there
-                        # are multiple object within the window, it
-                        # seems like this could work, and it's more in
-                        # keeping with the rest of the image-so-far
-                        # style.
-
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
                     ws[t][i] = w
