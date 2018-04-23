@@ -417,9 +417,10 @@ class DynAIR(nn.Module):
 
         return frames, wss, extra_frames, extra_wss
 
-# TODO: Extend with CNN variants used for guide for w. (Re-use code,
-# since solving same basic problem, i.e. compute parameters from main
-# + side input.)
+# TODO: Extend with CNN variants used for guide for w. (Are there
+# opportunities for code re-use, since for both w and z compute
+# parameters from main + side input. The different been that there is
+# no recurrent part of the guide for z.)
 class GuideZ(nn.Module):
     def __init__(self, parent, dedicated_t0):
         super(GuideZ, self).__init__()
