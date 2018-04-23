@@ -14,11 +14,12 @@ import pyro.poutine as poutine
 
 
 import dyn3d_modules as mod
-
+from utils import make_output_dir, append_line, describe_env
 
 import visdom
 from PIL import Image, ImageDraw
 
+import os
 import json
 import argparse
 from collections import defaultdict
@@ -684,6 +685,9 @@ def run_vis(X, Y, dynair, vis, epoch, step):
 def run_svi(data, args):
     t0 = time.time()
     vis = visdom.Visdom()
+    output_path = make_output_dir()
+    append_line(describe_env(), os.path.join(output_path, 'env.txt'))
+
     dynair = DynAIR(use_cuda=args.cuda)
     #norms = add_grad_hooks(dynair)
 
@@ -713,8 +717,9 @@ def run_svi(data, args):
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
-            elapsed = str(timedelta(seconds=time.time()- t0))
+            elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
+            append_line('{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo), os.path.join(output_path, 'elbo.csv'))
             if i == 0:
                 run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
@@ -723,9 +728,9 @@ def run_svi(data, args):
         if 0 < i and (i < 50 or (i+1) % 50 == 0):
             run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
-        if (i+1) % 50 == 0:
-            #print('Saving parameters...')
-            torch.save(dynair.state_dict(), 'dyn3d.pytorch')
+        if (i+1) % 1000 == 0:
+            torch.save(dynair.state_dict(),
+                       os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
         # Write grad norms to disk.
         # with open('grad_norms.json', 'w') as f:
