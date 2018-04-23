@@ -106,11 +106,6 @@ class DynAIR(nn.Module):
         self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
-        # bkg_rgb = self.prototype.new_zeros(self.num_chan - 1, self.image_size, self.image_size)
-        # bkg_alpha = self.prototype.new_ones(1, self.image_size, self.image_size)
-        # self.bkg = torch.cat((bkg_rgb, bkg_alpha))
-
-
         # Priors:
 
         self.y_prior_mean = self.prototype.new_zeros(self.y_size)
@@ -132,10 +127,6 @@ class DynAIR(nn.Module):
         self.z_0_prior_sd = self.prototype.new_ones(self.z_size)
 
         self.likelihood_sd = 0.3
-
-        # Parameters.
-        # self.guide_w_t_init = nn.Parameter(torch.zeros(self.w_size))
-        # self.guide_z_t_init = nn.Parameter(torch.zeros(self.z_size))
 
         # Modules
 
