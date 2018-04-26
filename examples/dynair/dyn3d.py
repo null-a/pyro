@@ -26,6 +26,7 @@ from collections import defaultdict
 import time
 from datetime import timedelta
 import enum
+from functools import partial
 
 # TODO: There's no reason the dedicated nets for t=0 for the w and z
 # guides have to be used/not used in unison.
@@ -639,7 +640,7 @@ def split(t, batch_size, num_test_batches):
     return train, test
 
 
-def run_vis(X, Y, dynair, vis, epoch, step):
+def run_vis(vis, dynair, X, Y, epoch, step):
     n = X.size(0)
 
     frames, wss, extra_frames, extra_wss = dynair.infer(X, Y, 15)
@@ -660,10 +661,12 @@ def run_vis(X, Y, dynair, vis, epoch, step):
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
 
+def vis_hook(vis, dynair, X, Y, epoch, step):
+    # TODO: Add logic for perform vis. at required intervals.
+    run_vis(vis, dynair, X, Y, epoch, step)
 
-def run_svi(dynair, X_split, Y_split, num_epochs):
+def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook):
     t0 = time.time()
-    vis = visdom.Visdom()
     output_path = make_output_dir()
     append_line(describe_env(), os.path.join(output_path, 'env.txt'))
 
@@ -698,11 +701,8 @@ def run_svi(dynair, X_split, Y_split, num_epochs):
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             append_line('{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo), os.path.join(output_path, 'elbo.csv'))
-            if i == 0:
-                run_vis(X_vis, Y_vis, dynair, vis, i, j)
-
-        if 0 < i and (i < 50 or (i+1) % 50 == 0):
-            run_vis(X_vis, Y_vis, dynair, vis, i, j)
+            if not vis_hook is None:
+                vis_hook(X_vis, Y_vis, i, j)
 
         if (i+1) % 1000 == 0:
             torch.save(dynair.state_dict(),
@@ -799,6 +799,8 @@ if __name__ == '__main__':
                         help='number of optimisation epochs to perform')
     parser.add_argument('--hold-out', type=int, default=0,
                         help='number of batches to hold out')
+    parser.add_argument('--vis', action='store_true', default=False,
+                        help='visualise inferences during optimisation')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
     args = parser.parse_args()
 
@@ -809,4 +811,5 @@ if __name__ == '__main__':
     print('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
 
     dynair = DynAIR(use_cuda=args.cuda)
-    run_svi(dynair, X_split, Y_split, args.epochs)
+    run_svi(dynair, X_split, Y_split, args.epochs,
+            partial(vis_hook, visdom.Visdom(), dynair) if args.vis else None)
