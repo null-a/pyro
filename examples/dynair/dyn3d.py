@@ -626,12 +626,12 @@ def over(a, b):
     return rgb_a * alpha_a + b * (1 - alpha_a)
 
 
-def split(t, batch_size, num_train_batches, num_test_batches):
+def split(t, batch_size, num_test_batches):
     n = t.size(0)
     assert batch_size > 0
-    assert num_train_batches >= 0
     assert num_test_batches >= 0
     assert n % batch_size == 0
+    num_train_batches = (n // batch_size) - num_test_batches
     assert batch_size * (num_train_batches + num_test_batches) == n
     batches = t.chunk(n // batch_size)
     train = batches[0:num_train_batches]
@@ -661,7 +661,7 @@ def run_vis(X, Y, dynair, vis, epoch, step):
                    opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
 
 
-def run_svi(data, args):
+def run_svi(X_split, Y_split, args):
     t0 = time.time()
     vis = visdom.Visdom()
     output_path = make_output_dir()
@@ -669,15 +669,18 @@ def run_svi(data, args):
 
     dynair = DynAIR(use_cuda=args.cuda)
 
-    X, Y = data # (sequences, counts)
-    batch_size = 25
-    X_train, X_test = split(X, batch_size, 39, 1)
-    Y_train, Y_test = split(Y, batch_size, 39, 1)
+    X_train, X_test = X_split
+    Y_train, Y_test = Y_split
+    batch_size = X_train[0].size(0)
 
-    # Produce visualization for train & test data points.
-    ix = 40
-    X_vis = torch.cat((X[ix:ix+1], X_test[0][0:1]))
-    Y_vis = torch.cat((Y[ix:ix+1], Y_test[0][0:1]))
+    # Produce visualisations for the first train & test data points
+    # where possible.
+    if len(X_test) > 0:
+        X_vis = torch.cat((X_train[0][0:1], X_test[0][0:1]))
+        Y_vis = torch.cat((Y_train[0][0:1], Y_test[0][0:1]))
+    else:
+        X_vis = X_train[0][0:1]
+        Y_vis = Y_train[0][0:1]
 
     def per_param_optim_args(module_name, param_name):
         return {'lr': 1e-4}
@@ -793,7 +796,16 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
+    parser.add_argument('-b', '--batch-size', type=int, required=True, help='batch size')
+    parser.add_argument('--hold-out', type=int, default=0,
+                        help='number of batches to hold out')
     parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
     args = parser.parse_args()
+
     data = load_data(args.data_path, args.cuda)
-    run_svi(data, args)
+    X, Y = data # (sequences, counts)
+    X_split = split(X, args.batch_size, args.hold_out)
+    Y_split = split(Y, args.batch_size, args.hold_out)
+    print('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
+
+    run_svi(X_split, Y_split, args)
