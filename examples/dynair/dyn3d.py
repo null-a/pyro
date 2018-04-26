@@ -708,8 +708,9 @@ def run_svi(data, args):
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
 
-def load_data(use_cuda):
-    data = np.load('./data/multi_obj.npz')
+def load_data(data_path, use_cuda):
+    print('loading {}'.format(data_path))
+    data = np.load(data_path)
     X_np = data['X']
     # print(X_np.shape)
     X_np = X_np.astype(np.float32)
@@ -718,6 +719,7 @@ def load_data(use_cuda):
     # Drop the alpha channel.
     X = X[:,:,0:3]
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
+    assert X.size(0) == Y.size(0)
     if use_cuda:
         X = X.cuda()
         Y = Y.cuda()
@@ -790,9 +792,8 @@ def mk_matrix(m, n):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('data_path')
     parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
     args = parser.parse_args()
-    print(args)
-
-    data = load_data(args.cuda)
+    data = load_data(args.data_path, args.cuda)
     run_svi(data, args)
