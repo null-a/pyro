@@ -14,7 +14,7 @@ import pyro.poutine as poutine
 
 
 import dyn3d_modules as mod
-from utils import make_output_dir, append_line, describe_env
+from utils import make_output_dir, append_line, describe_env, md5sum
 
 import visdom
 from PIL import Image, ImageDraw
@@ -665,10 +665,8 @@ def vis_hook(vis, dynair, X, Y, epoch, step):
     # TODO: Add logic for perform vis. at required intervals.
     run_vis(vis, dynair, X, Y, epoch, step)
 
-def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook):
+def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
     t0 = time.time()
-    output_path = make_output_dir()
-    append_line(describe_env(), os.path.join(output_path, 'env.txt'))
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
@@ -700,7 +698,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook):
             elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
-            append_line('{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo), os.path.join(output_path, 'elbo.csv'))
+            append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
             if not vis_hook is None:
                 vis_hook(X_vis, Y_vis, i, j)
 
@@ -808,8 +806,16 @@ if __name__ == '__main__':
     X, Y = data # (sequences, counts)
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
-    print('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
+
+    output_path = make_output_dir()
+    print('output path: {}'.format(output_path))
+    log_to_cond = partial(append_line, os.path.join(output_path, 'condition.txt'))
+    log_to_cond(describe_env())
+    log_to_cond('data path: {}'.format(args.data_path))
+    log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
+    log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
 
     dynair = DynAIR(use_cuda=args.cuda)
     run_svi(dynair, X_split, Y_split, args.epochs,
-            partial(vis_hook, visdom.Visdom(), dynair) if args.vis else None)
+            partial(vis_hook, visdom.Visdom(), dynair) if args.vis else None,
+            output_path)
