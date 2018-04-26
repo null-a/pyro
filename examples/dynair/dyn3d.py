@@ -661,7 +661,7 @@ def run_vis(X, Y, dynair, vis, epoch, step):
                    opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
 
 
-def run_svi(dynair, X_split, Y_split):
+def run_svi(dynair, X_split, Y_split, num_epochs):
     t0 = time.time()
     vis = visdom.Visdom()
     output_path = make_output_dir()
@@ -688,7 +688,7 @@ def run_svi(dynair, X_split, Y_split):
               loss='ELBO',
               trace_graph=False) # We don't have discrete choices.
 
-    for i in range(10**6):
+    for i in range(num_epochs):
 
         for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
             loss = svi.step(X_batch, Y_batch)
@@ -795,6 +795,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
     parser.add_argument('-b', '--batch-size', type=int, required=True, help='batch size')
+    parser.add_argument('-e', '--epochs', type=int, default=10**6,
+                        help='number of optimisation epochs to perform')
     parser.add_argument('--hold-out', type=int, default=0,
                         help='number of batches to hold out')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
@@ -807,4 +809,4 @@ if __name__ == '__main__':
     print('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
 
     dynair = DynAIR(use_cuda=args.cuda)
-    run_svi(dynair, X_split, Y_split)
+    run_svi(dynair, X_split, Y_split, args.epochs)
