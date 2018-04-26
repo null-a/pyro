@@ -661,13 +661,11 @@ def run_vis(X, Y, dynair, vis, epoch, step):
                    opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
 
 
-def run_svi(X_split, Y_split, args):
+def run_svi(dynair, X_split, Y_split):
     t0 = time.time()
     vis = visdom.Visdom()
     output_path = make_output_dir()
     append_line(describe_env(), os.path.join(output_path, 'env.txt'))
-
-    dynair = DynAIR(use_cuda=args.cuda)
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
@@ -808,4 +806,5 @@ if __name__ == '__main__':
     Y_split = split(Y, args.batch_size, args.hold_out)
     print('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
 
-    run_svi(X_split, Y_split, args)
+    dynair = DynAIR(use_cuda=args.cuda)
+    run_svi(dynair, X_split, Y_split)
