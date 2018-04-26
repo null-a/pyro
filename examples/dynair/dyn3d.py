@@ -639,27 +639,6 @@ def split(t, batch_size, num_train_batches, num_test_batches):
     return train, test
 
 
-# Borrowed from:
-# https://github.com/uber/pyro/blob/5b67518dc1ded8aac59b6dfc51d0892223e8faad/tutorial/source/gmm.ipynb
-def add_grad_hooks(module):
-    norms = defaultdict(list)
-    def hook(name, grad):
-        norm = grad.norm().item()
-        # print(name)
-        # print(norm)
-        norms[name].append(norm)
-    for name, value in module.named_parameters():
-        value.register_hook(lambda grad, name=name: hook(name, grad))
-    return norms
-
-def clip_grads(params):
-    threshold = 2000000
-    norm = clip_grad_norm(params, threshold)
-    if norm > threshold:
-        print('\nGradient clipped, norm={:0.2f}'.format(norm))
-    #norm_after = clip_grad_norm(params, float('inf'))
-    #print('norm={}, norm_after={}'.format(norm, norm_after))
-
 def run_vis(X, Y, dynair, vis, epoch, step):
     n = X.size(0)
 
@@ -689,7 +668,6 @@ def run_svi(data, args):
     append_line(describe_env(), os.path.join(output_path, 'env.txt'))
 
     dynair = DynAIR(use_cuda=args.cuda)
-    #norms = add_grad_hooks(dynair)
 
     X, Y = data # (sequences, counts)
     batch_size = 25
@@ -707,7 +685,6 @@ def run_svi(data, args):
     svi = SVI(dynair.model, dynair.guide,
               optim.Adam(per_param_optim_args),
               loss='ELBO',
-              # param_hook=clip_grads,
               trace_graph=False) # We don't have discrete choices.
 
     for i in range(10**6):
@@ -723,21 +700,12 @@ def run_svi(data, args):
             if i == 0:
                 run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
-            #print(dynair.cache.stats)
-
         if 0 < i and (i < 50 or (i+1) % 50 == 0):
             run_vis(X_vis, Y_vis, dynair, vis, i, j)
 
         if (i+1) % 1000 == 0:
             torch.save(dynair.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
-
-        # Write grad norms to disk.
-        # with open('grad_norms.json', 'w') as f:
-        #     json.dump(norms, f)
-
-
-
 
 
 def load_data(use_cuda):
