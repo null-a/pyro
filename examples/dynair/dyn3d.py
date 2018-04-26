@@ -799,7 +799,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch-size', type=int, required=True, help='batch size')
     parser.add_argument('--hold-out', type=int, default=0,
                         help='number of batches to hold out')
-    parser.add_argument('--cuda', action='store_true', default=False, help='Use CUDA')
+    parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
     args = parser.parse_args()
 
     data = load_data(args.data_path, args.cuda)
