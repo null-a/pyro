@@ -640,7 +640,7 @@ def split(t, batch_size, num_test_batches):
     return train, test
 
 
-def run_vis(vis, dynair, X, Y, epoch, step):
+def run_vis(vis, dynair, X, Y, epoch, batch):
     n = X.size(0)
 
     frames, wss, extra_frames, extra_wss = dynair.infer(X, Y, 15)
@@ -653,23 +653,24 @@ def run_vis(vis, dynair, X, Y, epoch, step):
     for k in range(n):
         out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y[k])
         vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
-                   opts=dict(title='input {} after epoch {} step {}'.format(k, epoch, step)))
+                   opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
-                   opts=dict(title='recon {} after epoch {} step {}'.format(k, epoch, step)))
+                   opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
         out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y[k])
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
-                   opts=dict(title='extra {} after epoch {} step {}'.format(k, epoch, step)))
+                   opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-def vis_hook(vis, dynair, X, Y, epoch, step):
-    # TODO: Add logic for perform vis. at required intervals.
-    run_vis(vis, dynair, X, Y, epoch, step)
+def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
+    if period > 0 and (step+1) % period == 0:
+        run_vis(vis, dynair, X, Y, epoch, batch)
 
 def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
     t0 = time.time()
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
+    num_batches = len(X_train)
     batch_size = X_train[0].size(0)
 
     # Produce visualisations for the first train & test data points
@@ -700,7 +701,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
             if not vis_hook is None:
-                vis_hook(X_vis, Y_vis, i, j)
+                vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
 
         if (i+1) % 1000 == 0:
             torch.save(dynair.state_dict(),
@@ -797,8 +798,8 @@ if __name__ == '__main__':
                         help='number of optimisation epochs to perform')
     parser.add_argument('--hold-out', type=int, default=0,
                         help='number of batches to hold out')
-    parser.add_argument('--vis', action='store_true', default=False,
-                        help='visualise inferences during optimisation')
+    parser.add_argument('--vis', type=int, default=0,
+                        help='visualise inferences during optimisation (zero disables, otherwise specifies period)')
     parser.add_argument('-o', default='./runs', help='base output path')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
     args = parser.parse_args()
@@ -818,5 +819,5 @@ if __name__ == '__main__':
 
     dynair = DynAIR(use_cuda=args.cuda)
     run_svi(dynair, X_split, Y_split, args.epochs,
-            partial(vis_hook, visdom.Visdom(), dynair) if args.vis else None,
+            partial(vis_hook, args.vis, visdom.Visdom(), dynair),
             output_path)
