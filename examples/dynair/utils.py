@@ -13,11 +13,16 @@ def git_wd_is_clean():
 
 def make_output_dir(base_path):
     ts = int(time.time())
-    path = os.path.join(base_path, str(ts))
+    name = str(ts)
+    path = os.path.join(base_path, name)
     if os.path.exists(path):
         raise 'failed to create output directory'
     else:
         os.makedirs(path)
+        symlink_path = os.path.join(base_path, 'latest')
+        if os.path.exists(symlink_path):
+            os.remove(symlink_path)
+        os.symlink(name, symlink_path)
         return path
 
 def describe_env():
