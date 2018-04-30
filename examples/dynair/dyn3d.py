@@ -27,26 +27,6 @@ import time
 from datetime import timedelta
 import enum
 from functools import partial
-
-# TODO: There's no reason the dedicated nets for t=0 for the w and z
-# guides have to be used/not used in unison.
-
-# TODO: Figure out how to conveniently specify the entire guide
-# architecture. Maybe have DynAIR take sub-modules as args, allowing
-# the config. to be varied by instantiating DynAIR with different
-# modules? (Each of which may take its own args?) One problem with
-# that is that sub-modules currently look at their parent for global
-# config. info., so that may need extracting to its own structure.
-# Also, some modules need to call methods on the parent, so that would
-# need wiring up, perhaps in `init` for DynAIR. (By passing `self` to
-# some method on the sub-module in question.)
-
-class GuideArch(enum.Enum):
-    rnn = enum.auto()
-    rnnt0 = enum.auto() # dedicate nets for step t=0
-    isf = enum.auto()   # image-so-far
-
-
 from functools import wraps
 
 def cached(f):
@@ -77,28 +57,28 @@ class PropCache():
 
 
 ArchConfig = namedtuple('ArchConfig',
-                        ['seq_length',    # data specified config
+                        ['seq_length', # data specified config
                          'num_chan',
                          'image_size',
                          'x_size',
                          'max_obj_count',
-                         'y_size',        # global config
+                         'w_size',     # global config
+                         'y_size',
                          'z_size',
                          'window_size',
                         ])
 
 class DynAIR(nn.Module):
-    def __init__(self, arch_cfg, guide_arch=GuideArch.isf, use_cuda=False):
+    def __init__(self, arch_cfg, arch, use_cuda=False):
 
         super(DynAIR, self).__init__()
 
         self.cache = PropCache()
-
-        self.guide_arch = guide_arch
-
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.use_cuda = use_cuda
 
+        # TODO: These probably don't need making into properties on
+        # DynAIR eventually.
         self.seq_length = arch_cfg.seq_length
         self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
         self.image_size = arch_cfg.image_size
@@ -109,11 +89,11 @@ class DynAIR(nn.Module):
         self.window_size = arch_cfg.window_size
 
         self.w_size = 2 # (x, y)
+        assert arch_cfg.w_size == self.w_size, 'w_size mismatch'
         # This may need increasing /slightly/ to allow for the
         # rotation of the avatars.
         self.window_scale = 0.25
 
-        self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
         # Priors:
@@ -141,15 +121,9 @@ class DynAIR(nn.Module):
         # Modules
 
         # Guide modules:
-
-        if self.guide_arch == GuideArch.isf:
-            self.guide_w_params = GuideW_ImageSoFar(self)
-        else:
-            self.guide_w_params = GuideW_ObjRnn(self, dedicated_t0=self.guide_arch==GuideArch.rnnt0)
-
-        self.guide_z_params = GuideZ(self, dedicated_t0=self.guide_arch==GuideArch.rnnt0)
-
-        self.y_param = mod.ParamY([200, 200], self.x_size, self.y_size)
+        self.guide_w_params = arch['guide_w']
+        self.y_param = arch['guide_y']
+        self.guide_z_params = arch['guide_z']
 
         # Model modules:
 
@@ -160,10 +134,23 @@ class DynAIR(nn.Module):
         self.z_transition = mod.ZTransition(self.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
+        self.modules_with_cache = [self]
+        if hasattr(self.guide_w_params, 'cache'):
+            self.modules_with_cache.append(self.guide_w_params)
+
         # CUDA
         if use_cuda:
             self.cuda()
 
+    def clear_caches(self):
+        for mod in self.modules_with_cache:
+            mod.cache.store.clear()
+
+    def stats_for_caches(self):
+        all_stats = {}
+        for mod in self.modules_with_cache:
+            all_stats.update(**mod.cache.stats)
+        return all_stats
 
     # We wrap `_decode_bkg` here to enable caching without
     # interferring with the magic behaviour that comes from having an
@@ -203,9 +190,9 @@ class DynAIR(nn.Module):
                 if do_likelihood:
                     self.likelihood(t, frame_mean, batch[:, t])
 
-        # It's possible the cache will still need clearing manually,
+        # It's possible the caches will still need clearing manually,
         # but this catches the common cases of SVI & infer.
-        self.cache.store.clear()
+        self.clear_caches()
 
         return frames, wss, zss
 
@@ -423,25 +410,26 @@ class DynAIR(nn.Module):
 # parameters from main + side input. The different been that there is
 # no recurrent part of the guide for z.)
 class GuideZ(nn.Module):
-    def __init__(self, parent, dedicated_t0):
+    def __init__(self, cfg, dedicated_t0):
         super(GuideZ, self).__init__()
 
+        x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
         x_att_embed_size = 200
 
         self.z_param = mod.ParamZ(
             [200, 200],
-            parent.w_size + x_att_embed_size + parent.z_size, # input size
-            parent.z_size)
+            cfg.w_size + x_att_embed_size + cfg.z_size, # input size
+            cfg.z_size)
 
         if dedicated_t0:
             self.z0_param = mod.ParamZ(
                 [200, 200],
-                parent.w_size + x_att_embed_size, # input size
-                parent.z_size)
+                cfg.w_size + x_att_embed_size, # input size
+                cfg.z_size)
         else:
-            self.z_init = nn.Parameter(torch.zeros(parent.z_size))
+            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-        self.x_att_embed = mod.MLP(parent.x_att_size, [x_att_embed_size], nn.ReLU, True)
+        self.x_att_embed = mod.MLP(x_att_size, [x_att_embed_size], nn.ReLU, True)
 
 
     def forward(self, t, i, w, x_att, z_prev_i):
@@ -460,31 +448,33 @@ class GuideZ(nn.Module):
 
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, parent, dedicated_t0):
+    def __init__(self, cfg, dedicated_t0):
         super(GuideW_ObjRnn, self).__init__()
 
         x_embed_size = 800
         rnn_hid_size = 200
 
-        # Use parent's cache for simplicity.
-        self.cache = parent.cache
+        self.cache = PropCache()
 
-        self._x_embed = mod.MLP(parent.x_size, [800, x_embed_size], nn.ReLU)
+        self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU)
 
         self.w_param = mod.ParamW(
-            x_embed_size + parent.w_size + parent.z_size, # input size
-            rnn_hid_size, [], parent.w_size, parent.z_size,
+            x_embed_size + cfg.w_size + cfg.z_size, # input size
+            rnn_hid_size, [], cfg.w_size, cfg.z_size,
             sd_bias=-2.25)
 
         if dedicated_t0:
             self.w0_param = mod.ParamW(
                 x_embed_size, # input size
-                rnn_hid_size, [], parent.w_size, parent.z_size,
+                rnn_hid_size, [], cfg.w_size, cfg.z_size,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
         else:
-            self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
+            # TODO: Does it make sense that this is a parameter
+            # (rather than fixed) in the case where the guide
+            # computing the delta?
+            self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
             # TODO: Small init.
-            self.z_init = nn.Parameter(torch.zeros(parent.z_size))
+            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
     @cached
     def x_embed(self, *args, **kwargs):
@@ -710,6 +700,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
             if not vis_hook is None:
                 vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
+            # print('\n' + str(dynair.stats_for_caches()))
 
         if (i+1) % 1000 == 0:
             torch.save(dynair.state_dict(),
@@ -832,7 +823,8 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    arch_cfg = ArchConfig(y_size=args.y_size,
+    arch_cfg = ArchConfig(w_size=2,
+                          y_size=args.y_size,
                           z_size=args.z_size,
                           window_size=args.window_size,
                           **data_params(data))
@@ -846,7 +838,13 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond(arch_cfg)
 
-    dynair = DynAIR(arch_cfg, use_cuda=args.cuda)
+    dynair = DynAIR(arch_cfg,
+                    dict(guide_w=GuideW_ObjRnn(arch_cfg, dedicated_t0=False),
+                         # guide_w=GuideW_ImageSoFar(arch_cfg)
+                         guide_y=mod.ParamY(arch_cfg),
+                         guide_z=GuideZ(arch_cfg, dedicated_t0=False)),
+                    use_cuda=args.cuda)
+
     run_svi(dynair, X_split, Y_split, args.epochs,
             partial(vis_hook, args.vis, visdom.Visdom(), dynair),
             output_path)

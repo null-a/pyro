@@ -291,10 +291,10 @@ class ParamZ(nn.Module):
         return z_mean, z_sd
 
 class ParamY(nn.Module):
-    def __init__(self, hids, x_size, y_size):
+    def __init__(self, cfg):
         super(ParamY, self).__init__()
-        self.col_widths = [y_size, y_size]
-        self.mlp = MLP(x_size, hids + [sum(self.col_widths)], nn.ReLU)
+        self.col_widths = [cfg.y_size, cfg.y_size]
+        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)], nn.ReLU)
 
     def forward(self, x):
         batch_size = x.size(0)
