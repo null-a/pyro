@@ -125,6 +125,10 @@ class DynAIR(nn.Module):
         self.y_param = arch['guide_y']
         self.guide_z_params = arch['guide_z']
 
+        # Hack to support image-so-far.
+        if hasattr(self.guide_w_params, 'set_parent'):
+            self.guide_w_params.set_parent(self)
+
         # Model modules:
 
         self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
@@ -500,25 +504,28 @@ class GuideW_ObjRnn(nn.Module):
 
 
 class GuideW_ImageSoFar(nn.Module):
-    def __init__(self, parent):
+    def __init__(self, cfg):
         super(GuideW_ImageSoFar, self).__init__()
 
+        # TODO: Figure out how best to specify the desired architecture.
+        self.w_param = mod.ParamW_Isf_Mlp(cfg)
+        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(cfg)
+        #self.w_param = mod.ParamW_Isf_Cnn_AM(cfg)
+
+        # TODO: Does it make sense that this is a parameter (rather
+        # than fixed) in the case where the guide computing the delta?
+        # (Though this guide perhaps lends itself to computing
+        # absolute position.)
+        self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
+        self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+
+    # TODO: This is unpleasant. This is complicated by caching. One
+    # alternative might be to have a `Model` module that contains
+    # these methods, and then pass that to both DynAIR and this
+    # module.
+    def set_parent(self, parent):
         self.decode_bkg = parent.decode_bkg
         self.model_composite_object = parent.model_composite_object
-
-        # TODO: Figure out how best to specify the desired architecture.
-        self.w_param = mod.ParamW_Isf_Mlp(parent)
-        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(parent)
-        #self.w_param = mod.ParamW_Isf_Cnn_AM(parent)
-
-        # TODO: I don't see a problem making this a parameter in the
-        # CNN+AM case, assuming we're computing absolute position. In
-        # other cases it's less clear. OTOH, it's 2/3 real numbers,
-        # and z_init alone can probably do the job.
-        self.w_init = Variable(parent.prototype.new_zeros(parent.w_size))
-        self.z_init = nn.Parameter(torch.zeros(parent.z_size))
-
-
 
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
         batch_size = x.size(0)
@@ -840,7 +847,7 @@ if __name__ == '__main__':
 
     dynair = DynAIR(arch_cfg,
                     dict(guide_w=GuideW_ObjRnn(arch_cfg, dedicated_t0=False),
-                         # guide_w=GuideW_ImageSoFar(arch_cfg)
+                         #guide_w=GuideW_ImageSoFar(arch_cfg),
                          guide_y=mod.ParamY(arch_cfg),
                          guide_z=GuideZ(arch_cfg, dedicated_t0=False)),
                     use_cuda=args.cuda)

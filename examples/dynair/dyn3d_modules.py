@@ -146,7 +146,7 @@ class ParamW_Isf_Cnn_Mixin(nn.Module):
 
         self.cnn = InputCnn(cfg)
 
-        self.mlp = MLP(prod(self.cnn.output_size) + cfg.w_size + cfg.z_size,
+        self.mlp = MLP(product(self.cnn.output_size) + cfg.w_size + cfg.z_size,
                        [200, 200, sum(self.col_widths)],
                        nn.ReLU)
 
