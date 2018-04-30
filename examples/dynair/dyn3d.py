@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw
 import os
 import json
 import argparse
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import time
 from datetime import timedelta
 import enum
@@ -76,8 +76,19 @@ class PropCache():
         self.stats = defaultdict(lambda: dict(miss=0, hit=0))
 
 
+ArchConfig = namedtuple('ArchConfig',
+                        ['seq_length',    # data specified config
+                         'num_chan',
+                         'image_size',
+                         'x_size',
+                         'max_obj_count',
+                         'y_size',        # global config
+                         'z_size',
+                         'window_size',
+                        ])
+
 class DynAIR(nn.Module):
-    def __init__(self, guide_arch=GuideArch.isf, use_cuda=False):
+    def __init__(self, arch_cfg, guide_arch=GuideArch.isf, use_cuda=False):
 
         super(DynAIR, self).__init__()
 
@@ -88,23 +99,20 @@ class DynAIR(nn.Module):
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.use_cuda = use_cuda
 
-        self.seq_length = 20
+        self.seq_length = arch_cfg.seq_length
+        self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
+        self.image_size = arch_cfg.image_size
+        self.x_size = arch_cfg.x_size
+        self.max_obj_count = arch_cfg.max_obj_count
+        self.y_size = arch_cfg.y_size
+        self.z_size = arch_cfg.z_size
+        self.window_size = arch_cfg.window_size
 
-        self.max_obj_count = 3
-
-        self.image_size = 50
-        self.num_chan = 3 # not inc. the alpha channel
-
-        self.window_size = 22
-
-        self.y_size = 50
-        self.z_size = 50
         self.w_size = 2 # (x, y)
         # This may need increasing /slightly/ to allow for the
         # rotation of the avatars.
         self.window_scale = 0.25
 
-        self.x_size = self.num_chan * self.image_size**2
         self.x_att_size = self.num_chan * self.window_size**2 # patches cropped from the input
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
@@ -725,6 +733,17 @@ def load_data(data_path, use_cuda):
         Y = Y.cuda()
     return X, Y
 
+def data_params(data):
+    X, Y = data
+    seq_length, num_chan, image_size = X.size()[1:4]
+    x_size = num_chan * image_size**2
+    max_obj_count = Y.max().item()
+    return dict(seq_length=seq_length,
+                num_chan=num_chan,
+                image_size=image_size,
+                x_size=x_size,
+                max_obj_count=max_obj_count)
+
 def frames_to_rgb_list(frames):
     return frames[:, 0:3].data.numpy().tolist()
 
@@ -801,6 +820,10 @@ if __name__ == '__main__':
     parser.add_argument('--vis', type=int, default=0,
                         help='visualise inferences during optimisation (zero disables, otherwise specifies period)')
     parser.add_argument('-o', default='./runs', help='base output path')
+    parser.add_argument('--y-size', type=int, default=50, help='size of y')
+    parser.add_argument('--z-size', type=int, default=50, help='size of z')
+    parser.add_argument('--window-size', type=int, default=22,
+                        help='size of the object window')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
     args = parser.parse_args()
 
@@ -809,6 +832,11 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
+    arch_cfg = ArchConfig(y_size=args.y_size,
+                          z_size=args.z_size,
+                          window_size=args.window_size,
+                          **data_params(data))
+
     output_path = make_output_dir(args.o)
     print('output path: {}'.format(output_path))
     log_to_cond = partial(append_line, os.path.join(output_path, 'condition.txt'))
@@ -816,8 +844,9 @@ if __name__ == '__main__':
     log_to_cond('data path: {}'.format(args.data_path))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
+    log_to_cond(arch_cfg)
 
-    dynair = DynAIR(use_cuda=args.cuda)
+    dynair = DynAIR(arch_cfg, use_cuda=args.cuda)
     run_svi(dynair, X_split, Y_split, args.epochs,
             partial(vis_hook, args.vis, visdom.Visdom(), dynair),
             output_path)
