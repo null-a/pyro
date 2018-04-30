@@ -11,13 +11,11 @@ def git_wd_is_clean():
     out = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
     return len(out) == 0
 
-def make_output_dir(rev=None, i=0):
-    assert i < 100, "Lot's of runs, something probably went wrong."
-    if rev is None:
-        rev = git_rev()
-    path = './runs/{}-{}'.format(rev, i)
+def make_output_dir(base_path):
+    ts = int(time.time())
+    path = os.path.join(base_path, str(ts))
     if os.path.exists(path):
-        return make_output_dir(rev, i + 1)
+        raise 'failed to create output directory'
     else:
         os.makedirs(path)
         return path

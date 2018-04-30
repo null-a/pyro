@@ -799,6 +799,7 @@ if __name__ == '__main__':
                         help='number of batches to hold out')
     parser.add_argument('--vis', action='store_true', default=False,
                         help='visualise inferences during optimisation')
+    parser.add_argument('-o', default='./runs', help='base output path')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
     args = parser.parse_args()
 
@@ -807,7 +808,7 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    output_path = make_output_dir()
+    output_path = make_output_dir(args.o)
     print('output path: {}'.format(output_path))
     log_to_cond = partial(append_line, os.path.join(output_path, 'condition.txt'))
     log_to_cond(describe_env())
