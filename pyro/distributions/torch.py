@@ -7,6 +7,8 @@ from pyro.distributions.torch_distribution import TorchDistributionMixin
 # Programmatically load all distributions from PyTorch.
 __all__ = []
 for _name, _Dist in torch.distributions.__dict__.items():
+    if _name == 'Binomial':
+        continue
     if not isinstance(_Dist, type):
         continue
     if not issubclass(_Dist, torch.distributions.Distribution):
@@ -38,7 +40,7 @@ __doc__ = '\n\n'.join([
     '''
     {0}
     ----------------------------------------------------------------
-    .. autoclass:: {0}
+    .. autoclass:: pyro.distributions.{0}
     '''.format(_name)
     for _name in sorted(__all__)
 ])

@@ -36,7 +36,7 @@ Models
     :show-inheritance:
     :member-order: bysource
 
-.. automodule:: pyro.contrib.gp.models.svgp
+.. automodule:: pyro.contrib.gp.models.vsgp
     :members:
     :undoc-members:
     :show-inheritance:
@@ -103,6 +103,12 @@ Likelihoods
     :member-order: bysource
 
 .. automodule:: pyro.contrib.gp.likelihoods.multi_class
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+.. automodule:: pyro.contrib.gp.likelihoods.poisson
     :members:
     :undoc-members:
     :show-inheritance:

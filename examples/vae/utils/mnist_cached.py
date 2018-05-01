@@ -7,7 +7,6 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 
-
 # This file contains utilities for caching, transforming and splitting MNIST data
 # efficiently. By default, a Pytorch DataLoader will apply the transform every epoch
 # we avoid this by caching the data early on in MNISTCached class
@@ -115,8 +114,8 @@ def print_distribution_labels(y):
 
 class MNISTCached(MNIST):
     """
-        a wrapper around MNIST to load and cache the transformed data
-        once at the beginning of the inference
+    a wrapper around MNIST to load and cache the transformed data
+    once at the beginning of the inference
     """
 
     # static class variables for caching training data
@@ -180,11 +179,8 @@ class MNISTCached(MNIST):
 
     def __getitem__(self, index):
         """
-        Args:
-            index (int): Index or slice object
-
-        Returns:
-            tuple: (image, target) where target is index of the target class.
+        :param index: Index or slice object
+        :returns tuple: (image, target) where target is index of the target class.
         """
         if self.mode in ["sup", "unsup", "valid"]:
             img, target = self.train_data[index], self.train_labels[index]

@@ -7,13 +7,11 @@ import visdom
 
 import pyro
 import pyro.distributions as dist
-from pyro.infer import SVI
+from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 from utils.mnist_cached import MNISTCached as MNIST
 from utils.mnist_cached import setup_data_loaders
 from utils.vae_plots import mnist_test_tsne, plot_llk, plot_vae_samples
-
-fudge = 1e-7
 
 
 # define the PyTorch module that parameterizes the
@@ -25,7 +23,7 @@ class Encoder(nn.Module):
         self.fc1 = nn.Linear(784, hidden_dim)
         self.fc21 = nn.Linear(hidden_dim, z_dim)
         self.fc22 = nn.Linear(hidden_dim, z_dim)
-        # setup the non-linearity
+        # setup the non-linearities
         self.softplus = nn.Softplus()
 
     def forward(self, x):
@@ -46,10 +44,10 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, z_dim, hidden_dim):
         super(Decoder, self).__init__()
-        # setup the three linear transformations used
+        # setup the two linear transformations used
         self.fc1 = nn.Linear(z_dim, hidden_dim)
         self.fc21 = nn.Linear(hidden_dim, 784)
-        # setup the non-linearity
+        # setup the non-linearities
         self.softplus = nn.Softplus()
         self.sigmoid = nn.Sigmoid()
 
@@ -59,8 +57,7 @@ class Decoder(nn.Module):
         hidden = self.softplus(self.fc1(z))
         # return the parameter for the output Bernoulli
         # each is of size batch_size x 784
-        # fixing numerical instabilities of sigmoid with a fudge
-        loc_img = (self.sigmoid(self.fc21(hidden))+fudge) * (1-2*fudge)
+        loc_img = self.sigmoid(self.fc21(hidden))
         return loc_img
 
 
@@ -90,11 +87,13 @@ class VAE(nn.Module):
             z_loc = x.new_zeros(torch.Size((x.size(0), self.z_dim)))
             z_scale = x.new_ones(torch.Size((x.size(0), self.z_dim)))
             # sample from prior (value will be sampled by guide when computing the ELBO)
-            z = pyro.sample("latent", dist.Normal(z_loc, z_scale).reshape(extra_event_dims=1))
+            z = pyro.sample("latent", dist.Normal(z_loc, z_scale).independent(1))
             # decode the latent code z
             loc_img = self.decoder.forward(z)
             # score against actual images
-            pyro.sample("obs", dist.Bernoulli(loc_img).reshape(extra_event_dims=1), obs=x.reshape(-1, 784))
+            pyro.sample("obs", dist.Bernoulli(loc_img).independent(1), obs=x.reshape(-1, 784))
+            # return the loc so we can visualize it later
+            return loc_img
 
     # define the guide (i.e. variational distribution) q(z|x)
     def guide(self, x):
@@ -104,7 +103,7 @@ class VAE(nn.Module):
             # use the encoder to get the parameters used to define q(z|x)
             z_loc, z_scale = self.encoder.forward(x)
             # sample the latent code z
-            pyro.sample("latent", dist.Normal(z_loc, z_scale).reshape(extra_event_dims=1))
+            pyro.sample("latent", dist.Normal(z_loc, z_scale).independent(1))
 
     # define a helper function for reconstructing images
     def reconstruct_img(self, x):
@@ -115,15 +114,6 @@ class VAE(nn.Module):
         # decode the image (note we don't sample in image space)
         loc_img = self.decoder(z)
         return loc_img
-
-    def model_sample(self, batch_size=1):
-        # sample the handwriting style from the constant prior distribution
-        prior_loc = torch.zeros([batch_size, self.z_dim])
-        prior_scale = torch.ones([batch_size, self.z_dim])
-        zs = pyro.sample("z", dist.Normal(prior_loc, prior_scale))
-        loc = self.decoder.forward(zs)
-        xs = pyro.sample("sample", dist.Bernoulli(loc))
-        return xs, loc
 
 
 def main(args):
@@ -139,7 +129,7 @@ def main(args):
     optimizer = Adam(adam_args)
 
     # setup the inference algorithm
-    svi = SVI(vae.model, vae.guide, optimizer, loss="ELBO")
+    svi = SVI(vae.model, vae.guide, optimizer, loss=Trace_ELBO())
 
     # setup visdom for visualization
     if args.visdom_flag:
@@ -210,9 +200,8 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--num-epochs', default=101, type=int, help='number of training epochs')
     parser.add_argument('-tf', '--test-frequency', default=5, type=int, help='how often we evaluate the test set')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
-    parser.add_argument('-b1', '--beta1', default=0.95, type=float, help='beta1 adam hyperparameter')
     parser.add_argument('--cuda', action='store_true', default=False, help='whether to use cuda')
-    parser.add_argument('-visdom', '--visdom_flag', default=False, help='Whether plotting in visdom is desired')
+    parser.add_argument('-visdom', '--visdom_flag', action="store_true", help='Whether plotting in visdom is desired')
     parser.add_argument('-i-tsne', '--tsne_iter', default=100, type=int, help='epoch when tsne visualization runs')
     args = parser.parse_args()
 

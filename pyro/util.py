@@ -10,150 +10,7 @@ import graphviz
 import torch
 from six.moves import zip_longest
 
-from pyro.params import _PYRO_PARAM_STORE
-from pyro.poutine.poutine import _PYRO_STACK
 from pyro.poutine.util import site_is_subsample
-
-
-def validate_message(msg):
-    """
-    Asserts that the message has a valid format.
-    :returns: None
-    """
-    assert msg["type"] in ("sample", "param"), \
-        "{} is an invalid site type, how did that get there?".format(msg["type"])
-
-
-def default_process_message(msg):
-    """
-    Default method for processing messages in inference.
-    :param msg: a message to be processed
-    :returns: None
-    """
-    validate_message(msg)
-    if msg["type"] == "sample":
-        fn, args, kwargs = \
-            msg["fn"], msg["args"], msg["kwargs"]
-
-        # msg["done"] enforces the guarantee in the poutine execution model
-        # that a site's non-effectful primary computation should only be executed once:
-        # if the site already has a stored return value,
-        # don't reexecute the function at the site,
-        # and do any side effects using the stored return value.
-        if msg["done"]:
-            return msg
-
-        if msg["is_observed"]:
-            assert msg["value"] is not None
-            val = msg["value"]
-        else:
-            val = fn(*args, **kwargs)
-
-        # after fn has been called, update msg to prevent it from being called again.
-        msg["done"] = True
-        msg["value"] = val
-    elif msg["type"] == "param":
-        name, args, kwargs = \
-            msg["name"], msg["args"], msg["kwargs"]
-
-        # msg["done"] enforces the guarantee in the poutine execution model
-        # that a site's non-effectful primary computation should only be executed once:
-        # if the site already has a stored return value,
-        # don't reexecute the function at the site,
-        # and do any side effects using the stored return value.
-        if msg["done"]:
-            return msg
-
-        ret = _PYRO_PARAM_STORE.get_param(name, *args, **kwargs)
-
-        # after the param store has been queried, update msg["done"]
-        # to prevent it from being queried again.
-        msg["done"] = True
-        msg["value"] = ret
-    else:
-        assert False
-    return None
-
-
-def apply_stack(initial_msg):
-    """
-    :param dict initial_msg: the starting version of the trace site
-    :returns: an updated message that is the final version of the trace site
-
-    Execute the poutine stack at a single site according to the following scheme:
-    1. Walk down the stack from top to bottom, collecting into the message
-        all information necessary to execute the stack at that site
-    2. For each poutine in the stack from bottom to top:
-           Execute the poutine with the message;
-           If the message field "stop" is True, stop;
-           Otherwise, continue
-    3. Return the updated message
-    """
-    stack = _PYRO_STACK
-    # TODO check at runtime if stack is valid
-
-    # msg is used to pass information up and down the stack
-    msg = initial_msg
-
-    counter = 0
-    # go until time to stop?
-    for frame in stack:
-        validate_message(msg)
-
-        counter = counter + 1
-
-        frame._process_message(msg)
-
-        if msg["stop"]:
-            break
-
-    default_process_message(msg)
-
-    for frame in reversed(stack[0:counter]):
-        frame._postprocess_message(msg)
-
-    cont = msg["continuation"]
-    if cont is not None:
-        cont(msg)
-
-    return None
-
-
-def am_i_wrapped():
-    """
-    Checks whether the current computation is wrapped in a poutine.
-    :returns: bool
-    """
-    return len(_PYRO_STACK) > 0
-
-
-def _dict_to_tuple(d):
-    """
-    Recursively converts a dictionary to a list of key-value tuples
-    Only intended for use as a helper function inside memoize!!
-    May break when keys cant be sorted, but that is not an expected use-case
-    """
-    if isinstance(d, dict):
-        return tuple([(k, _dict_to_tuple(d[k])) for k in sorted(d.keys())])
-    else:
-        return d
-
-
-def memoize(fn):
-    """
-    https://stackoverflow.com/questions/1988804/what-is-memoization-and-how-can-i-use-it-in-python
-    unbounded memoize
-    alternate in py3: https://docs.python.org/3/library/functools.html
-    lru_cache
-    """
-    mem = {}
-
-    def _fn(*args, **kwargs):
-        kwargs_tuple = _dict_to_tuple(kwargs)
-        if (args, kwargs_tuple) not in mem:
-            mem[(args, kwargs_tuple)] = fn(*args, **kwargs)
-        return mem[(args, kwargs_tuple)]
-    return _fn
 
 
 def set_rng_seed(rng_seed):
@@ -165,7 +22,6 @@ def set_rng_seed(rng_seed):
     random.seed(rng_seed)
     try:
         import numpy as np
-
         np.random.seed(rng_seed)
     except ImportError:
         pass
@@ -266,10 +122,15 @@ def check_model_guide_match(model_trace, guide_trace, max_iarange_nesting=float(
     :param pyro.poutine.Trace guide_trace: Trace object of the guide
     :raises: RuntimeWarning, ValueError
 
-    Checks that (1) there is a bijection between the samples in the guide
-    and the samples in the model, (2) each `iarange` statement in the guide
-    also appears in the model, (3) at each sample site that appears in both
-    the model and guide, the model and guide agree on sample shape.
+    Checks the following assumptions:
+    1. Each sample site in the model also appears in the guide and is not
+        marked auxiliary.
+    2. Each sample site in the guide either appears in the model or is marked,
+        auxiliary via ``infer={'is_auxiliary': True}``.
+    3. Each :class:``~pyro.iarange`` statement in the guide also appears in the
+        model.
+    4. At each sample site that appears in both the model and guide, the model
+        and guide agree on sample shape.
     """
     # Check ordinary sample sites.
     model_vars = set(name for name, site in model_trace.nodes.items()
@@ -278,8 +139,15 @@ def check_model_guide_match(model_trace, guide_trace, max_iarange_nesting=float(
     guide_vars = set(name for name, site in guide_trace.nodes.items()
                      if site["type"] == "sample"
                      if type(site["fn"]).__name__ != "_Subsample")
-    if not (guide_vars <= model_vars):
-        warnings.warn("Found vars in guide but not model: {}".format(guide_vars - model_vars))
+    aux_vars = set(name for name, site in guide_trace.nodes.items()
+                   if site["type"] == "sample"
+                   if site["infer"].get("is_auxiliary"))
+    if aux_vars & model_vars:
+        warnings.warn("Found auxiliary vars in the model: {}".format(aux_vars & model_vars))
+    if not (guide_vars <= model_vars | aux_vars):
+        warnings.warn("Found non-auxiliary vars in guide but not model, "
+                      "consider marking these infer={{'is_auxiliary': True}}:\n{}".format(
+                          guide_vars - aux_vars - model_vars))
     if not (model_vars <= guide_vars):
         warnings.warn("Found vars in model but not guide: {}".format(model_vars - guide_vars))
 
@@ -358,7 +226,7 @@ def check_site_shape(site, max_iarange_nesting):
                 'Expected {}, actual {}'.format(expected_shape, actual_shape),
                 'Try one of the following fixes:',
                 '- enclose the batched tensor in a with iarange(...): context',
-                '- .reshape(extra_event_dims=...) the distribution being sampled',
+                '- .independent(...) the distribution being sampled',
                 '- .permute() data dimensions']))
 
     # TODO Check parallel dimensions on the left of max_iarange_nesting.

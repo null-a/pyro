@@ -5,7 +5,8 @@ Contributed Code
     This code makes no guarantee about maintaining backwards compatibility.
 
 .. toctree::
-   :maxdepth: 2
+    :maxdepth: 2
+    :glob:
+    :includehidden:
 
-   contrib.named
-   contrib.gp
+    contrib.*

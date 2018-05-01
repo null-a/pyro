@@ -12,7 +12,7 @@ import pyro.distributions as dist
 import pyro.optim as optim
 from pyro.distributions.testing import fakes
 from pyro.distributions.testing.rejection_gamma import ShapeAugmentedGamma
-from pyro.infer.svi import SVI
+from pyro.infer import SVI, Trace_ELBO, TraceEnum_ELBO, TraceGraph_ELBO
 from tests.common import assert_equal
 
 
@@ -57,10 +57,10 @@ class NormalNormalTests(TestCase):
         def model():
             loc_latent = pyro.sample("loc_latent",
                                      dist.Normal(self.loc0, torch.pow(self.lam0, -0.5))
-                                     .reshape(extra_event_dims=1))
+                                     .independent(1))
             with pyro.iarange('data', self.batch_size):
                 pyro.sample("obs",
-                            dist.Normal(loc_latent, torch.pow(self.lam, -0.5)).reshape(extra_event_dims=1),
+                            dist.Normal(loc_latent, torch.pow(self.lam, -0.5)).independent(1),
                             obs=self.data)
             return loc_latent
 
@@ -72,10 +72,10 @@ class NormalNormalTests(TestCase):
                                    requires_grad=True))
             sig_q = torch.exp(log_sig_q)
             Normal = dist.Normal if reparameterized else fakes.NonreparameterizedNormal
-            pyro.sample("loc_latent", Normal(loc_q, sig_q).reshape(extra_event_dims=1))
+            pyro.sample("loc_latent", Normal(loc_q, sig_q).independent(1))
 
         adam = optim.Adam({"lr": .001})
-        svi = SVI(model, guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(model, guide, adam, loss=Trace_ELBO())
 
         for k in range(n_steps):
             svi.step()
@@ -128,7 +128,7 @@ class TestFixedModelGuide(TestCase):
             return {'lr': 0.01}
 
         adam = optim.Adam(per_param_args)
-        svi = SVI(model, guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(model, guide, adam, loss=Trace_ELBO())
 
         for _ in range(3):
             svi.step()
@@ -167,7 +167,7 @@ class PoissonGammaTests(TestCase):
         self.n_data = len(self.data)
         data_sum = self.data.sum(0)
         self.alpha_n = self.alpha0 + data_sum  # posterior alpha
-        self.beta_n = self.beta0 + torch.tensor(self.n_data)  # posterior beta
+        self.beta_n = self.beta0 + torch.tensor(float(self.n_data))  # posterior beta
 
     def test_elbo_reparameterized(self):
         self.do_elbo_test(True, 10000)
@@ -193,19 +193,19 @@ class PoissonGammaTests(TestCase):
             pyro.sample("lambda_latent", Gamma(alpha_q, beta_q))
 
         adam = optim.Adam({"lr": .0002, "betas": (0.97, 0.999)})
-        svi = SVI(model, guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(model, guide, adam, loss=Trace_ELBO())
 
         for k in range(n_steps):
             svi.step()
 
         assert_equal(pyro.param("alpha_q"), self.alpha_n, prec=0.2, msg='{} vs {}'.format(
-            pyro.param("alpha_q").detach().numpy(), self.alpha_n.detach().numpy()))
+            pyro.param("alpha_q").detach().cpu().numpy(), self.alpha_n.detach().cpu().numpy()))
         assert_equal(pyro.param("beta_q"), self.beta_n, prec=0.15, msg='{} vs {}'.format(
-            pyro.param("beta_q").detach().numpy(), self.beta_n.detach().numpy()))
+            pyro.param("beta_q").detach().cpu().numpy(), self.beta_n.detach().cpu().numpy()))
 
 
 @pytest.mark.stage("integration", "integration_batch_1")
-@pytest.mark.parametrize('elbo_impl', ["Trace", "TraceGraph", "TraceEnum"])
+@pytest.mark.parametrize('elbo_impl', [Trace_ELBO, TraceGraph_ELBO, TraceEnum_ELBO])
 @pytest.mark.parametrize('gamma_dist,n_steps', [
     (dist.Gamma, 5000),
     (fakes.NonreparameterizedGamma, 10000),
@@ -220,7 +220,7 @@ def test_exponential_gamma(gamma_dist, n_steps, elbo_impl):
     beta0 = torch.tensor(1.0)
     n_data = 2
     data = torch.tensor([3.0, 2.0])  # two observations
-    alpha_n = alpha0 + torch.tensor(n_data)  # posterior alpha
+    alpha_n = alpha0 + torch.tensor(float(n_data))  # posterior alpha
     beta_n = beta0 + torch.sum(data)  # posterior beta
 
     def model():
@@ -235,18 +235,16 @@ def test_exponential_gamma(gamma_dist, n_steps, elbo_impl):
         pyro.sample("lambda_latent", gamma_dist(alpha_q, beta_q))
 
     adam = optim.Adam({"lr": .0003, "betas": (0.97, 0.999)})
-    svi = SVI(model, guide, adam, loss="ELBO",
-              trace_graph=(elbo_impl == "TraceGraph"),
-              enum_discrete=(elbo_impl == "TraceEnum"),
-              max_iarange_nesting=1)
+    elbo = elbo_impl(strict_enumeration_warning=False)
+    svi = SVI(model, guide, adam, loss=elbo, max_iarange_nesting=1)
 
     for k in range(n_steps):
         svi.step()
 
     assert_equal(pyro.param("alpha_q"), alpha_n, prec=0.15, msg='{} vs {}'.format(
-        pyro.param("alpha_q").detach().numpy(), alpha_n.detach().numpy()))
+        pyro.param("alpha_q").detach().cpu().numpy(), alpha_n.detach().cpu().numpy()))
     assert_equal(pyro.param("beta_q"), beta_n, prec=0.15, msg='{} vs {}'.format(
-        pyro.param("beta_q").detach().numpy(), beta_n.detach().numpy()))
+        pyro.param("beta_q").detach().cpu().numpy(), beta_n.detach().cpu().numpy()))
 
 
 @pytest.mark.stage("integration", "integration_batch_2")
@@ -261,7 +259,7 @@ class BernoulliBetaTests(TestCase):
         self.batch_size = 4
         data_sum = self.data.sum()
         self.alpha_n = self.alpha0 + data_sum  # posterior alpha
-        self.beta_n = self.beta0 - data_sum + torch.tensor(self.n_data)
+        self.beta_n = self.beta0 - data_sum + torch.tensor(float(self.n_data))
         # posterior beta
         self.log_alpha_n = torch.log(self.alpha_n)
         self.log_beta_n = torch.log(self.beta_n)
@@ -291,7 +289,7 @@ class BernoulliBetaTests(TestCase):
             pyro.sample("p_latent", Beta(alpha_q, beta_q))
 
         adam = optim.Adam({"lr": .001, "betas": (0.97, 0.999)})
-        svi = SVI(model, guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(model, guide, adam, loss=Trace_ELBO())
 
         for k in range(n_steps):
             svi.step()
@@ -331,7 +329,7 @@ class SafetyTests(TestCase):
         pyro.clear_param_store()
 
         adam = optim.Adam({"lr": .001})
-        svi = SVI(self.duplicate_model, self.guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(self.duplicate_model, self.guide, adam, loss=Trace_ELBO())
 
         with pytest.raises(RuntimeError):
             svi.step()
@@ -340,7 +338,7 @@ class SafetyTests(TestCase):
         pyro.clear_param_store()
 
         adam = optim.Adam({"lr": .001})
-        svi = SVI(self.model, self.guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(self.model, self.guide, adam, loss=Trace_ELBO())
 
         with pytest.warns(Warning):
             svi.step()
@@ -349,7 +347,7 @@ class SafetyTests(TestCase):
         pyro.clear_param_store()
 
         adam = optim.Adam({"lr": .001})
-        svi = SVI(self.duplicate_obs, self.guide, adam, loss="ELBO", trace_graph=False)
+        svi = SVI(self.duplicate_obs, self.guide, adam, loss=Trace_ELBO())
 
         with pytest.raises(RuntimeError):
             svi.step()

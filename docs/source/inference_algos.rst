@@ -29,15 +29,6 @@ ELBO
     :undoc-members:
     :show-inheritance:
 
-ADVI
-----
-
-.. automodule:: pyro.infer.advi
-    :members:
-    :undoc-members:
-    :show-inheritance:
-    :member-order: bysource
-
 Importance
 ----------
 
@@ -46,10 +37,10 @@ Importance
     :undoc-members:
     :show-inheritance:
 
-Search
-------
+Inference Utilities
+-------------------
 
-.. automodule:: pyro.infer.search
+.. automodule:: pyro.infer.abstract_infer
     :members:
     :undoc-members:
     :show-inheritance:

@@ -7,12 +7,11 @@ import networkx
 import torch
 
 import pyro
-import pyro.infer as infer
 import pyro.poutine as poutine
 from pyro.distributions.util import is_identically_zero
 from pyro.infer import ELBO
-from pyro.infer.util import (MultiFrameTensor, get_iarange_stacks, torch_backward,
-                             torch_data_sum, detach_iterable)
+from pyro.infer.util import (MultiFrameTensor, detach_iterable, get_iarange_stacks, is_validation_enabled,
+                             torch_backward, torch_item)
 from pyro.poutine.util import prune_subsample_sites
 from pyro.util import check_model_guide_match, check_site_shape, torch_isnan
 
@@ -96,25 +95,22 @@ def _compute_downstream_costs(model_trace, guide_trace,  #
 def _compute_elbo_reparam(model_trace, guide_trace, non_reparam_nodes):
     elbo = 0.0
     surrogate_elbo = 0.0
-    for name, model_site in model_trace.nodes.items():
-        if model_site["type"] == "sample":
-            if model_site["is_observed"]:
-                elbo += model_site["log_prob_sum"]
-                surrogate_elbo += model_site["log_prob_sum"]
-            else:
-                # deal with log p(z|...) term
-                elbo += model_site["log_prob_sum"]
-                surrogate_elbo += model_site["log_prob_sum"]
-                # deal with log q(z|...) term, if present
-                guide_site = guide_trace.nodes[name]
-                elbo -= guide_site["log_prob_sum"]
-                entropy_term = guide_site["score_parts"].entropy_term
-                if not is_identically_zero(entropy_term):
-                    surrogate_elbo -= entropy_term.sum()
 
-    # elbo is never differentiated, surrogate_elbo is
+    # deal with log p(z|...) terms
+    for name, site in model_trace.nodes.items():
+        if site["type"] == "sample":
+            elbo += torch_item(site["log_prob_sum"])
+            surrogate_elbo += site["log_prob_sum"]
 
-    return torch_data_sum(elbo), surrogate_elbo
+    # deal with log q(z|...) terms
+    for name, site in guide_trace.nodes.items():
+        if site["type"] == "sample":
+            elbo -= torch_item(site["log_prob_sum"])
+            entropy_term = site["score_parts"].entropy_term
+            if not is_identically_zero(entropy_term):
+                surrogate_elbo -= entropy_term.sum()
+
+    return elbo, surrogate_elbo
 
 
 def _compute_elbo_non_reparam(guide_trace, non_reparam_nodes, downstream_costs):
@@ -198,10 +194,18 @@ class TraceGraph_ELBO(ELBO):
         for i in range(self.num_particles):
             guide_trace = poutine.trace(guide,
                                         graph_type="dense").get_trace(*args, **kwargs)
-            model_trace = poutine.trace(poutine.replay(model, guide_trace),
+            model_trace = poutine.trace(poutine.replay(model, trace=guide_trace),
                                         graph_type="dense").get_trace(*args, **kwargs)
-            if infer.is_validation_enabled():
+            if is_validation_enabled():
                 check_model_guide_match(model_trace, guide_trace)
+                enumerated_sites = [name for name, site in guide_trace.nodes.items()
+                                    if site["type"] == "sample" and site["infer"].get("enumerate")]
+                if enumerated_sites:
+                    warnings.warn('\n'.join([
+                        'TraceGraph_ELBO found sample sites configured for enumeration:'
+                        ', '.join(enumerated_sites),
+                        'If you want to enumerate sites, you need to use TraceEnum_ELBO instead.']))
+
             guide_trace = prune_subsample_sites(guide_trace)
             model_trace = prune_subsample_sites(model_trace)
 
@@ -217,19 +221,8 @@ class TraceGraph_ELBO(ELBO):
         """
         elbo = 0.0
         for weight, model_trace, guide_trace in self._get_traces(model, guide, *args, **kwargs):
-            guide_trace.log_prob_sum(), model_trace.log_prob_sum()
-
-            elbo_particle = 0.0
-
-            for name in model_trace.nodes.keys():
-                if model_trace.nodes[name]["type"] == "sample":
-                    if model_trace.nodes[name]["is_observed"]:
-                        elbo_particle += model_trace.nodes[name]["log_prob_sum"]
-                    else:
-                        elbo_particle += model_trace.nodes[name]["log_prob_sum"]
-                        elbo_particle -= guide_trace.nodes[name]["log_prob_sum"]
-
-            elbo += torch_data_sum(weight * elbo_particle)
+            elbo_particle = torch_item(model_trace.log_prob_sum()) - torch_item(guide_trace.log_prob_sum())
+            elbo += weight * elbo_particle
 
         loss = -elbo
         if torch_isnan(loss):
@@ -255,7 +248,7 @@ class TraceGraph_ELBO(ELBO):
         # and score function terms (if present) so that they are available below
         model_trace.compute_log_prob()
         guide_trace.compute_score_parts()
-        if infer.is_validation_enabled():
+        if is_validation_enabled():
             for site in model_trace.nodes.values():
                 if site["type"] == "sample":
                     check_site_shape(site, self.max_iarange_nesting)
@@ -276,15 +269,13 @@ class TraceGraph_ELBO(ELBO):
             surrogate_elbo += surrogate_elbo_term
 
         # collect parameters to train from model and guide
-        trainable_params = set(site["value"].unconstrained()
+        trainable_params = any(site["type"] == "param"
                                for trace in (model_trace, guide_trace)
-                               for site in trace.nodes.values()
-                               if site["type"] == "param")
+                               for site in trace.nodes.values())
 
         if trainable_params:
             surrogate_loss = -surrogate_elbo
             torch_backward(weight * (surrogate_loss + baseline_loss))
-            pyro.get_param_store().mark_params_active(trainable_params)
 
         loss = -elbo
         if torch_isnan(loss):

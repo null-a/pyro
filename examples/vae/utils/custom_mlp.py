@@ -1,7 +1,9 @@
-import torch.nn as nn
-import torch
 from inspect import isclass
-from pyro.nn import ClippedSoftmax, ClippedSigmoid
+
+import torch
+import torch.nn as nn
+
+from pyro.distributions.util import broadcast_shape
 
 
 class Exp(nn.Module):
@@ -19,7 +21,8 @@ class ConcatModule(nn.Module):
     """
     a custom module for concatenation of tensors
     """
-    def __init__(self):
+    def __init__(self, allow_broadcast=False):
+        self.allow_broadcast = allow_broadcast
         super(ConcatModule, self).__init__()
 
     def forward(self, *input_args):
@@ -34,6 +37,9 @@ class ConcatModule(nn.Module):
         if torch.is_tensor(input_args):
             return input_args
         else:
+            if self.allow_broadcast:
+                shape = broadcast_shape(*[s.shape[:-1] for s in input_args]) + (-1,)
+                input_args = [s.expand(shape) for s in input_args]
             return torch.cat(input_args, dim=-1)
 
 
@@ -49,23 +55,15 @@ class ListOutModule(nn.ModuleList):
         return [mm.forward(*args, **kwargs) for mm in self]
 
 
-def call_nn_op(op, epsilon):
+def call_nn_op(op):
     """
     a helper function that adds appropriate parameters when calling
     an nn module representing an operation like Softmax
+
     :param op: the nn.Module operation to instantiate
-    :param epsilon: a scaling parameter for certain custom modules
     :return: instantiation of the op module with appropriate parameters
     """
-    if op in [ClippedSoftmax]:
-        try:
-            return op(epsilon, dim=1)
-        except TypeError:
-            # Support older pytorch 0.2 release.
-            return op(epsilon)
-    elif op in [ClippedSigmoid]:
-        return op(epsilon)
-    elif op in [nn.Softmax, nn.LogSoftmax]:
+    if op in [nn.Softmax, nn.LogSoftmax]:
         return op(dim=1)
     else:
         return op()
@@ -76,7 +74,7 @@ class MLP(nn.Module):
     def __init__(self, mlp_sizes, activation=nn.ReLU, output_activation=None,
                  post_layer_fct=lambda layer_ix, total_layers, layer: None,
                  post_act_fct=lambda layer_ix, total_layers, layer: None,
-                 epsilon_scale=None, use_cuda=False):
+                 allow_broadcast=False, use_cuda=False):
         # init the module object
         super(MLP, self).__init__()
 
@@ -92,7 +90,7 @@ class MLP(nn.Module):
         last_layer_size = input_size if type(input_size) == int else sum(input_size)
 
         # everything sent in will be concatted together by default
-        all_modules = [ConcatModule()]
+        all_modules = [ConcatModule(allow_broadcast)]
 
         # loop over l
         for layer_ix, layer_size in enumerate(hidden_sizes):
@@ -141,7 +139,7 @@ class MLP(nn.Module):
         if type(output_size) == int:
             all_modules.append(nn.Linear(last_layer_size, output_size))
             if output_activation is not None:
-                all_modules.append(call_nn_op(output_activation, epsilon_scale)
+                all_modules.append(call_nn_op(output_activation)
                                    if isclass(output_activation) else output_activation)
         else:
 
@@ -164,7 +162,7 @@ class MLP(nn.Module):
                 if(act_out_fct):
                     # we check if it's a class. if so, instantiate the object
                     # otherwise, use the object directly (e.g. pre-instaniated)
-                    split_layer.append(call_nn_op(act_out_fct, epsilon_scale)
+                    split_layer.append(call_nn_op(act_out_fct)
                                        if isclass(act_out_fct) else act_out_fct)
 
                 # our outputs is just a sequential of the two

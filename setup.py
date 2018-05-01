@@ -1,10 +1,10 @@
 from __future__ import absolute_import, division, print_function
 
+import os
 import subprocess
 import sys
 
-import os
-from setuptools import setup
+from setuptools import find_packages, setup
 
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 VERSION = """
@@ -45,7 +45,8 @@ except (IOError, ImportError, OSError) as e:
     long_description = open('README.md').read()
 
 # Remove badges since they will always be obsolete.
-blacklist = ['Build Status', 'Latest Version', 'travis-ci.org', 'pypi.python.org']
+blacklist = ['Build Status', 'Latest Version', 'Documentation Status',
+             'travis-ci.org', 'pypi.python.org', 'pyro-ppl.readthedocs.io']
 long_description = '\n'.join(
     [line for line in long_description.split('\n') if not any(patt in line for patt in blacklist)])
 
@@ -58,6 +59,7 @@ EXTRAS_REQUIRE = [
     'pillow',
     'torchvision',
     'visdom>=0.1.4',
+    'pandas',
 ]
 
 setup(
@@ -65,7 +67,7 @@ setup(
     version=version,
     description='A Python library for probabilistic modeling and inference',
     long_description=long_description,
-    packages=['pyro'],
+    packages=find_packages(include=['pyro', 'pyro.*']),
     url='http://pyro.ai',
     author='Uber AI Labs',
     author_email='pyro@uber.com',
@@ -91,6 +93,7 @@ setup(
             'flake8',
             'isort',
             'nbformat',
+            'nbsphinx>=0.3.2',
             'nbstripout',
             'nbval',
             'pypandoc',
