@@ -9,7 +9,7 @@ import numpy as np
 import pyro
 import pyro.distributions as dist
 import pyro.optim as optim
-from pyro.infer import SVI
+from pyro.infer import SVI, Trace_ELBO
 import pyro.poutine as poutine
 
 
@@ -203,35 +203,35 @@ class DynAIR(nn.Module):
         # TODO: Using a normal here isn't very sensible since the data
         # is in [0, 1]. Do something better.
         pyro.sample('x_{}'.format(t),
-                    dist.Normal(frame_mean, frame_sd).reshape(extra_event_dims=3),
+                    dist.Normal(frame_mean, frame_sd).independent(3),
                     obs=obs)
 
     def model_sample_y(self, batch_size):
         return pyro.sample('y', dist.Normal(self.y_prior_mean.expand(batch_size, -1),
                                             self.y_prior_sd.expand(batch_size, -1))
-                                .reshape(extra_event_dims=1))
+                                .independent(1))
 
     def model_sample_w_0(self, i, batch_size):
         return pyro.sample('w_0_{}'.format(i),
                            dist.Normal(
                                self.w_0_prior_mean.expand(batch_size, -1),
                                self.w_0_prior_sd.expand(batch_size, -1))
-                           .reshape(extra_event_dims=1))
+                           .independent(1))
 
     def model_sample_w(self, t, i, w_mean, w_sd):
         return pyro.sample('w_{}_{}'.format(t, i),
-                           dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
+                           dist.Normal(w_mean, w_sd).independent(1))
 
     def model_sample_z_0(self, i, batch_size):
         return pyro.sample('z_0_{}'.format(i),
                            dist.Normal(
                                self.z_0_prior_mean.expand(batch_size, -1),
                                self.z_0_prior_sd.expand(batch_size, -1))
-                           .reshape(extra_event_dims=1))
+                           .independent(1))
 
     def model_sample_z(self, t, i, z_mean, z_sd):
         return pyro.sample('z_{}_{}'.format(t, i),
-                           dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
+                           dist.Normal(z_mean, z_sd).independent(1))
 
     def model_transition_one(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
@@ -352,16 +352,16 @@ class DynAIR(nn.Module):
 
     def guide_y(self, x0):
         y_mean, y_sd = self.y_param(x0)
-        return pyro.sample('y', dist.Normal(y_mean, y_sd).reshape(extra_event_dims=1))
+        return pyro.sample('y', dist.Normal(y_mean, y_sd).independent(1))
 
     def guide_w(self, t, i, *args, **kwargs):
         w_mean, w_sd, w_guide_state = self.guide_w_params(t, i, *args, **kwargs)
-        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).reshape(extra_event_dims=1))
+        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
         return w, w_guide_state
 
     def guide_z(self, t, i, *args, **kwargs):
         z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
-        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
+        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
     # TODO: These STN helpers could now be top-level functions that
     # take arch_cfg as an extra argument.
@@ -688,8 +688,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
 
     svi = SVI(dynair.model, dynair.guide,
               optim.Adam(per_param_optim_args),
-              loss='ELBO',
-              trace_graph=False) # We don't have discrete choices.
+              loss=Trace_ELBO())
 
     for i in range(num_epochs):
 
