@@ -363,6 +363,8 @@ class DynAIR(nn.Module):
         z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).reshape(extra_event_dims=1))
 
+    # TODO: These STN helpers could now be top-level functions that
+    # take arch_cfg as an extra argument.
     def image_to_window(self, w, images):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
