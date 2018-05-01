@@ -456,7 +456,7 @@ class GuideW_ObjRnn(nn.Module):
         super(GuideW_ObjRnn, self).__init__()
 
         x_embed_size = 800
-        rnn_hid_sizes = [200, 200]
+        rnn_hid_sizes = [200]
 
         self.cache = PropCache()
 
