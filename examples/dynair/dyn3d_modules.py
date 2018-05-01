@@ -210,7 +210,7 @@ class ParamW(nn.Module):
             [nn.Parameter(torch.zeros(h)) for h in rnn_hid_sizes])
 
         for rnn_hid_init in self.rnn_hid_inits:
-            nn.init.normal(rnn_hid_init, std=0.01)
+            nn.init.normal_(rnn_hid_init, std=0.01)
 
         assert len(self.rnns) == len(self.rnn_hid_inits)
 
@@ -232,7 +232,7 @@ class ParamW(nn.Module):
         # reason. Here we match the sd the initial sd used in the
         # model. (Is the latter sensible/helpful?)
 
-        nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
+        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
         self.mlp.seq[-1].bias.data *= 0.0
         self.mlp.seq[-1].bias.data[w_size:] += sd_bias
 
@@ -277,7 +277,7 @@ class ParamZ(nn.Module):
         self.col_widths = [z_size, z_size]
         self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
 
-        nn.init.normal(self.mlp.seq[-1].weight, std=0.01)
+        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
         self.mlp.seq[-1].bias.data *= 0.0
         self.mlp.seq[-1].bias.data[z_size:] -= 2.25
 
