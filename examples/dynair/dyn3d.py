@@ -367,8 +367,7 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-        z_where = w_to_z_where(w)
-        theta_inv = expand_z_where(z_where_inv(z_where))
+        theta_inv = expand_theta(theta_inverse(w_to_theta(w)))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
         return grid_sample(images, grid, padding_mode='border').view(n, -1)
 
@@ -376,8 +375,7 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(windows, (n, self.x_obj_size))
-        z_where = w_to_z_where(w)
-        theta = expand_z_where(z_where)
+        theta = expand_theta(w_to_theta(w))
         assert_size(theta, (n, 2, 3))
         grid = affine_grid(theta, torch.Size((n, self.num_chan+1, self.image_size, self.image_size)))
         # first arg to grid sample should be (n, c, in_w, in_h)
@@ -565,45 +563,42 @@ def batch_expand(t, b):
     return t.expand((b,) + t.size())
 
 
-# Spatial transformer helpers. (Taken from the AIR example.)
-
 expansion_indices = torch.LongTensor([1, 0, 2, 0, 1, 3])
 
-def expand_z_where(z_where):
+def expand_theta(theta):
     # Take a batch of three-vectors, and massages them into a batch of
     # 2x3 matrices with elements like so:
     # [s,x,y] -> [[s,0,x],
     #             [0,s,y]]
-    n = z_where.size(0)
-    assert_size(z_where, (n, 3))
-    out = torch.cat((torch.zeros([1, 1]).type_as(z_where).expand(n, 1), z_where), 1)
+    n = theta.size(0)
+    assert_size(theta, (n, 3))
+    out = torch.cat((torch.zeros([1, 1]).type_as(theta).expand(n, 1), theta), 1)
     ix = Variable(expansion_indices)
-    if z_where.is_cuda:
+    if theta.is_cuda:
         ix = ix.cuda()
     out = torch.index_select(out, 1, ix)
     out = out.view(n, 2, 3)
     return out
 
-def w_to_z_where(w):
+def w_to_theta(w):
     # Unsquish the `scale` component of w.
     scale = softplus(w[:, 0:1])
     xy = w[:, 1:] * scale
     out = torch.cat((scale, xy), 1)
     return out
 
-
 # An alternative to this would be to add the "missing" bottom row to
 # theta, and then use `torch.inverse`.
-def z_where_inv(z_where):
+def theta_inverse(theta):
     # Take a batch of z_where vectors, and compute their "inverse".
     # That is, for each row compute:
     # [s,x,y] -> [1/s,-x/s,-y/s]
     # These are the parameters required to perform the inverse of the
     # spatial transform performed in the generative model.
-    n = z_where.size(0)
-    out = torch.cat((torch.ones([1, 1]).type_as(z_where).expand(n, 1), -z_where[:, 1:]), 1)
+    n = theta.size(0)
+    out = torch.cat((torch.ones([1, 1]).type_as(theta).expand(n, 1), -theta[:, 1:]), 1)
     # Divide all entries by the scale.
-    out = out / z_where[:, 0:1]
+    out = out / theta[:, 0:1]
     return out
 
 
