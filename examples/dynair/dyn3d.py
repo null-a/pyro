@@ -28,6 +28,9 @@ import enum
 from functools import partial
 from functools import wraps
 
+
+
+
 def cached(f):
     name = f.__name__
     @wraps(f)
@@ -44,6 +47,8 @@ def cached(f):
             return out
     return cached_f
 
+
+# TODO: it would be helpful if stats included the size of the store.
 
 class PropCache():
     def __init__(self):
@@ -67,17 +72,105 @@ ArchConfig = namedtuple('ArchConfig',
                          'window_size',
                         ])
 
-class DynAIR(nn.Module):
-    def __init__(self, arch_cfg, arch, use_cuda=False):
+def get_modules_with_cache(parent):
+    out = []
+    if has_cache(parent):
+        out.append(parent)
+    for m in parent.children():
+        out.extend(get_modules_with_cache(m))
+    return out
 
+def has_cache(m):
+    return hasattr(m, 'cache')
+
+
+
+
+class DynAIR(nn.Module):
+    def __init__(self, arch_cfg, model, guide, use_cuda=False):
         super(DynAIR, self).__init__()
 
+        self.arch_cfg = arch_cfg
+        self.model = model
+        self.guide = guide
+
+        self.modules_with_cache = get_modules_with_cache(self)
+        #print([m._get_name() for m in self.modules_with_cache])
+
+        # CUDA
+        if use_cuda:
+            self.cuda()
+
+    def clear_caches(self):
+        for m in self.modules_with_cache:
+            m.cache.store.clear()
+
+    def stats_for_caches(self):
+        # Note, name collisions are not handled here.
+        all_stats = {}
+        for m in self.modules_with_cache:
+            all_stats.update(**m.cache.stats)
+        return all_stats
+
+    def params_with_nan(self):
+        return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
+
+    def infer(self, batch, obj_counts, num_extra_frames=0):
+        trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
+        frames, _, _ = poutine.replay(self.model, trace)(batch, obj_counts, do_likelihood=False)
+        wss, zss, y = trace.nodes['_RETURN']['value']
+
+        bkg = self.model.decode_bkg(y)
+
+        extra_wss = []
+        extra_zss = []
+        extra_frames = []
+
+        ws = wss[-1]
+        zs = zss[-1]
+
+        for t in range(num_extra_frames):
+            zs, ws = self.model.model_transition(self.arch_cfg.seq_length + t, obj_counts, zs, ws)
+            frame_mean = self.model.model_emission(zs, ws, bkg, obj_counts)
+            extra_frames.append(frame_mean)
+            extra_wss.append(ws)
+            extra_zss.append(zs)
+
+        self.clear_caches()
+
+        return frames, wss, extra_frames, extra_wss
+
+
+def image_to_window(arch_cfg, w, images):
+    n = w.size(0)
+    assert_size(w, (n, arch_cfg.w_size))
+    assert_size(images, (n, arch_cfg.num_chan, arch_cfg.image_size, arch_cfg.image_size))
+    theta_inv = expand_theta(theta_inverse(w_to_theta(w)))
+    grid = affine_grid(theta_inv, torch.Size((n, arch_cfg.num_chan, arch_cfg.window_size, arch_cfg.window_size)))
+    # TODO: Consider using padding_mode='border' with grid_sample,
+    # seems pretty sensible, though may not make much difference.
+    return grid_sample(images, grid).view(n, -1)
+
+def window_to_image(arch_cfg, w, windows):
+    n = w.size(0)
+    assert_size(w, (n, arch_cfg.w_size))
+    x_obj_size = (arch_cfg.num_chan+1) * arch_cfg.window_size**2 # contents of the object window
+    assert_size(windows, (n, x_obj_size))
+    theta = expand_theta(w_to_theta(w))
+    assert_size(theta, (n, 2, 3))
+    grid = affine_grid(theta, torch.Size((n, arch_cfg.num_chan+1, arch_cfg.image_size, arch_cfg.image_size)))
+    # first arg to grid sample should be (n, c, in_w, in_h)
+    return grid_sample(windows.view(n, arch_cfg.num_chan+1, arch_cfg.window_size, arch_cfg.window_size), grid)
+
+
+class Model(nn.Module):
+    def __init__(self, arch_cfg, use_cuda=False):
+        super(Model, self).__init__()
         self.cache = PropCache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
-        self.use_cuda = use_cuda
 
-        # TODO: These probably don't need making into properties on
-        # DynAIR eventually.
+        # TODO: avoid copying all these as properties.
+        self.arch_cfg = arch_cfg
         self.seq_length = arch_cfg.seq_length
         self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
         self.image_size = arch_cfg.image_size
@@ -86,11 +179,7 @@ class DynAIR(nn.Module):
         self.y_size = arch_cfg.y_size
         self.z_size = arch_cfg.z_size
         self.window_size = arch_cfg.window_size
-
         self.w_size = 3
-        assert arch_cfg.w_size == self.w_size, 'w_size mismatch'
-
-        self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
         # Priors:
 
@@ -115,19 +204,6 @@ class DynAIR(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        # Modules
-
-        # Guide modules:
-        self.guide_w_params = arch['guide_w']
-        self.y_param = arch['guide_y']
-        self.guide_z_params = arch['guide_z']
-
-        # Hack to support image-so-far.
-        if hasattr(self.guide_w_params, 'set_parent'):
-            self.guide_w_params.set_parent(self)
-
-        # Model modules:
-
         self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self._decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
@@ -135,23 +211,9 @@ class DynAIR(nn.Module):
         self.z_transition = mod.ZTransition(self.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
-        self.modules_with_cache = [self]
-        if hasattr(self.guide_w_params, 'cache'):
-            self.modules_with_cache.append(self.guide_w_params)
 
-        # CUDA
-        if use_cuda:
-            self.cuda()
-
-    def clear_caches(self):
-        for mod in self.modules_with_cache:
-            mod.cache.store.clear()
-
-    def stats_for_caches(self):
-        all_stats = {}
-        for mod in self.modules_with_cache:
-            all_stats.update(**mod.cache.stats)
-        return all_stats
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
 
     # We wrap `_decode_bkg` here to enable caching without
     # interferring with the magic behaviour that comes from having an
@@ -162,6 +224,11 @@ class DynAIR(nn.Module):
 
     # TODO: This do_likelihood business is unpleasant.
     def model(self, batch, obj_counts, do_likelihood=True):
+
+        pyro.module('model', self)
+        # for name, _ in self.named_parameters():
+        #     print(name)
+
         batch_size = batch.size(0)
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
@@ -192,10 +259,6 @@ class DynAIR(nn.Module):
 
                 if do_likelihood:
                     self.likelihood(t, frame_mean, batch[:, t])
-
-        # It's possible the caches will still need clearing manually,
-        # but this catches the common cases of SVI & infer.
-        self.clear_caches()
 
         return frames, wss, zss
 
@@ -292,16 +355,41 @@ class DynAIR(nn.Module):
         assert z.size(0) == w.size(0) == image_so_far.size(0)
         mask = torch.Tensor(mask).type_as(z) # move to gpu
         x_att = self.decode_obj(z) * mask.view(-1, 1)
-        return over(self.window_to_image(w, x_att), image_so_far)
+        return over(window_to_image(self.arch_cfg, w, x_att), image_so_far)
 
 
-    # ==GUIDE==================================================
+class Guide(nn.Module):
+    def __init__(self, arch_cfg, arch, use_cuda=False):
+        super(Guide, self).__init__()
+
+        self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
+
+        # TODO: avoid copying all these as properties.
+        self.arch_cfg = arch_cfg
+        self.seq_length = arch_cfg.seq_length
+        self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
+        self.image_size = arch_cfg.image_size
+        self.x_size = arch_cfg.x_size
+        self.max_obj_count = arch_cfg.max_obj_count
+        self.y_size = arch_cfg.y_size
+        self.z_size = arch_cfg.z_size
+        self.window_size = arch_cfg.window_size
+        self.w_size = 3
+
+        # Modules
+
+        # Guide modules:
+        self.guide_w_params = arch['guide_w']
+        self.y_param = arch['guide_y']
+        self.guide_z_params = arch['guide_z']
+
+
+    def forward(self, *args, **kwargs):
+        return self.guide(*args, **kwargs)
 
     def guide(self, batch, obj_counts, *args):
 
-        # I'd rather register model/guide modules in their methods,
-        # but this is easier.
-        pyro.module('dynair', self)
+        pyro.module('guide', self)
         # for name, _ in self.named_parameters():
         #     print(name)
 
@@ -340,7 +428,7 @@ class DynAIR(nn.Module):
 
                     with poutine.scale(None, mask):
                         w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
-                        x_att = self.image_to_window(w, x)
+                        x_att = image_to_window(self.arch_cfg, w, x)
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
                     ws[t][i] = w
@@ -364,53 +452,7 @@ class DynAIR(nn.Module):
         z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
-    # TODO: These STN helpers could now be top-level functions that
-    # take arch_cfg as an extra argument.
-    def image_to_window(self, w, images):
-        n = w.size(0)
-        assert_size(w, (n, self.w_size))
-        assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-        theta_inv = expand_theta(theta_inverse(w_to_theta(w)))
-        grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
-        # TODO: Consider using padding_mode='border' with grid_sample,
-        # seems pretty sensible, though may not make much difference.
-        return grid_sample(images, grid).view(n, -1)
 
-    def window_to_image(self, w, windows):
-        n = w.size(0)
-        assert_size(w, (n, self.w_size))
-        assert_size(windows, (n, self.x_obj_size))
-        theta = expand_theta(w_to_theta(w))
-        assert_size(theta, (n, 2, 3))
-        grid = affine_grid(theta, torch.Size((n, self.num_chan+1, self.image_size, self.image_size)))
-        # first arg to grid sample should be (n, c, in_w, in_h)
-        return grid_sample(windows.view(n, self.num_chan+1, self.window_size, self.window_size), grid)
-
-    def params_with_nan(self):
-        return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
-
-    def infer(self, batch, obj_counts, num_extra_frames=0):
-        trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
-        frames, _, _ = poutine.replay(self.model, trace)(batch, obj_counts, do_likelihood=False)
-        wss, zss, y = trace.nodes['_RETURN']['value']
-
-        bkg = self.decode_bkg(y)
-
-        extra_wss = []
-        extra_zss = []
-        extra_frames = []
-
-        ws = wss[-1]
-        zs = zss[-1]
-
-        for t in range(num_extra_frames):
-            zs, ws = self.model_transition(self.seq_length + t, obj_counts, zs, ws)
-            frame_mean = self.model_emission(zs, ws, bkg, obj_counts)
-            extra_frames.append(frame_mean)
-            extra_wss.append(ws)
-            extra_zss.append(zs)
-
-        return frames, wss, extra_frames, extra_wss
 
 # TODO: Extend with CNN variants used for guide for w. (Are there
 # opportunities for code re-use, since for both w and z compute
@@ -509,7 +551,7 @@ class GuideW_ObjRnn(nn.Module):
 
 
 class GuideW_ImageSoFar(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, model):
         super(GuideW_ImageSoFar, self).__init__()
 
         # TODO: Figure out how best to specify the desired architecture.
@@ -524,13 +566,8 @@ class GuideW_ImageSoFar(nn.Module):
         self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-    # TODO: This is unpleasant. This is complicated by caching. One
-    # alternative might be to have a `Model` module that contains
-    # these methods, and then pass that to both DynAIR and this
-    # module.
-    def set_parent(self, parent):
-        self.decode_bkg = parent.decode_bkg
-        self.model_composite_object = parent.model_composite_object
+        self.decode_bkg = model.decode_bkg
+        self.model_composite_object = model.model_composite_object
 
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
         batch_size = x.size(0)
@@ -653,13 +690,13 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
     extra_ws = latents_to_tensor(extra_wss)
 
     for k in range(n):
-        out = overlay_multiple_window_outlines(dynair, frames[k], ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.arch_cfg, frames[k], ws[k], Y[k])
         vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
                    opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-        out = overlay_multiple_window_outlines(dynair, extra_frames[k], extra_ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.arch_cfg, extra_frames[k], extra_ws[k], Y[k])
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
@@ -697,13 +734,16 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             loss = svi.step(X_batch, Y_batch)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
-            elbo = -loss / (dynair.seq_length * batch_size) # elbo per datum, per frame
+            elbo = -loss / (dynair.arch_cfg.seq_length * batch_size) # elbo per datum, per frame
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
             if not vis_hook is None:
                 vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
-            # print('\n' + str(dynair.stats_for_caches()))
+            dynair.clear_caches()
+            print('\n' + str(dynair.stats_for_caches()))
+            #print(len(dynair.model.cache.store))
+
 
         if (i+1) % 1000 == 0:
             torch.save(dynair.state_dict(),
@@ -754,29 +794,29 @@ def draw_rect(size, color):
     draw.rectangle([0, 0, size - 1, size - 1], outline=color)
     return torch.from_numpy(img_to_arr(img).astype(np.float32) / 255.0)
 
-def draw_window_outline(dynair, z_where, color):
+def draw_window_outline(arch_cfg, z_where, color):
     n = z_where.size(0)
-    rect = draw_rect(dynair.window_size, color)
+    rect = draw_rect(arch_cfg.window_size, color)
     if z_where.is_cuda:
         rect = rect.cuda()
     rect_batch = batch_expand(rect.contiguous().view(-1), n).contiguous()
-    return dynair.window_to_image(z_where, rect_batch)
+    return window_to_image(arch_cfg, z_where, rect_batch)
 
-def overlay_window_outlines(dynair, frame, z_where, color):
-    return over(draw_window_outline(dynair, z_where, color), frame)
+def overlay_window_outlines(arch_cfg, frame, z_where, color):
+    return over(draw_window_outline(arch_cfg, z_where, color), frame)
 
-def overlay_window_outlines_conditionally(dynair, frame, z_where, color, ii):
+def overlay_window_outlines_conditionally(arch_cfg, frame, z_where, color, ii):
     batch_size = z_where.size(0)
     presence_mask = ii.view(-1, 1, 1, 1)
     borders = batch_expand(torch.Tensor([-0.08, 0, 0]), batch_size).type_as(ii)
-    return over(draw_window_outline(dynair, borders, color) * presence_mask,
-                over(draw_window_outline(dynair, z_where, color) * presence_mask,
+    return over(draw_window_outline(arch_cfg, borders, color) * presence_mask,
+                over(draw_window_outline(arch_cfg, z_where, color) * presence_mask,
                      frame))
 
-def overlay_multiple_window_outlines(dynair, frame, ws, obj_count):
+def overlay_multiple_window_outlines(arch_cfg, frame, ws, obj_count):
     acc = frame
     for i in range(obj_count):
-        acc = overlay_window_outlines(dynair, acc, ws[i], ['red', 'green', 'blue'][i % 3])
+        acc = overlay_window_outlines(arch_cfg, acc, ws[i], ['red', 'green', 'blue'][i % 3])
     return acc
 
 def frames_to_tensor(arr):
@@ -841,12 +881,15 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond(arch_cfg)
 
-    dynair = DynAIR(arch_cfg,
-                    dict(guide_w=GuideW_ObjRnn(arch_cfg, dedicated_t0=False),
-                         #guide_w=GuideW_ImageSoFar(arch_cfg),
-                         guide_y=mod.ParamY(arch_cfg),
-                         guide_z=GuideZ(arch_cfg, dedicated_t0=False)),
-                    use_cuda=args.cuda)
+    model = Model(arch_cfg, use_cuda=args.cuda)
+    guide = Guide(arch_cfg,
+                  dict(guide_w=GuideW_ObjRnn(arch_cfg, dedicated_t0=False),
+                       #guide_w=GuideW_ImageSoFar(arch_cfg, model),
+                       guide_y=mod.ParamY(arch_cfg),
+                       guide_z=GuideZ(arch_cfg, dedicated_t0=False)),
+                  use_cuda=args.cuda)
+
+    dynair = DynAIR(arch_cfg, model, guide, use_cuda=args.cuda)
 
     run_svi(dynair, X_split, Y_split, args.epochs,
             partial(vis_hook, args.vis, visdom.Visdom(), dynair),
