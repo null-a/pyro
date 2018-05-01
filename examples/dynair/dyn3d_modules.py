@@ -192,24 +192,22 @@ class ParamW_Isf_Cnn_AM(nn.Module):
 
 
 class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_size, hids, w_size, z_size, sd_bias=0.0):
+    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, z_size, sd_bias=0.0):
         super(ParamW, self).__init__()
+
+        assert len(rnn_hid_sizes) > 0
 
         self.input_size = input_size
         self.w_size = w_size
         self.z_size = z_size
 
-        rnn_input_size = input_size + w_size + z_size
+        rnn_input_sizes = [input_size + w_size + z_size] + rnn_hid_sizes[0:-1]
 
-        self.rnns = nn.ModuleList([
-            nn.RNNCell(rnn_input_size, rnn_hid_size),
-            nn.RNNCell(rnn_hid_size, rnn_hid_size)
-        ])
+        self.rnns = nn.ModuleList(
+            [nn.RNNCell(i, h) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
 
-        self.rnn_hid_inits = nn.ParameterList([
-            nn.Parameter(torch.zeros(rnn_hid_size)),
-            nn.Parameter(torch.zeros(rnn_hid_size))
-        ])
+        self.rnn_hid_inits = nn.ParameterList(
+            [nn.Parameter(torch.zeros(h)) for h in rnn_hid_sizes])
 
         for rnn_hid_init in self.rnn_hid_inits:
             nn.init.normal(rnn_hid_init, std=0.01)
@@ -217,7 +215,7 @@ class ParamW(nn.Module):
         assert len(self.rnns) == len(self.rnn_hid_inits)
 
         self.col_widths = [w_size, w_size]
-        self.mlp = MLP(rnn_hid_size, hids + [sum(self.col_widths)], nn.ReLU)
+        self.mlp = MLP(rnn_hid_sizes[-1], hids + [sum(self.col_widths)], nn.ReLU)
 
         self.w_t_prev_init = nn.Parameter(torch.zeros(w_size))
         self.z_t_prev_init = nn.Parameter(torch.zeros(z_size))

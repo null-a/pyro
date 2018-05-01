@@ -456,7 +456,7 @@ class GuideW_ObjRnn(nn.Module):
         super(GuideW_ObjRnn, self).__init__()
 
         x_embed_size = 800
-        rnn_hid_size = 200
+        rnn_hid_sizes = [200, 200]
 
         self.cache = PropCache()
 
@@ -464,13 +464,13 @@ class GuideW_ObjRnn(nn.Module):
 
         self.w_param = mod.ParamW(
             x_embed_size + cfg.w_size + cfg.z_size, # input size
-            rnn_hid_size, [], cfg.w_size, cfg.z_size,
+            rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
             sd_bias=-2.25)
 
         if dedicated_t0:
             self.w0_param = mod.ParamW(
                 x_embed_size, # input size
-                rnn_hid_size, [], cfg.w_size, cfg.z_size,
+                rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
         else:
             # TODO: Does it make sense that this is a parameter
