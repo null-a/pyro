@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import affine_grid, grid_sample, sigmoid, softplus
 from torch.nn.utils import clip_grad_norm
-from torch.autograd import Variable
 
 import numpy as np
 
@@ -103,9 +102,9 @@ class DynAIR(nn.Module):
         # sense if we allowed objects to begin off screen.)
 
         # better for the cubes data set.
-        self.w_0_prior_mean = Variable(torch.Tensor([3, 0, 0]))
-        self.w_0_prior_sd = Variable(torch.Tensor([0.8, 0.7, 0.7]),
-                                     requires_grad=False)
+        self.w_0_prior_mean = torch.Tensor([3, 0, 0])
+        self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7])
+
         if use_cuda:
             self.w_0_prior_mean = self.w_0_prior_mean.cuda()
             self.w_0_prior_sd = self.w_0_prior_sd.cuda()
@@ -263,7 +262,7 @@ class DynAIR(nn.Module):
 
         for i in range(self.max_obj_count):
 
-            mask = Variable((obj_counts > i).float())
+            mask = (obj_counts > i).float()
 
             with poutine.scale(None, mask):
                 if t > 0:
@@ -289,7 +288,7 @@ class DynAIR(nn.Module):
     def model_composite_object(self, z, w, mask, image_so_far):
         assert type(mask) == tuple # to facilitate caching on the mask
         assert z.size(0) == w.size(0) == image_so_far.size(0)
-        mask = Variable(torch.Tensor(mask).type_as(z)) # move to gpu
+        mask = torch.Tensor(mask).type_as(z) # move to gpu
         x_att = self.decode_obj(z) * mask.view(-1, 1)
         return over(self.window_to_image(w, x_att), image_so_far)
 
@@ -335,7 +334,7 @@ class DynAIR(nn.Module):
                     w_t_prev = ws[t][i-1] if i > 0 else None
                     z_t_prev = zs[t][i-1] if i > 0 else None
 
-                    mask = Variable((obj_counts > i).float())
+                    mask = (obj_counts > i).float()
 
                     with poutine.scale(None, mask):
                         w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
@@ -579,7 +578,7 @@ def expand_theta(theta):
     n = theta.size(0)
     assert_size(theta, (n, 3))
     out = torch.cat((torch.zeros([1, 1]).type_as(theta).expand(n, 1), theta), 1)
-    ix = Variable(expansion_indices)
+    ix = expansion_indices
     if theta.is_cuda:
         ix = ix.cuda()
     out = torch.index_select(out, 1, ix)
@@ -716,7 +715,7 @@ def load_data(data_path, use_cuda):
     # print(X_np.shape)
     X_np = X_np.astype(np.float32)
     X_np /= 255.0
-    X = Variable(torch.from_numpy(X_np))
+    X = torch.from_numpy(X_np)
     # Drop the alpha channel.
     X = X[:,:,0:3]
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
@@ -758,7 +757,7 @@ def draw_window_outline(dynair, z_where, color):
     rect = draw_rect(dynair.window_size, color)
     if z_where.is_cuda:
         rect = rect.cuda()
-    rect_batch = Variable(batch_expand(rect.contiguous().view(-1), n).contiguous())
+    rect_batch = batch_expand(rect.contiguous().view(-1), n).contiguous()
     return dynair.window_to_image(z_where, rect_batch)
 
 def overlay_window_outlines(dynair, frame, z_where, color):
@@ -767,7 +766,7 @@ def overlay_window_outlines(dynair, frame, z_where, color):
 def overlay_window_outlines_conditionally(dynair, frame, z_where, color, ii):
     batch_size = z_where.size(0)
     presence_mask = ii.view(-1, 1, 1, 1)
-    borders = batch_expand(Variable(torch.Tensor([-0.08, 0, 0])), batch_size).type_as(ii)
+    borders = batch_expand(torch.Tensor([-0.08, 0, 0]), batch_size).type_as(ii)
     return over(draw_window_outline(dynair, borders, color) * presence_mask,
                 over(draw_window_outline(dynair, z_where, color) * presence_mask,
                      frame))

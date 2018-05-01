@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import sigmoid, softplus, tanh, relu
 
-from torch.autograd import Variable
-
 import functools
 import operator
 
