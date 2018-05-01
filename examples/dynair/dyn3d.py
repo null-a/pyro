@@ -460,7 +460,7 @@ class GuideW_ObjRnn(nn.Module):
 
         self.cache = PropCache()
 
-        self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU)
+        self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
 
         self.w_param = mod.ParamW(
             x_embed_size + cfg.w_size + cfg.z_size, # input size
