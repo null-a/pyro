@@ -129,7 +129,7 @@ class DynAIR(nn.Module):
 
         # Model modules:
 
-        self.decode_obj = mod.DecodeObj([200, 200], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
+        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
         self._decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
 
         self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
@@ -418,22 +418,24 @@ class GuideZ(nn.Module):
         super(GuideZ, self).__init__()
 
         x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
-        x_att_embed_size = 200
+        x_att_embed_size = 100
 
+        # TODO: Having only a single hidden layer between z_prev and z
+        # may be insufficient?
         self.z_param = mod.ParamZ(
-            [200, 200],
+            [100],
             cfg.w_size + x_att_embed_size + cfg.z_size, # input size
             cfg.z_size)
 
         if dedicated_t0:
             self.z0_param = mod.ParamZ(
-                [200, 200],
+                [100],
                 cfg.w_size + x_att_embed_size, # input size
                 cfg.z_size)
         else:
             self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-        self.x_att_embed = mod.MLP(x_att_size, [x_att_embed_size], nn.ReLU, True)
+        self.x_att_embed = mod.MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
 
 
     def forward(self, t, i, w, x_att, z_prev_i):
