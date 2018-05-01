@@ -88,11 +88,8 @@ class DynAIR(nn.Module):
         self.z_size = arch_cfg.z_size
         self.window_size = arch_cfg.window_size
 
-        self.w_size = 2 # (x, y)
+        self.w_size = 3
         assert arch_cfg.w_size == self.w_size, 'w_size mismatch'
-        # This may need increasing /slightly/ to allow for the
-        # rotation of the avatars.
-        self.window_scale = 0.25
 
         self.x_obj_size = (self.num_chan+1) * self.window_size**2 # contents of the object window
 
@@ -105,8 +102,9 @@ class DynAIR(nn.Module):
         # better for the cubes data set. (Though this would makes less
         # sense if we allowed objects to begin off screen.)
 
-        self.w_0_prior_mean = Variable(torch.Tensor([0, 0]))
-        self.w_0_prior_sd = Variable(torch.Tensor([0.7, 0.7]),
+        # better for the cubes data set.
+        self.w_0_prior_mean = Variable(torch.Tensor([3, 0, 0]))
+        self.w_0_prior_sd = Variable(torch.Tensor([0.8, 0.7, 0.7]),
                                      requires_grad=False)
         if use_cuda:
             self.w_0_prior_mean = self.w_0_prior_mean.cuda()
@@ -369,7 +367,8 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(images, (n, self.num_chan, self.image_size, self.image_size))
-        theta_inv = expand_theta(w2_to_theta_inv(w, self.window_scale))
+        z_where = w_to_z_where(w)
+        theta_inv = expand_z_where(z_where_inv(z_where))
         grid = affine_grid(theta_inv, torch.Size((n, self.num_chan, self.window_size, self.window_size)))
         return grid_sample(images, grid, padding_mode='border').view(n, -1)
 
@@ -377,7 +376,8 @@ class DynAIR(nn.Module):
         n = w.size(0)
         assert_size(w, (n, self.w_size))
         assert_size(windows, (n, self.x_obj_size))
-        theta = expand_theta(w2_to_theta(w, self.window_scale))
+        z_where = w_to_z_where(w)
+        theta = expand_z_where(z_where)
         assert_size(theta, (n, 2, 3))
         grid = affine_grid(theta, torch.Size((n, self.num_chan+1, self.image_size, self.image_size)))
         # first arg to grid sample should be (n, c, in_w, in_h)
@@ -569,49 +569,44 @@ def batch_expand(t, b):
 
 expansion_indices = torch.LongTensor([1, 0, 2, 0, 1, 3])
 
-def expand_theta(theta):
+def expand_z_where(z_where):
     # Take a batch of three-vectors, and massages them into a batch of
     # 2x3 matrices with elements like so:
     # [s,x,y] -> [[s,0,x],
     #             [0,s,y]]
-    n = theta.size(0)
-    assert_size(theta, (n, 3))
-    out = torch.cat((torch.zeros([1, 1]).type_as(theta).expand(n, 1), theta), 1)
+    n = z_where.size(0)
+    assert_size(z_where, (n, 3))
+    out = torch.cat((torch.zeros([1, 1]).type_as(z_where).expand(n, 1), z_where), 1)
     ix = Variable(expansion_indices)
-    if theta.is_cuda:
+    if z_where.is_cuda:
         ix = ix.cuda()
     out = torch.index_select(out, 1, ix)
     out = out.view(n, 2, 3)
     return out
 
-def w_to_theta(w):
-    # Takes w = (log(scale), pos_x, pos_y) to parameter theta of the
-    # spatial transform.
-    scale = torch.exp(w[:, 0:1])
-    scale_inv = 1 / scale
-    xy = -w[:, 1:] * scale_inv
-    out = torch.cat((scale_inv, xy), 1)
-    return out
-
-def w_to_theta_inv(w):
-    # Takes w to theta inverse.
-    scale = torch.exp(w[:, 0:1])
-    xy = w[:, 1:]
+def w_to_z_where(w):
+    # Unsquish the `scale` component of w.
+    scale = softplus(w[:, 0:1])
+    xy = w[:, 1:] * scale
     out = torch.cat((scale, xy), 1)
     return out
 
 
-def w2_to_theta(w, scale):
-    # Takes w = (x, y) & scale to parameter theta of the spatial
-    # transform.
-    batch_size = w.size(0)
-    scale_inv = torch.tensor(1.0 / scale).type_as(w).expand(batch_size, 1)
-    return torch.cat((scale_inv, w), 1)
+# An alternative to this would be to add the "missing" bottom row to
+# theta, and then use `torch.inverse`.
+def z_where_inv(z_where):
+    # Take a batch of z_where vectors, and compute their "inverse".
+    # That is, for each row compute:
+    # [s,x,y] -> [1/s,-x/s,-y/s]
+    # These are the parameters required to perform the inverse of the
+    # spatial transform performed in the generative model.
+    n = z_where.size(0)
+    out = torch.cat((torch.ones([1, 1]).type_as(z_where).expand(n, 1), -z_where[:, 1:]), 1)
+    # Divide all entries by the scale.
+    out = out / z_where[:, 0:1]
+    return out
 
-def w2_to_theta_inv(w, scale):
-    batch_size = w.size(0)
-    scale = torch.tensor(scale).type_as(w).expand(batch_size, 1)
-    return torch.cat((scale, w), 1)
+
 
 
 def assert_size(t, expected_size):
@@ -830,7 +825,7 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    arch_cfg = ArchConfig(w_size=2,
+    arch_cfg = ArchConfig(w_size=3,
                           y_size=args.y_size,
                           z_size=args.z_size,
                           window_size=args.window_size,
