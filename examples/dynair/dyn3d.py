@@ -170,7 +170,9 @@ class DynAIR(nn.Module):
         wss = []
         frames = []
 
-        with pyro.iarange('data'):
+        # Supply batch size as recommended:
+        # http://pyro.ai/examples/tensor_shapes.html
+        with pyro.iarange('data', batch_size):
 
             y = self.model_sample_y(batch_size)
             bkg = self.decode_bkg(y)
@@ -312,7 +314,7 @@ class DynAIR(nn.Module):
         ws = mk_matrix(self.seq_length, self.max_obj_count)
         zs = mk_matrix(self.seq_length, self.max_obj_count)
 
-        with pyro.iarange('data'):
+        with pyro.iarange('data', batch_size):
 
             # NOTE: Here we're guiding y based on the contents of the
             # first frame only.
