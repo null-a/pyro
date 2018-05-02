@@ -193,13 +193,8 @@ class Model(nn.Module):
         # sense if we allowed objects to begin off screen.)
 
         # better for the cubes data set.
-        self.w_0_prior_mean = torch.Tensor([3, 0, 0])
-        self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7])
-
-        if use_cuda:
-            self.w_0_prior_mean = self.w_0_prior_mean.cuda()
-            self.w_0_prior_sd = self.w_0_prior_sd.cuda()
-
+        self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
+        self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
         self.z_0_prior_mean = self.prototype.new_zeros(self.z_size)
         self.z_0_prior_sd = self.prototype.new_ones(self.z_size)
