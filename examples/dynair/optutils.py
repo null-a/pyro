@@ -30,7 +30,6 @@ def describe_env():
     if not is_clean:
         print('warning: working directory is not clean')
     return '\n'.join([
-        'start: {}'.format(time.strftime('%d %b %Y %H:%M %Z')),
         'git rev: {}'.format(git_rev()),
         'clean working directory: {}'.format(git_wd_is_clean()),
         'torch version: {}'.format(torch.version.__version__),
