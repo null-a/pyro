@@ -170,23 +170,12 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.cache = Cache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
-
-        # TODO: avoid copying all these as properties.
         self.cfg = cfg
-        self.seq_length = cfg.seq_length
-        self.num_chan = cfg.num_chan # not inc. the alpha channel
-        self.image_size = cfg.image_size
-        self.x_size = cfg.x_size
-        self.max_obj_count = cfg.max_obj_count
-        self.y_size = cfg.y_size
-        self.z_size = cfg.z_size
-        self.window_size = cfg.window_size
-        self.w_size = 3
 
         # Priors:
 
-        self.y_prior_mean = self.prototype.new_zeros(self.y_size)
-        self.y_prior_sd = self.prototype.new_ones(self.y_size)
+        self.y_prior_mean = self.prototype.new_zeros(cfg.y_size)
+        self.y_prior_sd = self.prototype.new_ones(cfg.y_size)
 
         # TODO: Using a (reparameterized) uniform would probably be
         # better for the cubes data set. (Though this would makes less
@@ -196,16 +185,17 @@ class Model(nn.Module):
         self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
         self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
-        self.z_0_prior_mean = self.prototype.new_zeros(self.z_size)
-        self.z_0_prior_sd = self.prototype.new_ones(self.z_size)
+        self.z_0_prior_mean = self.prototype.new_zeros(cfg.z_size)
+        self.z_0_prior_sd = self.prototype.new_ones(cfg.z_size)
 
         self.likelihood_sd = 0.3
 
-        self.decode_obj = mod.DecodeObj([100, 100], self.z_size, self.num_chan, self.window_size, alpha_bias=-2.0)
-        self._decode_bkg = mod.DecodeBkg([200, 200], self.y_size, self.num_chan, self.image_size)
+        # TODO: Just pass cfg to module, and figure out sizes there.
+        self.decode_obj = mod.DecodeObj([100, 100], cfg.z_size, cfg.num_chan, cfg.window_size, alpha_bias=-2.0)
+        self._decode_bkg = mod.DecodeBkg([200, 200], cfg.y_size, cfg.num_chan, cfg.image_size)
 
-        self.w_transition = mod.WTransition(self.z_size, self.w_size, 50)
-        self.z_transition = mod.ZTransition(self.z_size, 50)
+        self.w_transition = mod.WTransition(cfg.z_size, cfg.w_size, 50)
+        self.z_transition = mod.ZTransition(cfg.z_size, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
 
@@ -225,7 +215,7 @@ class Model(nn.Module):
 
         batch_size = batch.size(0)
         assert_size(obj_counts, (batch_size,))
-        assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
+        assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
         zss = []
         wss = []
@@ -238,7 +228,7 @@ class Model(nn.Module):
             y = self.sample_y(batch_size)
             bkg = self.decode_bkg(y)
 
-            for t in range(self.seq_length):
+            for t in range(self.cfg.seq_length):
                 if t>0:
                     zs_prev, ws_prev = zss[-1], wss[-1]
                 else:
@@ -293,8 +283,8 @@ class Model(nn.Module):
 
     def transition_one(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
-        assert_size(z_prev, (batch_size, self.z_size))
-        assert_size(w_prev, (batch_size, self.w_size))
+        assert_size(z_prev, (batch_size, self.cfg.z_size))
+        assert_size(w_prev, (batch_size, self.cfg.w_size))
         z_mean, z_sd = self.z_transition(z_prev)
         w_mean, w_sd = self.w_transition(z_prev, w_prev)
         z = self.sample_z(t, i, z_mean, z_sd)
@@ -309,8 +299,8 @@ class Model(nn.Module):
             assert zs_prev is None and ws_prev is None
         else:
             assert t>0
-            assert len(zs_prev) == self.max_obj_count # was zs[t-1]
-            assert len(ws_prev) == self.max_obj_count # was ws[t-1]
+            assert len(zs_prev) == self.cfg.max_obj_count # was zs[t-1]
+            assert len(ws_prev) == self.cfg.max_obj_count # was ws[t-1]
 
         zs = []
         ws = []
@@ -319,7 +309,7 @@ class Model(nn.Module):
         # sequences, and throw out the extra objects. We can consider
         # refining this to avoid this unnecessary sampling later.
 
-        for i in range(self.max_obj_count):
+        for i in range(self.cfg.max_obj_count):
 
             mask = (obj_counts > i).float()
 
@@ -357,18 +347,7 @@ class Guide(nn.Module):
         super(Guide, self).__init__()
 
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
-
-        # TODO: avoid copying all these as properties.
         self.cfg = cfg
-        self.seq_length = cfg.seq_length
-        self.num_chan = cfg.num_chan # not inc. the alpha channel
-        self.image_size = cfg.image_size
-        self.x_size = cfg.x_size
-        self.max_obj_count = cfg.max_obj_count
-        self.y_size = cfg.y_size
-        self.z_size = cfg.z_size
-        self.window_size = cfg.window_size
-        self.w_size = 3
 
         # Modules
 
@@ -384,13 +363,15 @@ class Guide(nn.Module):
         #     print(name)
 
         batch_size = batch.size(0)
-        assert_size(batch, (batch_size, self.seq_length, self.num_chan, self.image_size, self.image_size))
+        assert_size(batch, (batch_size,
+                            self.cfg.seq_length, self.cfg.num_chan,
+                            self.cfg.image_size, self.cfg.image_size))
 
         assert_size(obj_counts, (batch_size,))
-        assert all(0 <= obj_counts) and all(obj_counts <= self.max_obj_count), 'Object count out of range.'
+        assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
-        ws = mk_matrix(self.seq_length, self.max_obj_count)
-        zs = mk_matrix(self.seq_length, self.max_obj_count)
+        ws = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
+        zs = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
 
         with pyro.iarange('data', batch_size):
 
@@ -398,7 +379,7 @@ class Guide(nn.Module):
             # first frame only.
             y = self.guide_y(batch[:, 0])
 
-            for t in range(self.seq_length):
+            for t in range(self.cfg.seq_length):
 
                 x = batch[:, t]
                 w_guide_state_prev = None
@@ -407,7 +388,7 @@ class Guide(nn.Module):
                 # As in the model, we'll sample max_obj_count objects for
                 # all sequences, and ignore the ones we don't need.
 
-                for i in range(self.max_obj_count):
+                for i in range(self.cfg.max_obj_count):
 
                     w_prev_i = ws[t-1][i] if t > 0 else None
                     z_prev_i = zs[t-1][i] if t > 0 else None
