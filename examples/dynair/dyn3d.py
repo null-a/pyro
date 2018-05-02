@@ -27,7 +27,7 @@ from datetime import timedelta
 import enum
 from functools import partial
 from functools import wraps
-
+from pprint import pprint as pp
 
 
 
@@ -38,17 +38,15 @@ def cached(f):
         assert len(kwargs) == 0, 'kwargs not supported'
         key = (name,) + args
         if key in self.cache.store:
-            self.cache.stats[name]['hit'] += 1
+            self.cache.counts[name]['hit'] += 1
             return self.cache.store[key]
         else:
-            self.cache.stats[name]['miss'] += 1
+            self.cache.counts[name]['miss'] += 1
             out = f(self, *args)
             self.cache.store[key] = out
             return out
     return cached_f
 
-
-# TODO: it would be helpful if stats included the size of the store.
 
 class PropCache():
     def __init__(self):
@@ -57,7 +55,15 @@ class PropCache():
         # (Since it would be nice to not have to think about clearing
         # the cache.)
         self.store = dict()
-        self.stats = defaultdict(lambda: dict(miss=0, hit=0))
+        self.counts = defaultdict(lambda: dict(miss=0, hit=0))
+
+    def clear(self):
+        self.store.clear()
+
+    def stats(self):
+        out = dict(size=len(self.store))
+        out.update(self.counts)
+        return out
 
 
 ArchConfig = namedtuple('ArchConfig',
@@ -103,13 +109,13 @@ class DynAIR(nn.Module):
 
     def clear_caches(self):
         for m in self.modules_with_cache:
-            m.cache.store.clear()
+            m.cache.clear()
 
     def stats_for_caches(self):
         # Note, name collisions are not handled here.
         all_stats = {}
         for m in self.modules_with_cache:
-            all_stats.update(**m.cache.stats)
+            all_stats.update(**m.cache.stats())
         return all_stats
 
     def params_with_nan(self):
@@ -741,8 +747,8 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             if not vis_hook is None:
                 vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
             dynair.clear_caches()
-            print('\n' + str(dynair.stats_for_caches()))
-            #print(len(dynair.model.cache.store))
+            print()
+            pp(dynair.stats_for_caches())
 
 
         if (i+1) % 1000 == 0:
