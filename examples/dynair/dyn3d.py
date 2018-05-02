@@ -66,17 +66,17 @@ class Cache():
         return out
 
 
-ArchConfig = namedtuple('ArchConfig',
-                        ['seq_length', # data specified config
-                         'num_chan',
-                         'image_size',
-                         'x_size',
-                         'max_obj_count',
-                         'w_size',     # global config
-                         'y_size',
-                         'z_size',
-                         'window_size',
-                        ])
+Config = namedtuple('Config',
+                    ['seq_length', # data specified config
+                     'num_chan',
+                     'image_size',
+                     'x_size',
+                     'max_obj_count',
+                     'w_size',     # global config
+                     'y_size',
+                     'z_size',
+                     'window_size',
+                    ])
 
 def get_modules_with_cache(parent):
     out = []
@@ -93,10 +93,10 @@ def has_cache(m):
 
 
 class DynAIR(nn.Module):
-    def __init__(self, arch_cfg, model, guide, use_cuda=False):
+    def __init__(self, cfg, model, guide, use_cuda=False):
         super(DynAIR, self).__init__()
 
-        self.arch_cfg = arch_cfg
+        self.cfg = cfg
         self.model = model
         self.guide = guide
 
@@ -132,7 +132,7 @@ class DynAIR(nn.Module):
         zs = zss[-1]
 
         for t in range(num_extra_frames):
-            zs, ws = self.model.transition(self.arch_cfg.seq_length + t, obj_counts, zs, ws)
+            zs, ws = self.model.transition(self.cfg.seq_length + t, obj_counts, zs, ws)
             frame_mean = self.model.emission(zs, ws, bkg, obj_counts)
             extra_frames.append(frame_mean)
             extra_wss.append(ws)
@@ -143,44 +143,44 @@ class DynAIR(nn.Module):
         return frames, wss, extra_frames, extra_wss
 
 
-def image_to_window(arch_cfg, w, images):
+def image_to_window(cfg, w, images):
     n = w.size(0)
-    assert_size(w, (n, arch_cfg.w_size))
-    assert_size(images, (n, arch_cfg.num_chan, arch_cfg.image_size, arch_cfg.image_size))
+    assert_size(w, (n, cfg.w_size))
+    assert_size(images, (n, cfg.num_chan, cfg.image_size, cfg.image_size))
     theta_inv = expand_theta(theta_inverse(w_to_theta(w)))
-    grid = affine_grid(theta_inv, torch.Size((n, arch_cfg.num_chan, arch_cfg.window_size, arch_cfg.window_size)))
+    grid = affine_grid(theta_inv, torch.Size((n, cfg.num_chan, cfg.window_size, cfg.window_size)))
     # TODO: Consider using padding_mode='border' with grid_sample,
     # seems pretty sensible, though may not make much difference.
     return grid_sample(images, grid).view(n, -1)
 
-def window_to_image(arch_cfg, w, windows):
+def window_to_image(cfg, w, windows):
     n = w.size(0)
-    assert_size(w, (n, arch_cfg.w_size))
-    x_obj_size = (arch_cfg.num_chan+1) * arch_cfg.window_size**2 # contents of the object window
+    assert_size(w, (n, cfg.w_size))
+    x_obj_size = (cfg.num_chan+1) * cfg.window_size**2 # contents of the object window
     assert_size(windows, (n, x_obj_size))
     theta = expand_theta(w_to_theta(w))
     assert_size(theta, (n, 2, 3))
-    grid = affine_grid(theta, torch.Size((n, arch_cfg.num_chan+1, arch_cfg.image_size, arch_cfg.image_size)))
+    grid = affine_grid(theta, torch.Size((n, cfg.num_chan+1, cfg.image_size, cfg.image_size)))
     # first arg to grid sample should be (n, c, in_w, in_h)
-    return grid_sample(windows.view(n, arch_cfg.num_chan+1, arch_cfg.window_size, arch_cfg.window_size), grid)
+    return grid_sample(windows.view(n, cfg.num_chan+1, cfg.window_size, cfg.window_size), grid)
 
 
 class Model(nn.Module):
-    def __init__(self, arch_cfg, use_cuda=False):
+    def __init__(self, cfg, use_cuda=False):
         super(Model, self).__init__()
         self.cache = Cache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
 
         # TODO: avoid copying all these as properties.
-        self.arch_cfg = arch_cfg
-        self.seq_length = arch_cfg.seq_length
-        self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
-        self.image_size = arch_cfg.image_size
-        self.x_size = arch_cfg.x_size
-        self.max_obj_count = arch_cfg.max_obj_count
-        self.y_size = arch_cfg.y_size
-        self.z_size = arch_cfg.z_size
-        self.window_size = arch_cfg.window_size
+        self.cfg = cfg
+        self.seq_length = cfg.seq_length
+        self.num_chan = cfg.num_chan # not inc. the alpha channel
+        self.image_size = cfg.image_size
+        self.x_size = cfg.x_size
+        self.max_obj_count = cfg.max_obj_count
+        self.y_size = cfg.y_size
+        self.z_size = cfg.z_size
+        self.window_size = cfg.window_size
         self.w_size = 3
 
         # Priors:
@@ -354,25 +354,25 @@ class Model(nn.Module):
         assert z.size(0) == w.size(0) == image_so_far.size(0)
         mask = torch.Tensor(mask).type_as(z) # move to gpu
         x_att = self.decode_obj(z) * mask.view(-1, 1)
-        return over(window_to_image(self.arch_cfg, w, x_att), image_so_far)
+        return over(window_to_image(self.cfg, w, x_att), image_so_far)
 
 
 class Guide(nn.Module):
-    def __init__(self, arch_cfg, arch, use_cuda=False):
+    def __init__(self, cfg, arch, use_cuda=False):
         super(Guide, self).__init__()
 
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
 
         # TODO: avoid copying all these as properties.
-        self.arch_cfg = arch_cfg
-        self.seq_length = arch_cfg.seq_length
-        self.num_chan = arch_cfg.num_chan # not inc. the alpha channel
-        self.image_size = arch_cfg.image_size
-        self.x_size = arch_cfg.x_size
-        self.max_obj_count = arch_cfg.max_obj_count
-        self.y_size = arch_cfg.y_size
-        self.z_size = arch_cfg.z_size
-        self.window_size = arch_cfg.window_size
+        self.cfg = cfg
+        self.seq_length = cfg.seq_length
+        self.num_chan = cfg.num_chan # not inc. the alpha channel
+        self.image_size = cfg.image_size
+        self.x_size = cfg.x_size
+        self.max_obj_count = cfg.max_obj_count
+        self.y_size = cfg.y_size
+        self.z_size = cfg.z_size
+        self.window_size = cfg.window_size
         self.w_size = 3
 
         # Modules
@@ -423,7 +423,7 @@ class Guide(nn.Module):
 
                     with poutine.scale(None, mask):
                         w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
-                        x_att = image_to_window(self.arch_cfg, w, x)
+                        x_att = image_to_window(self.cfg, w, x)
                         z = self.guide_z(t, i, w, x_att, z_prev_i)
 
                     ws[t][i] = w
@@ -685,13 +685,13 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
     extra_ws = latents_to_tensor(extra_wss)
 
     for k in range(n):
-        out = overlay_multiple_window_outlines(dynair.arch_cfg, frames[k], ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k], Y[k])
         vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
                    opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-        out = overlay_multiple_window_outlines(dynair.arch_cfg, extra_frames[k], extra_ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k], Y[k])
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
@@ -729,7 +729,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             loss = svi.step(X_batch, Y_batch)
             nan_params = list(dynair.params_with_nan())
             assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
-            elbo = -loss / (dynair.arch_cfg.seq_length * batch_size) # elbo per datum, per frame
+            elbo = -loss / (dynair.cfg.seq_length * batch_size) # elbo per datum, per frame
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
@@ -789,29 +789,29 @@ def draw_rect(size, color):
     draw.rectangle([0, 0, size - 1, size - 1], outline=color)
     return torch.from_numpy(img_to_arr(img).astype(np.float32) / 255.0)
 
-def draw_window_outline(arch_cfg, z_where, color):
+def draw_window_outline(cfg, z_where, color):
     n = z_where.size(0)
-    rect = draw_rect(arch_cfg.window_size, color)
+    rect = draw_rect(cfg.window_size, color)
     if z_where.is_cuda:
         rect = rect.cuda()
     rect_batch = batch_expand(rect.contiguous().view(-1), n).contiguous()
-    return window_to_image(arch_cfg, z_where, rect_batch)
+    return window_to_image(cfg, z_where, rect_batch)
 
-def overlay_window_outlines(arch_cfg, frame, z_where, color):
-    return over(draw_window_outline(arch_cfg, z_where, color), frame)
+def overlay_window_outlines(cfg, frame, z_where, color):
+    return over(draw_window_outline(cfg, z_where, color), frame)
 
-def overlay_window_outlines_conditionally(arch_cfg, frame, z_where, color, ii):
+def overlay_window_outlines_conditionally(cfg, frame, z_where, color, ii):
     batch_size = z_where.size(0)
     presence_mask = ii.view(-1, 1, 1, 1)
     borders = batch_expand(torch.Tensor([-0.08, 0, 0]), batch_size).type_as(ii)
-    return over(draw_window_outline(arch_cfg, borders, color) * presence_mask,
-                over(draw_window_outline(arch_cfg, z_where, color) * presence_mask,
+    return over(draw_window_outline(cfg, borders, color) * presence_mask,
+                over(draw_window_outline(cfg, z_where, color) * presence_mask,
                      frame))
 
-def overlay_multiple_window_outlines(arch_cfg, frame, ws, obj_count):
+def overlay_multiple_window_outlines(cfg, frame, ws, obj_count):
     acc = frame
     for i in range(obj_count):
-        acc = overlay_window_outlines(arch_cfg, acc, ws[i], ['red', 'green', 'blue'][i % 3])
+        acc = overlay_window_outlines(cfg, acc, ws[i], ['red', 'green', 'blue'][i % 3])
     return acc
 
 def frames_to_tensor(arr):
@@ -861,11 +861,11 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    arch_cfg = ArchConfig(w_size=3,
-                          y_size=args.y_size,
-                          z_size=args.z_size,
-                          window_size=args.window_size,
-                          **data_params(data))
+    cfg = Config(w_size=3,
+                 y_size=args.y_size,
+                 z_size=args.z_size,
+                 window_size=args.window_size,
+                 **data_params(data))
 
     output_path = make_output_dir(args.o)
     print('output path: {}'.format(output_path))
@@ -874,17 +874,17 @@ if __name__ == '__main__':
     log_to_cond('data path: {}'.format(args.data_path))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
-    log_to_cond(arch_cfg)
+    log_to_cond(cfg)
 
-    model = Model(arch_cfg, use_cuda=args.cuda)
-    guide = Guide(arch_cfg,
-                  dict(guide_w=GuideW_ObjRnn(arch_cfg, dedicated_t0=False),
-                       #guide_w=GuideW_ImageSoFar(arch_cfg, model),
-                       guide_y=mod.ParamY(arch_cfg),
-                       guide_z=GuideZ(arch_cfg, dedicated_t0=False)),
+    model = Model(cfg, use_cuda=args.cuda)
+    guide = Guide(cfg,
+                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
+                       #guide_w=GuideW_ImageSoFar(cfg, model),
+                       guide_y=mod.ParamY(cfg),
+                       guide_z=GuideZ(cfg, dedicated_t0=False)),
                   use_cuda=args.cuda)
 
-    dynair = DynAIR(arch_cfg, model, guide, use_cuda=args.cuda)
+    dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
 
     run_svi(dynair, X_split, Y_split, args.epochs,
             partial(vis_hook, args.vis, visdom.Visdom(), dynair),
