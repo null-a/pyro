@@ -26,9 +26,9 @@ class Guide(nn.Module):
         # Modules
 
         # Guide modules:
-        self.guide_w_params = arch['guide_w']
-        self.y_param = arch['guide_y']
-        self.guide_z_params = arch['guide_z']
+        self.guide_w = arch['guide_w']
+        self.guide_y = arch['guide_y']
+        self.guide_z = arch['guide_z']
 
     def forward(self, batch_size, batch, obj_counts):
 
@@ -50,7 +50,7 @@ class Guide(nn.Module):
 
             # NOTE: Here we're guiding y based on the contents of the
             # first frame only.
-            y = self.guide_y(batch[:, 0])
+            y = self.sample_y(*self.guide_y(batch[:, 0]))
 
             for t in range(self.cfg.seq_length):
 
@@ -71,9 +71,13 @@ class Guide(nn.Module):
                     mask = (obj_counts > i).float()
 
                     with poutine.scale(None, mask):
-                        w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
+                        w_params, w_guide_state = self.guide_w(t, i, x, y,
+                                                               w_prev_i, z_prev_i,
+                                                               w_t_prev, z_t_prev,
+                                                               mask_prev, w_guide_state_prev)
+                        w = self.sample_w(t, i, *w_params)
                         x_att = image_to_window(self.cfg, w, x)
-                        z = self.guide_z(t, i, w, x_att, z_prev_i)
+                        z = self.sample_z(t, i, *self.guide_z(t, i, w, x_att, z_prev_i))
 
                     ws[t][i] = w
                     zs[t][i] = z
@@ -83,17 +87,13 @@ class Guide(nn.Module):
 
         return ws, zs, y
 
-    def guide_y(self, x0):
-        y_mean, y_sd = self.y_param(x0)
+    def sample_y(self, y_mean, y_sd):
         return pyro.sample('y', dist.Normal(y_mean, y_sd).independent(1))
 
-    def guide_w(self, t, i, *args, **kwargs):
-        w_mean, w_sd, w_guide_state = self.guide_w_params(t, i, *args, **kwargs)
-        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
-        return w, w_guide_state
+    def sample_w(self, t, i, w_mean, w_sd):
+        return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
-    def guide_z(self, t, i, *args, **kwargs):
-        z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
+    def sample_z(self, t, i, z_mean, z_sd):
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
 
@@ -190,7 +190,7 @@ class GuideW_ObjRnn(nn.Module):
             w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
             w_mean = w_prev_i + w_delta
 
-        return w_mean, w_sd, rnn_hid
+        return (w_mean, w_sd), rnn_hid
 
 
 class GuideW_ImageSoFar(nn.Module):
