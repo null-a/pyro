@@ -114,8 +114,6 @@ class DynAIR(nn.Module):
         return dict((m._get_name(), m.cache.stats())
                     for m in self.modules_with_cache)
 
-    def params_with_nan(self):
-        return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
 
     def infer(self, batch, obj_counts, num_extra_frames=0):
         trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
@@ -703,8 +701,6 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
 
         for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
             loss = svi.step(X_batch, Y_batch)
-            nan_params = list(dynair.params_with_nan())
-            assert len(nan_params) == 0, 'The following parameters include NaN:\n  {}'.format("\n  ".join(nan_params))
             elbo = -loss / (dynair.cfg.seq_length * batch_size) # elbo per datum, per frame
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
