@@ -8,7 +8,7 @@ import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
 from modules import MLP, split_at
-from utils import assert_size, batch_expand
+from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
 product = functools.partial(functools.reduce, operator.mul)
@@ -17,11 +17,18 @@ def mk_matrix(m, n):
     return [[None] * n for _ in range(m)]
 
 class Guide(nn.Module):
-    def __init__(self, cfg, arch, use_cuda=False):
+    def __init__(self, cfg, arch, delta_w=False, delta_z=False, use_cuda=False):
         super(Guide, self).__init__()
 
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.cfg = cfg
+
+        # When enabled the guide outputs the delta from the previous
+        # value of the variable rather than outputting the next value
+        # directly for steps t>0. This seems most natural when there
+        # is a separate guide for t=0.
+        self.delta_w = delta_w
+        self.delta_z = delta_z
 
         # Modules
 
@@ -75,9 +82,9 @@ class Guide(nn.Module):
                                                                w_prev_i, z_prev_i,
                                                                w_t_prev, z_t_prev,
                                                                mask_prev, w_guide_state_prev)
-                        w = self.sample_w(t, i, *w_params)
+                        w = self.sample_w(t, i, w_prev_i, *w_params)
                         x_att = image_to_window(self.cfg, w, x)
-                        z = self.sample_z(t, i, *self.guide_z(t, i, w, x_att, z_prev_i))
+                        z = self.sample_z(t, i, z_prev_i, *self.guide_z(t, i, w, x_att, z_prev_i))
 
                     ws[t][i] = w
                     zs[t][i] = z
@@ -90,10 +97,12 @@ class Guide(nn.Module):
     def sample_y(self, y_mean, y_sd):
         return pyro.sample('y', dist.Normal(y_mean, y_sd).independent(1))
 
-    def sample_w(self, t, i, w_mean, w_sd):
+    def sample_w(self, t, i, w_prev, w_mean_or_delta, w_sd):
+        w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
         return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
-    def sample_z(self, t, i, z_mean, z_sd):
+    def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
+        z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
 
@@ -136,8 +145,7 @@ class GuideZ(nn.Module):
             if t == 0:
                 assert z_prev_i is None
                 z_prev_i = batch_expand(self.z_init, batch_size)
-            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
-            z_mean = z_prev_i + z_delta
+            z_mean, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
         return z_mean, z_sd
 
 
@@ -187,8 +195,7 @@ class GuideW_ObjRnn(nn.Module):
                 assert w_prev_i is None and z_prev_i is None
                 w_prev_i = batch_expand(self.w_init, batch_size)
                 z_prev_i = batch_expand(self.z_init, batch_size)
-            w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
-            w_mean = w_prev_i + w_delta
+            w_mean, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
 
         return (w_mean, w_sd), rnn_hid
 
@@ -239,10 +246,8 @@ class GuideW_ImageSoFar(nn.Module):
         # For simplicity, feed `x - image_so_far` into the net, though
         # note that alternatives exist.
         diff = x - image_so_far
-        w_delta, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
-        # TODO: Prefer absolute position here?
-        w_mean = w_prev_i + w_delta
-        return w_mean, w_sd, image_so_far
+        w_mean, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
+        return (w_mean, w_sd), image_so_far
 
 
 class ParamW_Isf_Mlp(nn.Module):

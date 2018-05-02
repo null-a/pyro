@@ -7,15 +7,21 @@ import pyro.distributions as dist
 
 from cache import Cache, cached
 from modules import MLP
-from utils import assert_size
+from utils import assert_size, delta_mean
 from transform import window_to_image, over
 
 class Model(nn.Module):
-    def __init__(self, cfg, use_cuda=False):
+    def __init__(self, cfg, delta_w=False, delta_z=False, use_cuda=False):
         super(Model, self).__init__()
         self.cache = Cache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
         self.cfg = cfg
+
+        # When enabled transitions output the delta from the previous
+        # value of a variable, rather than outputting the next value
+        # directly.
+        self.delta_w = delta_w
+        self.delta_z = delta_z
 
         # Priors:
 
@@ -113,7 +119,8 @@ class Model(nn.Module):
                                self.w_0_prior_sd.expand(batch_size, -1))
                            .independent(1))
 
-    def sample_w(self, t, i, w_mean, w_sd):
+    def sample_w(self, t, i, w_prev, w_mean_or_delta, w_sd):
+        w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
         return pyro.sample('w_{}_{}'.format(t, i),
                            dist.Normal(w_mean, w_sd).independent(1))
 
@@ -124,7 +131,8 @@ class Model(nn.Module):
                                self.z_0_prior_sd.expand(batch_size, -1))
                            .independent(1))
 
-    def sample_z(self, t, i, z_mean, z_sd):
+    def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
+        z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
         return pyro.sample('z_{}_{}'.format(t, i),
                            dist.Normal(z_mean, z_sd).independent(1))
 
@@ -132,10 +140,10 @@ class Model(nn.Module):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.cfg.z_size))
         assert_size(w_prev, (batch_size, self.cfg.w_size))
-        z_mean, z_sd = self.z_transition(z_prev)
-        w_mean, w_sd = self.w_transition(z_prev, w_prev)
-        z = self.sample_z(t, i, z_mean, z_sd)
-        w = self.sample_w(t, i, w_mean, w_sd)
+        z_mean_or_delta, z_sd = self.z_transition(z_prev)
+        w_mean_or_delta, w_sd = self.w_transition(z_prev, w_prev)
+        z = self.sample_z(t, i, z_prev, z_mean_or_delta, z_sd)
+        w = self.sample_w(t, i, w_prev, w_mean_or_delta, w_sd)
         return z, w
 
     def transition(self, t, obj_counts, zs_prev, ws_prev):
@@ -200,7 +208,7 @@ class WTransition(nn.Module):
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)
         wz_prev = torch.cat((w_prev, z_prev), 1)
-        w_mean = w_prev + self.w_mean_net(wz_prev)
+        w_mean = self.w_mean_net(wz_prev)
         w_sd = softplus(self._w_sd).expand_as(w_mean)
         return w_mean, w_sd
 
@@ -213,7 +221,7 @@ class ZTransition(nn.Module):
         self._z_sd = nn.Parameter(torch.ones(cfg.z_size) * -2.25)
 
     def forward(self, z_prev):
-        z_mean = z_prev + self.z_mean_net(z_prev)
+        z_mean = self.z_mean_net(z_prev)
         z_sd = softplus(self._z_sd).expand_as(z_mean)
         return z_mean, z_sd
 

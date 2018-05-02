@@ -125,7 +125,9 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond(cfg)
 
-    model = Model(cfg, use_cuda=args.cuda)
+    model = Model(cfg,
+                  delta_w=True, # Previous experiment use delta style here only.
+                  use_cuda=args.cuda)
     guide = Guide(cfg,
                   dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
                        #guide_w=GuideW_ImageSoFar(cfg, model),
