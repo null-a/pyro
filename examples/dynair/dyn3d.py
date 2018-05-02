@@ -13,7 +13,7 @@ import pyro.poutine as poutine
 
 
 import dyn3d_modules as mod
-from utils import make_output_dir, append_line, describe_env, md5sum
+from optutils import make_output_dir, append_line, describe_env, md5sum
 
 import visdom
 from PIL import Image, ImageDraw
