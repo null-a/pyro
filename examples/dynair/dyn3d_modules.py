@@ -50,11 +50,11 @@ def split_at(t, widths):
 # A simple non-linear transition. With learnable (constant) sd.
 
 class WTransition(nn.Module):
-    def __init__(self, z_size, w_size, hid_size):
+    def __init__(self, cfg, hid_size):
         super(WTransition, self).__init__()
-        self.w_mean_net = MLP(z_size + w_size, [hid_size, w_size], nn.ReLU)
+        self.w_mean_net = MLP(cfg.z_size + cfg.w_size, [hid_size, cfg.w_size], nn.ReLU)
         # Initialize to ~0.1 (after softplus).
-        self._w_sd = nn.Parameter(torch.ones(w_size) * -2.25)
+        self._w_sd = nn.Parameter(torch.ones(cfg.w_size) * -2.25)
 
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)
@@ -64,11 +64,11 @@ class WTransition(nn.Module):
         return w_mean, w_sd
 
 class ZTransition(nn.Module):
-    def __init__(self, z_size, hid_size):
+    def __init__(self, cfg, hid_size):
         super(ZTransition, self).__init__()
-        self.z_mean_net = MLP(z_size, [hid_size, z_size], nn.ReLU)
+        self.z_mean_net = MLP(cfg.z_size, [hid_size, cfg.z_size], nn.ReLU)
         # Initialize to ~0.1 (after softplus).
-        self._z_sd = nn.Parameter(torch.ones(z_size) * -2.25)
+        self._z_sd = nn.Parameter(torch.ones(cfg.z_size) * -2.25)
 
     def forward(self, z_prev):
         z_mean = z_prev + self.z_mean_net(z_prev)
@@ -303,22 +303,22 @@ class ParamY(nn.Module):
 
 
 class DecodeObj(nn.Module):
-    def __init__(self, hids, z_size, num_chan, window_size, alpha_bias=0.):
+    def __init__(self, cfg, hids, alpha_bias=0.):
         super(DecodeObj, self).__init__()
-        self.mlp = MLP(z_size, hids + [(num_chan+1) * window_size**2], nn.ReLU)
+        self.mlp = MLP(cfg.z_size, hids + [(cfg.num_chan+1) * cfg.window_size**2], nn.ReLU)
         # Adjust bias of the alpha channel.
-        self.mlp.seq[-1].bias.data[(num_chan * window_size ** 2):] += alpha_bias
+        self.mlp.seq[-1].bias.data[(cfg.num_chan * cfg.window_size ** 2):] += alpha_bias
 
     def forward(self, z):
         return sigmoid(self.mlp(z))
 
 
 class DecodeBkg(nn.Module):
-    def __init__(self, hids, y_size, num_chan, image_size):
+    def __init__(self, cfg, hids):
         super(DecodeBkg, self).__init__()
-        self.num_chan = num_chan
-        self.image_size = image_size
-        self.mlp = MLP(y_size, hids + [num_chan * image_size**2], nn.ReLU)
+        self.num_chan = cfg.num_chan
+        self.image_size = cfg.image_size
+        self.mlp = MLP(cfg.y_size, hids + [cfg.num_chan * cfg.image_size**2], nn.ReLU)
 
     def forward(self, y):
         batch_size = y.size(0)

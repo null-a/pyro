@@ -189,12 +189,11 @@ class Model(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        # TODO: Just pass cfg to module, and figure out sizes there.
-        self.decode_obj = mod.DecodeObj([100, 100], cfg.z_size, cfg.num_chan, cfg.window_size, alpha_bias=-2.0)
-        self._decode_bkg = mod.DecodeBkg([200, 200], cfg.y_size, cfg.num_chan, cfg.image_size)
+        self.decode_obj = mod.DecodeObj(cfg, [100, 100], alpha_bias=-2.0)
+        self._decode_bkg = mod.DecodeBkg(cfg, [200, 200])
 
-        self.w_transition = mod.WTransition(cfg.z_size, cfg.w_size, 50)
-        self.z_transition = mod.ZTransition(cfg.z_size, 50)
+        self.w_transition = mod.WTransition(cfg, 50)
+        self.z_transition = mod.ZTransition(cfg, 50)
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
 
