@@ -132,8 +132,8 @@ class DynAIR(nn.Module):
         zs = zss[-1]
 
         for t in range(num_extra_frames):
-            zs, ws = self.model.model_transition(self.arch_cfg.seq_length + t, obj_counts, zs, ws)
-            frame_mean = self.model.model_emission(zs, ws, bkg, obj_counts)
+            zs, ws = self.model.transition(self.arch_cfg.seq_length + t, obj_counts, zs, ws)
+            frame_mean = self.model.emission(zs, ws, bkg, obj_counts)
             extra_frames.append(frame_mean)
             extra_wss.append(ws)
             extra_zss.append(zs)
@@ -214,9 +214,6 @@ class Model(nn.Module):
         #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
 
 
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
     # We wrap `_decode_bkg` here to enable caching without
     # interferring with the magic behaviour that comes from having an
     # `nn.Module` as a property of the model class.
@@ -225,7 +222,7 @@ class Model(nn.Module):
         return self._decode_bkg(*args, **kwargs)
 
     # TODO: This do_likelihood business is unpleasant.
-    def model(self, batch, obj_counts, do_likelihood=True):
+    def forward(self, batch, obj_counts, do_likelihood=True):
 
         pyro.module('model', self)
         # for name, _ in self.named_parameters():
@@ -243,7 +240,7 @@ class Model(nn.Module):
         # http://pyro.ai/examples/tensor_shapes.html
         with pyro.iarange('data', batch_size):
 
-            y = self.model_sample_y(batch_size)
+            y = self.sample_y(batch_size)
             bkg = self.decode_bkg(y)
 
             for t in range(self.seq_length):
@@ -252,8 +249,8 @@ class Model(nn.Module):
                 else:
                     zs_prev, ws_prev = None, None
 
-                zs, ws = self.model_transition(t, obj_counts, zs_prev, ws_prev)
-                frame_mean = self.model_emission(zs, ws, bkg, obj_counts)
+                zs, ws = self.transition(t, obj_counts, zs_prev, ws_prev)
+                frame_mean = self.emission(zs, ws, bkg, obj_counts)
 
                 zss.append(zs)
                 wss.append(ws)
@@ -272,44 +269,44 @@ class Model(nn.Module):
                     dist.Normal(frame_mean, frame_sd).independent(3),
                     obs=obs)
 
-    def model_sample_y(self, batch_size):
+    def sample_y(self, batch_size):
         return pyro.sample('y', dist.Normal(self.y_prior_mean.expand(batch_size, -1),
                                             self.y_prior_sd.expand(batch_size, -1))
                                 .independent(1))
 
-    def model_sample_w_0(self, i, batch_size):
+    def sample_w_0(self, i, batch_size):
         return pyro.sample('w_0_{}'.format(i),
                            dist.Normal(
                                self.w_0_prior_mean.expand(batch_size, -1),
                                self.w_0_prior_sd.expand(batch_size, -1))
                            .independent(1))
 
-    def model_sample_w(self, t, i, w_mean, w_sd):
+    def sample_w(self, t, i, w_mean, w_sd):
         return pyro.sample('w_{}_{}'.format(t, i),
                            dist.Normal(w_mean, w_sd).independent(1))
 
-    def model_sample_z_0(self, i, batch_size):
+    def sample_z_0(self, i, batch_size):
         return pyro.sample('z_0_{}'.format(i),
                            dist.Normal(
                                self.z_0_prior_mean.expand(batch_size, -1),
                                self.z_0_prior_sd.expand(batch_size, -1))
                            .independent(1))
 
-    def model_sample_z(self, t, i, z_mean, z_sd):
+    def sample_z(self, t, i, z_mean, z_sd):
         return pyro.sample('z_{}_{}'.format(t, i),
                            dist.Normal(z_mean, z_sd).independent(1))
 
-    def model_transition_one(self, t, i, z_prev, w_prev):
+    def transition_one(self, t, i, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.z_size))
         assert_size(w_prev, (batch_size, self.w_size))
         z_mean, z_sd = self.z_transition(z_prev)
         w_mean, w_sd = self.w_transition(z_prev, w_prev)
-        z = self.model_sample_z(t, i, z_mean, z_sd)
-        w = self.model_sample_w(t, i, w_mean, w_sd)
+        z = self.sample_z(t, i, z_mean, z_sd)
+        w = self.sample_w(t, i, w_mean, w_sd)
         return z, w
 
-    def model_transition(self, t, obj_counts, zs_prev, ws_prev):
+    def transition(self, t, obj_counts, zs_prev, ws_prev):
         batch_size = obj_counts.size(0)
         assert_size(obj_counts, (batch_size,))
 
@@ -333,26 +330,26 @@ class Model(nn.Module):
 
             with poutine.scale(None, mask):
                 if t > 0:
-                    z, w = self.model_transition_one(t, i, zs_prev[i], ws_prev[i])
+                    z, w = self.transition_one(t, i, zs_prev[i], ws_prev[i])
                 else:
-                    z = self.model_sample_z_0(i, batch_size)
-                    w = self.model_sample_w_0(i, batch_size)
+                    z = self.sample_z_0(i, batch_size)
+                    w = self.sample_w_0(i, batch_size)
 
             zs.append(z)
             ws.append(w)
 
         return zs, ws
 
-    def model_emission(self, zs, ws, bkg, obj_counts):
+    def emission(self, zs, ws, bkg, obj_counts):
         #batch_size = z.size(0)
         acc = bkg
         for i, (z, w) in enumerate(zip(zs, ws)):
             mask = tuple((obj_counts > i).tolist())
-            acc = self.model_composite_object(z, w, mask, acc)
+            acc = self.composite_object(z, w, mask, acc)
         return acc
 
     @cached
-    def model_composite_object(self, z, w, mask, image_so_far):
+    def composite_object(self, z, w, mask, image_so_far):
         assert type(mask) == tuple # to facilitate caching on the mask
         assert z.size(0) == w.size(0) == image_so_far.size(0)
         mask = torch.Tensor(mask).type_as(z) # move to gpu
@@ -385,11 +382,7 @@ class Guide(nn.Module):
         self.y_param = arch['guide_y']
         self.guide_z_params = arch['guide_z']
 
-
-    def forward(self, *args, **kwargs):
-        return self.guide(*args, **kwargs)
-
-    def guide(self, batch, obj_counts, *args):
+    def forward(self, batch, obj_counts, *args):
 
         pyro.module('guide', self)
         # for name, _ in self.named_parameters():
@@ -569,7 +562,7 @@ class GuideW_ImageSoFar(nn.Module):
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
         self.decode_bkg = model.decode_bkg
-        self.model_composite_object = model.model_composite_object
+        self.composite_object = model.composite_object
 
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
         batch_size = x.size(0)
@@ -583,9 +576,9 @@ class GuideW_ImageSoFar(nn.Module):
             assert w_t_prev is not None
             assert z_t_prev is not None
             # Add previous object to image so far.
-            image_so_far = self.model_composite_object(z_t_prev, w_t_prev,
-                                                       tuple(mask_prev.tolist()),
-                                                       image_so_far_prev)
+            image_so_far = self.composite_object(z_t_prev, w_t_prev,
+                                                 tuple(mask_prev.tolist()),
+                                                 image_so_far_prev)
 
         # TODO: Should we be preventing gradients from flowing back
         # from the guide through image_so_far?
