@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+from torch.nn.functional import sigmoid, softplus
 import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 
 from cache import Cache, cached
-import dyn3d_modules as mod
+from dyn3d_modules import MLP
 from utils import assert_size
 from transform import window_to_image, over
 
@@ -34,12 +35,12 @@ class Model(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        self.decode_obj = mod.DecodeObj(cfg, [100, 100], alpha_bias=-2.0)
-        self._decode_bkg = mod.DecodeBkg(cfg, [200, 200])
+        self.decode_obj = DecodeObj(cfg, [100, 100], alpha_bias=-2.0)
+        self._decode_bkg = DecodeBkg(cfg, [200, 200])
 
-        self.w_transition = mod.WTransition(cfg, 50)
-        self.z_transition = mod.ZTransition(cfg, 50)
-        #self.z_transition = mod.ZGatedTransition(self.z_size, 50, 50)
+        self.w_transition = WTransition(cfg, 50)
+        self.z_transition = ZTransition(cfg, 50)
+        #self.z_transition = ZGatedTransition(self.z_size, 50, 50)
 
 
     # We wrap `_decode_bkg` here to enable caching without
@@ -186,3 +187,75 @@ class Model(nn.Module):
         mask = torch.Tensor(mask).type_as(z) # move to gpu
         x_att = self.decode_obj(z) * mask.view(-1, 1)
         return over(window_to_image(self.cfg, w, x_att), image_so_far)
+
+
+# A simple non-linear transition. With learnable (constant) sd.
+class WTransition(nn.Module):
+    def __init__(self, cfg, hid_size):
+        super(WTransition, self).__init__()
+        self.w_mean_net = MLP(cfg.z_size + cfg.w_size, [hid_size, cfg.w_size], nn.ReLU)
+        # Initialize to ~0.1 (after softplus).
+        self._w_sd = nn.Parameter(torch.ones(cfg.w_size) * -2.25)
+
+    def forward(self, z_prev, w_prev):
+        assert z_prev.size(0) == w_prev.size(0)
+        wz_prev = torch.cat((w_prev, z_prev), 1)
+        w_mean = w_prev + self.w_mean_net(wz_prev)
+        w_sd = softplus(self._w_sd).expand_as(w_mean)
+        return w_mean, w_sd
+
+
+class ZTransition(nn.Module):
+    def __init__(self, cfg, hid_size):
+        super(ZTransition, self).__init__()
+        self.z_mean_net = MLP(cfg.z_size, [hid_size, cfg.z_size], nn.ReLU)
+        # Initialize to ~0.1 (after softplus).
+        self._z_sd = nn.Parameter(torch.ones(cfg.z_size) * -2.25)
+
+    def forward(self, z_prev):
+        z_mean = z_prev + self.z_mean_net(z_prev)
+        z_sd = softplus(self._z_sd).expand_as(z_mean)
+        return z_mean, z_sd
+
+
+class ZGatedTransition(nn.Module):
+    def __init__(self, z_size, g_hid, h_hid):
+        super(ZGatedTransition, self).__init__()
+        self.g_mlp = nn.Sequential(MLP(z_size, [g_hid, z_size], nn.ReLU),
+                                   nn.Sigmoid())
+        self.h_mlp = MLP(z_size, [h_hid, z_size], nn.ReLU)
+        self.mean_lm = nn.Linear(z_size, z_size)
+        self.sd_lm = nn.Linear(z_size, z_size)
+        nn.init.eye(self.mean_lm.weight)
+        nn.init.constant(self.mean_lm.bias, 0)
+
+    def forward(self, z_prev):
+        g = self.g_mlp(z_prev)
+        h = self.h_mlp(z_prev)
+        z_mean = (1 - g) * self.mean_lm(z_prev) + g * h
+        z_sd = softplus(self.sd_lm(relu(h)))
+        return z_mean, z_sd
+
+
+class DecodeObj(nn.Module):
+    def __init__(self, cfg, hids, alpha_bias=0.):
+        super(DecodeObj, self).__init__()
+        self.mlp = MLP(cfg.z_size, hids + [(cfg.num_chan+1) * cfg.window_size**2], nn.ReLU)
+        # Adjust bias of the alpha channel.
+        self.mlp.seq[-1].bias.data[(cfg.num_chan * cfg.window_size ** 2):] += alpha_bias
+
+    def forward(self, z):
+        return sigmoid(self.mlp(z))
+
+
+class DecodeBkg(nn.Module):
+    def __init__(self, cfg, hids):
+        super(DecodeBkg, self).__init__()
+        self.num_chan = cfg.num_chan
+        self.image_size = cfg.image_size
+        self.mlp = MLP(cfg.y_size, hids + [cfg.num_chan * cfg.image_size**2], nn.ReLU)
+
+    def forward(self, y):
+        batch_size = y.size(0)
+        out_flat = sigmoid(self.mlp(y))
+        return out_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)

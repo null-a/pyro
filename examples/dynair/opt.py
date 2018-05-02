@@ -13,11 +13,10 @@ import torch.nn as nn
 
 from dyn3d import Config, DynAIR
 from model import Model
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
 from optutils import make_output_dir, append_line, describe_env, md5sum
 from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
-import dyn3d_modules as mod
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
     n = X.size(0)
@@ -130,7 +129,7 @@ if __name__ == '__main__':
     guide = Guide(cfg,
                   dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
                        #guide_w=GuideW_ImageSoFar(cfg, model),
-                       guide_y=mod.ParamY(cfg),
+                       guide_y=ParamY(cfg),
                        guide_z=GuideZ(cfg, dedicated_t0=False)),
                   use_cuda=args.cuda)
 

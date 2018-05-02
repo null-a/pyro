@@ -1,12 +1,20 @@
+import functools
+import operator
 import torch
 import torch.nn as nn
+from torch.nn.functional import softplus
 import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-import dyn3d_modules as mod
+from dyn3d_modules import MLP, split_at
 from utils import assert_size, batch_expand
 from transform import image_to_window
+
+product = functools.partial(functools.reduce, operator.mul)
+
+def mk_matrix(m, n):
+    return [[None] * n for _ in range(m)]
 
 class Guide(nn.Module):
     def __init__(self, cfg, arch, use_cuda=False):
@@ -102,20 +110,20 @@ class GuideZ(nn.Module):
 
         # TODO: Having only a single hidden layer between z_prev and z
         # may be insufficient?
-        self.z_param = mod.ParamZ(
+        self.z_param = ParamZ(
             [100],
             cfg.w_size + x_att_embed_size + cfg.z_size, # input size
             cfg.z_size)
 
         if dedicated_t0:
-            self.z0_param = mod.ParamZ(
+            self.z0_param = ParamZ(
                 [100],
                 cfg.w_size + x_att_embed_size, # input size
                 cfg.z_size)
         else:
             self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-        self.x_att_embed = mod.MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
+        self.x_att_embed = MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
 
 
     def forward(self, t, i, w, x_att, z_prev_i):
@@ -142,15 +150,15 @@ class GuideW_ObjRnn(nn.Module):
 
         self.cache = Cache()
 
-        self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
+        self._x_embed = MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
 
-        self.w_param = mod.ParamW(
+        self.w_param = ParamW(
             x_embed_size + cfg.w_size + cfg.z_size, # input size
             rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
             sd_bias=-2.25)
 
         if dedicated_t0:
-            self.w0_param = mod.ParamW(
+            self.w0_param = ParamW(
                 x_embed_size, # input size
                 rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
@@ -190,9 +198,9 @@ class GuideW_ImageSoFar(nn.Module):
         super(GuideW_ImageSoFar, self).__init__()
 
         # TODO: Figure out how best to specify the desired architecture.
-        self.w_param = mod.ParamW_Isf_Mlp(cfg)
-        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(cfg)
-        #self.w_param = mod.ParamW_Isf_Cnn_AM(cfg)
+        self.w_param = ParamW_Isf_Mlp(cfg)
+        #self.w_param = ParamW_Isf_Cnn_Mixin(cfg)
+        #self.w_param = ParamW_Isf_Cnn_AM(cfg)
 
         # TODO: Does it make sense that this is a parameter (rather
         # than fixed) in the case where the guide computing the delta?
@@ -236,5 +244,212 @@ class GuideW_ImageSoFar(nn.Module):
         w_mean = w_prev_i + w_delta
         return w_mean, w_sd, image_so_far
 
-def mk_matrix(m, n):
-    return [[None] * n for _ in range(m)]
+
+class ParamW_Isf_Mlp(nn.Module):
+    def __init__(self, cfg):
+        super(ParamW_Isf_Mlp, self).__init__()
+        self.col_widths = [cfg.w_size, cfg.w_size]
+        self.mlp = MLP(cfg.x_size + cfg.w_size + cfg.z_size,
+                       [500, 200, 200, sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, img, w_prev, z_prev):
+        batch_size = img.size(0)
+        # TODO: Make a "Flatten" nn.Module.
+        flat_img = img.view(batch_size, -1)
+        out = self.mlp(torch.cat((flat_img, w_prev, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+
+# TODO: Think more carefully about this architecture. Consider
+# switching to inputs of a more convenient size.
+class InputCnn(nn.Module):
+    def __init__(self, cfg):
+        super(InputCnn, self).__init__()
+        assert cfg.image_size == 50
+        self.output_size = (256, 2, 2)
+        self.cnn = nn.Sequential(
+            nn.Conv2d(cfg.num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2, padding=1), # => 64 x 12 x 12
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 4, stride=2, padding=1), # => 128 x 6 x 6
+            nn.ReLU(),
+            nn.Conv2d(128, 256, 4, stride=2, padding=0), # => 256 x 2 x 2
+            nn.ReLU(),
+        )
+
+    def forward(self, img):
+        out = self.cnn(img)
+        assert(out.size()[1:] == self.output_size)
+        return out
+
+
+class ParamW_Isf_Cnn_Mixin(nn.Module):
+    def __init__(self, cfg):
+        super(ParamW_Isf_Cnn_Mixin, self).__init__()
+
+        self.col_widths = [cfg.w_size, cfg.w_size]
+
+        self.cnn = InputCnn(cfg)
+
+        self.mlp = MLP(product(self.cnn.output_size) + cfg.w_size + cfg.z_size,
+                       [200, 200, sum(self.col_widths)],
+                       nn.ReLU)
+
+
+    def forward(self, img, w_prev, z_prev):
+        batch_size = img.size(0)
+        cnn_out_flat = self.cnn(img).view(batch_size, -1)
+        out = self.mlp(torch.cat((cnn_out_flat, w_prev, z_prev), 1))
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+
+# "Activation Map" architecture.
+# https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
+class ParamW_Isf_Cnn_AM(nn.Module):
+    def __init__(self, cfg):
+        super(ParamW_Isf_Cnn_AM, self).__init__()
+
+        self.num_chan = cfg.num_chan
+        self.image_size = cfg.image_size
+
+        self.col_widths = [cfg.w_size, cfg.w_size]
+
+        # TODO: Could use transposed convolution here?
+        # TODO: Check appropriateness of hidden sizes here.
+        self.am_mlp = MLP(cfg.w_size + cfg.z_size, [200, 200, cfg.x_size], nn.ReLU)
+        self.cnn = InputCnn(cfg)
+        self.output_mlp = MLP(product(self.cnn.output_size),
+                              [sum(self.col_widths)], nn.ReLU)
+
+
+    def forward(self, img, w_prev, z_prev):
+        batch_size = img.size(0)
+        am_flat = self.am_mlp(torch.cat((w_prev, z_prev), 1))
+        am = am_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)
+        cnn_out_flat = self.cnn(img * am).view(batch_size, -1)
+        out = self.output_mlp(cnn_out_flat)
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+        return w_mean, w_sd
+
+
+class ParamW(nn.Module):
+    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, z_size, sd_bias=0.0):
+        super(ParamW, self).__init__()
+
+        assert len(rnn_hid_sizes) > 0
+
+        self.input_size = input_size
+        self.w_size = w_size
+        self.z_size = z_size
+
+        rnn_input_sizes = [input_size + w_size + z_size] + rnn_hid_sizes[0:-1]
+
+        self.rnns = nn.ModuleList(
+            [nn.RNNCell(i, h) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
+
+        self.rnn_hid_inits = nn.ParameterList(
+            [nn.Parameter(torch.zeros(h)) for h in rnn_hid_sizes])
+
+        for rnn_hid_init in self.rnn_hid_inits:
+            nn.init.normal_(rnn_hid_init, std=0.01)
+
+        assert len(self.rnns) == len(self.rnn_hid_inits)
+
+        self.col_widths = [w_size, w_size]
+        self.mlp = MLP(rnn_hid_sizes[-1], hids + [sum(self.col_widths)], nn.ReLU)
+
+        self.w_t_prev_init = nn.Parameter(torch.zeros(w_size))
+        self.z_t_prev_init = nn.Parameter(torch.zeros(z_size))
+
+        # Adjust the init. of the parameter MLP in an attempt to:
+
+        # 1) Have the w delta output by the network be close to zero
+        # at the start of optimisation. The motivation is that we want
+        # minimise drift, in the hope that this helps prevent the
+        # guide moving all of the windows out of frame during the
+        # first few steps. (Because I assume this hurts optimisation.)
+
+        # 2) Have the sd start out at around 0.1 for much the same
+        # reason. Here we match the sd the initial sd used in the
+        # model. (Is the latter sensible/helpful?)
+
+        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
+        self.mlp.seq[-1].bias.data *= 0.0
+        self.mlp.seq[-1].bias.data[w_size:] += sd_bias
+
+    def forward(self, inp, w_t_prev, z_t_prev, rnn_hids_prev):
+        batch_size = inp.size(0)
+        assert inp.size(1) == self.input_size
+
+        if rnn_hids_prev is None:
+            hids_prev = [rnn_hid_init.expand(batch_size, -1)
+                         for rnn_hid_init in self.rnn_hid_inits]
+        else:
+            hids_prev = rnn_hids_prev
+
+        if w_t_prev is None:
+            w_t_prev = self.w_t_prev_init.expand(batch_size, self.w_size)
+        if z_t_prev is None:
+            z_t_prev = self.z_t_prev_init.expand(batch_size, self.z_size)
+
+        rnn_input = torch.cat((inp, w_t_prev, z_t_prev), 1)
+        hids = self.apply_rnn_stack(hids_prev, rnn_input)
+        out = self.mlp(hids[-1])
+        cols = split_at(out, self.col_widths)
+        w_mean = cols[0]
+        w_sd = softplus(cols[1])
+
+        return w_mean, w_sd, hids
+
+    def apply_rnn_stack(self, hids_prev, inp):
+        assert len(hids_prev) == len(self.rnns)
+        cur_inp = inp
+        hids = []
+        for rnn, hid_prev in zip(self.rnns, hids_prev):
+            hid = rnn(cur_inp, hid_prev)
+            hids.append(hid)
+            cur_inp = hid
+        return hids
+
+
+class ParamZ(nn.Module):
+    def __init__(self, hids, in_size, z_size):
+        super(ParamZ, self).__init__()
+        self.col_widths = [z_size, z_size]
+        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+
+        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
+        self.mlp.seq[-1].bias.data *= 0.0
+        self.mlp.seq[-1].bias.data[z_size:] -= 2.25
+
+    def forward(self, inp):
+        out = self.mlp(inp)
+        cols = split_at(out, self.col_widths)
+        z_mean = cols[0]
+        z_sd = softplus(cols[1])
+        return z_mean, z_sd
+
+
+class ParamY(nn.Module):
+    def __init__(self, cfg):
+        super(ParamY, self).__init__()
+        self.col_widths = [cfg.y_size, cfg.y_size]
+        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)], nn.ReLU)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        x_flat = x.view(batch_size, -1)
+        out = self.mlp(x_flat)
+        cols = split_at(out, self.col_widths)
+        y_mean = cols[0]
+        y_sd = softplus(cols[1])
+        return y_mean, y_sd
