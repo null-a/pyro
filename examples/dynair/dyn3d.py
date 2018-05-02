@@ -116,8 +116,9 @@ class DynAIR(nn.Module):
 
 
     def infer(self, batch, obj_counts, num_extra_frames=0):
-        trace = poutine.trace(self.guide).get_trace(batch, obj_counts)
-        frames, _, _ = poutine.replay(self.model, trace)(batch, obj_counts, do_likelihood=False)
+        batch_size = batch.size(0)
+        trace = poutine.trace(self.guide).get_trace(batch_size, batch, obj_counts)
+        frames, _, _ = poutine.replay(self.model, trace)(batch_size, batch, obj_counts)
         wss, zss, y = trace.nodes['_RETURN']['value']
 
         bkg = self.model.decode_bkg(y)
@@ -204,15 +205,18 @@ class Model(nn.Module):
     def decode_bkg(self, *args, **kwargs):
         return self._decode_bkg(*args, **kwargs)
 
-    # TODO: This do_likelihood business is unpleasant.
-    def forward(self, batch, obj_counts, do_likelihood=True):
+    def forward(self, batch_size, batch, obj_counts):
 
         pyro.module('model', self)
         # for name, _ in self.named_parameters():
         #     print(name)
 
-        batch_size = batch.size(0)
-        assert_size(obj_counts, (batch_size,))
+        assert (batch is None) == (obj_counts is None)
+        if not batch is None:
+            assert_size(batch, (batch_size,
+                                self.cfg.seq_length, self.cfg.num_chan,
+                                self.cfg.image_size, self.cfg.image_size))
+            assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
         zss = []
@@ -239,8 +243,8 @@ class Model(nn.Module):
                 wss.append(ws)
                 frames.append(frame_mean)
 
-                if do_likelihood:
-                    self.likelihood(t, frame_mean, batch[:, t])
+                obs = batch[:,t] if not batch is None else None
+                self.likelihood(t, frame_mean, obs)
 
         return frames, wss, zss
 
@@ -354,13 +358,12 @@ class Guide(nn.Module):
         self.y_param = arch['guide_y']
         self.guide_z_params = arch['guide_z']
 
-    def forward(self, batch, obj_counts, *args):
+    def forward(self, batch_size, batch, obj_counts):
 
         pyro.module('guide', self)
         # for name, _ in self.named_parameters():
         #     print(name)
 
-        batch_size = batch.size(0)
         assert_size(batch, (batch_size,
                             self.cfg.seq_length, self.cfg.num_chan,
                             self.cfg.image_size, self.cfg.image_size))
@@ -700,7 +703,7 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
     for i in range(num_epochs):
 
         for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
-            loss = svi.step(X_batch, Y_batch)
+            loss = svi.step(batch_size, X_batch, Y_batch)
             elbo = -loss / (dynair.cfg.seq_length * batch_size) # elbo per datum, per frame
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
