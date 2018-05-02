@@ -101,7 +101,6 @@ class DynAIR(nn.Module):
         self.guide = guide
 
         self.modules_with_cache = get_modules_with_cache(self)
-        #print([m._get_name() for m in self.modules_with_cache])
 
         # CUDA
         if use_cuda:
@@ -112,11 +111,8 @@ class DynAIR(nn.Module):
             m.cache.clear()
 
     def stats_for_caches(self):
-        # Note, name collisions are not handled here.
-        all_stats = {}
-        for m in self.modules_with_cache:
-            all_stats.update(**m.cache.stats())
-        return all_stats
+        return dict((m._get_name(), m.cache.stats())
+                    for m in self.modules_with_cache)
 
     def params_with_nan(self):
         return (name for (name, param) in self.named_parameters() if np.isnan(param.data.view(-1)[0]))
