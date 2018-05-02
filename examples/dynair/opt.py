@@ -43,13 +43,39 @@ def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
     if period > 0 and (step+1) % period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
 
-def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
+def run_svi(mod, X_train, Y_train, num_epochs, hook, output_path, elbo_scale=1.0):
     t0 = time.time()
+
+    num_batches = len(X_train)
+    batch_size = X_train[0].size(0)
+
+    def per_param_optim_args(module_name, param_name):
+        return {'lr': 1e-4}
+
+    svi = SVI(mod.model, mod.guide,
+              optim.Adam(per_param_optim_args),
+              loss=Trace_ELBO())
+
+    for i in range(num_epochs):
+
+        for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
+            loss = svi.step(batch_size, X_batch, Y_batch)
+            elbo = (-loss / batch_size) * elbo_scale
+            elapsed = timedelta(seconds=time.time()- t0)
+            print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
+            append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
+            if not hook is None:
+                hook(i, j, num_batches*i+j)
+
+        if (i+1) % 1000 == 0:
+            torch.save(mod.state_dict(),
+                       os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
+
+def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
+    vis = visdom.Visdom()
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
-    num_batches = len(X_train)
-    batch_size = X_train[0].size(0)
 
     # Produce visualisations for the first train & test data points
     # where possible.
@@ -60,31 +86,27 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
         X_vis = X_train[0][0:1]
         Y_vis = Y_train[0][0:1]
 
-    def per_param_optim_args(module_name, param_name):
-        return {'lr': 1e-4}
+    model = Model(cfg,
+                  delta_w=True, # Previous experiment use delta style here only.
+                  use_cuda=args.cuda)
+    guide = Guide(cfg,
+                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
+                       #guide_w=GuideW_ImageSoFar(cfg, model),
+                       guide_y=ParamY(cfg),
+                       guide_z=GuideZ(cfg, dedicated_t0=False)),
+                  use_cuda=args.cuda)
 
-    svi = SVI(dynair.model, dynair.guide,
-              optim.Adam(per_param_optim_args),
-              loss=Trace_ELBO())
+    dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
 
-    for i in range(num_epochs):
+    def hook(epoch, batch, step):
+        vis_hook(args.vis, vis, dynair, X_vis, Y_vis, epoch, batch, step)
+        dynair.clear_cache()
+        print()
+        pp(dynair.cache_stats())
 
-        for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
-            loss = svi.step(batch_size, X_batch, Y_batch)
-            elbo = -loss / (dynair.cfg.seq_length * batch_size) # elbo per datum, per frame
-            elapsed = timedelta(seconds=time.time()- t0)
-            print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
-            append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
-            if not vis_hook is None:
-                vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
-            dynair.clear_cache()
-            print()
-            pp(dynair.cache_stats())
+    run_svi(dynair, X_train, Y_train, args.epochs, hook, output_path,
+            elbo_scale=1.0/cfg.seq_length)
 
-
-        if (i+1) % 1000 == 0:
-            torch.save(dynair.state_dict(),
-                       os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
 if __name__ == '__main__':
 
@@ -98,11 +120,18 @@ if __name__ == '__main__':
     parser.add_argument('--vis', type=int, default=0,
                         help='visualise inferences during optimisation (zero disables, otherwise specifies period)')
     parser.add_argument('-o', default='./runs', help='base output path')
+    parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
+
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
     parser.add_argument('--z-size', type=int, default=50, help='size of z')
     parser.add_argument('--window-size', type=int, default=22,
                         help='size of the object window')
-    parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
+
+    subparsers = parser.add_subparsers(help='target')
+    all_parser = subparsers.add_parser('all')
+    all_parser.set_defaults(main=opt_all)
+
+
     args = parser.parse_args()
 
     data = load_data(args.data_path, args.cuda)
@@ -125,18 +154,4 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond(cfg)
 
-    model = Model(cfg,
-                  delta_w=True, # Previous experiment use delta style here only.
-                  use_cuda=args.cuda)
-    guide = Guide(cfg,
-                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
-                       #guide_w=GuideW_ImageSoFar(cfg, model),
-                       guide_y=ParamY(cfg),
-                       guide_z=GuideZ(cfg, dedicated_t0=False)),
-                  use_cuda=args.cuda)
-
-    dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
-
-    run_svi(dynair, X_split, Y_split, args.epochs,
-            partial(vis_hook, args.vis, visdom.Visdom(), dynair),
-            output_path)
+    args.main(data, X_split, Y_split, cfg, args, output_path, log_to_cond)
