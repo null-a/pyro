@@ -1,0 +1,240 @@
+import torch
+import torch.nn as nn
+import pyro
+import pyro.poutine as poutine
+import pyro.distributions as dist
+from cache import Cache, cached
+import dyn3d_modules as mod
+from utils import assert_size, batch_expand
+from transform import image_to_window
+
+class Guide(nn.Module):
+    def __init__(self, cfg, arch, use_cuda=False):
+        super(Guide, self).__init__()
+
+        self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
+        self.cfg = cfg
+
+        # Modules
+
+        # Guide modules:
+        self.guide_w_params = arch['guide_w']
+        self.y_param = arch['guide_y']
+        self.guide_z_params = arch['guide_z']
+
+    def forward(self, batch_size, batch, obj_counts):
+
+        pyro.module('guide', self)
+        # for name, _ in self.named_parameters():
+        #     print(name)
+
+        assert_size(batch, (batch_size,
+                            self.cfg.seq_length, self.cfg.num_chan,
+                            self.cfg.image_size, self.cfg.image_size))
+
+        assert_size(obj_counts, (batch_size,))
+        assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
+
+        ws = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
+        zs = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
+
+        with pyro.iarange('data', batch_size):
+
+            # NOTE: Here we're guiding y based on the contents of the
+            # first frame only.
+            y = self.guide_y(batch[:, 0])
+
+            for t in range(self.cfg.seq_length):
+
+                x = batch[:, t]
+                w_guide_state_prev = None
+                mask_prev = None
+
+                # As in the model, we'll sample max_obj_count objects for
+                # all sequences, and ignore the ones we don't need.
+
+                for i in range(self.cfg.max_obj_count):
+
+                    w_prev_i = ws[t-1][i] if t > 0 else None
+                    z_prev_i = zs[t-1][i] if t > 0 else None
+                    w_t_prev = ws[t][i-1] if i > 0 else None
+                    z_t_prev = zs[t][i-1] if i > 0 else None
+
+                    mask = (obj_counts > i).float()
+
+                    with poutine.scale(None, mask):
+                        w, w_guide_state = self.guide_w(t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, w_guide_state_prev)
+                        x_att = image_to_window(self.cfg, w, x)
+                        z = self.guide_z(t, i, w, x_att, z_prev_i)
+
+                    ws[t][i] = w
+                    zs[t][i] = z
+
+                    w_guide_state_prev = w_guide_state
+                    mask_prev = mask
+
+        return ws, zs, y
+
+    def guide_y(self, x0):
+        y_mean, y_sd = self.y_param(x0)
+        return pyro.sample('y', dist.Normal(y_mean, y_sd).independent(1))
+
+    def guide_w(self, t, i, *args, **kwargs):
+        w_mean, w_sd, w_guide_state = self.guide_w_params(t, i, *args, **kwargs)
+        w = pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
+        return w, w_guide_state
+
+    def guide_z(self, t, i, *args, **kwargs):
+        z_mean, z_sd = self.guide_z_params(t, i, *args, **kwargs)
+        return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
+
+
+# TODO: Extend with CNN variants used for guide for w. (Are there
+# opportunities for code re-use, since for both w and z compute
+# parameters from main + side input. The different been that there is
+# no recurrent part of the guide for z.)
+class GuideZ(nn.Module):
+    def __init__(self, cfg, dedicated_t0):
+        super(GuideZ, self).__init__()
+
+        x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
+        x_att_embed_size = 100
+
+        # TODO: Having only a single hidden layer between z_prev and z
+        # may be insufficient?
+        self.z_param = mod.ParamZ(
+            [100],
+            cfg.w_size + x_att_embed_size + cfg.z_size, # input size
+            cfg.z_size)
+
+        if dedicated_t0:
+            self.z0_param = mod.ParamZ(
+                [100],
+                cfg.w_size + x_att_embed_size, # input size
+                cfg.z_size)
+        else:
+            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+
+        self.x_att_embed = mod.MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
+
+
+    def forward(self, t, i, w, x_att, z_prev_i):
+        batch_size = w.size(0)
+        x_att_flat = x_att.view(x_att.size(0), -1)
+        x_att_embed = self.x_att_embed(x_att_flat)
+        if t == 0 and hasattr(self, 'z0_param'):
+            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
+        else:
+            if t == 0:
+                assert z_prev_i is None
+                z_prev_i = batch_expand(self.z_init, batch_size)
+            z_delta, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
+            z_mean = z_prev_i + z_delta
+        return z_mean, z_sd
+
+
+class GuideW_ObjRnn(nn.Module):
+    def __init__(self, cfg, dedicated_t0):
+        super(GuideW_ObjRnn, self).__init__()
+
+        x_embed_size = 800
+        rnn_hid_sizes = [200]
+
+        self.cache = Cache()
+
+        self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
+
+        self.w_param = mod.ParamW(
+            x_embed_size + cfg.w_size + cfg.z_size, # input size
+            rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
+            sd_bias=-2.25)
+
+        if dedicated_t0:
+            self.w0_param = mod.ParamW(
+                x_embed_size, # input size
+                rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
+                sd_bias=0.0) # TODO: This could probably stand to be increased a little.
+        else:
+            # TODO: Does it make sense that this is a parameter
+            # (rather than fixed) in the case where the guide
+            # computing the delta?
+            self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
+            # TODO: Small init.
+            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+
+    @cached
+    def x_embed(self, x):
+        x_flat = x.view(x.size(0), -1)
+        return self._x_embed(x_flat)
+
+    def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
+        batch_size = x.size(0)
+
+        x_embed = self.x_embed(x)
+
+        if t == 0 and hasattr(self, 'w0_param'):
+            w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
+        else:
+            if t == 0:
+                assert w_prev_i is None and z_prev_i is None
+                w_prev_i = batch_expand(self.w_init, batch_size)
+                z_prev_i = batch_expand(self.z_init, batch_size)
+            w_delta, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
+            w_mean = w_prev_i + w_delta
+
+        return w_mean, w_sd, rnn_hid
+
+
+class GuideW_ImageSoFar(nn.Module):
+    def __init__(self, cfg, model):
+        super(GuideW_ImageSoFar, self).__init__()
+
+        # TODO: Figure out how best to specify the desired architecture.
+        self.w_param = mod.ParamW_Isf_Mlp(cfg)
+        #self.w_param = mod.ParamW_Isf_Cnn_Mixin(cfg)
+        #self.w_param = mod.ParamW_Isf_Cnn_AM(cfg)
+
+        # TODO: Does it make sense that this is a parameter (rather
+        # than fixed) in the case where the guide computing the delta?
+        # (Though this guide perhaps lends itself to computing
+        # absolute position.)
+        self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
+        self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+
+        self.decode_bkg = model.decode_bkg
+        self.composite_object = model.composite_object
+
+    def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, image_so_far_prev):
+        batch_size = x.size(0)
+
+        if i == 0:
+            assert image_so_far_prev is None
+            assert mask_prev is None
+            image_so_far = self.decode_bkg(y)
+        else:
+            assert image_so_far_prev is not None
+            assert w_t_prev is not None
+            assert z_t_prev is not None
+            # Add previous object to image so far.
+            image_so_far = self.composite_object(z_t_prev, w_t_prev,
+                                                 tuple(mask_prev.tolist()),
+                                                 image_so_far_prev)
+
+        # TODO: Should we be preventing gradients from flowing back
+        # from the guide through image_so_far?
+
+        if t == 0:
+            assert w_prev_i is None and z_prev_i is None
+            w_prev_i = batch_expand(self.w_init, batch_size)
+            z_prev_i = batch_expand(self.z_init, batch_size)
+
+        # For simplicity, feed `x - image_so_far` into the net, though
+        # note that alternatives exist.
+        diff = x - image_so_far
+        w_delta, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
+        # TODO: Prefer absolute position here?
+        w_mean = w_prev_i + w_delta
+        return w_mean, w_sd, image_so_far
+
+def mk_matrix(m, n):
+    return [[None] * n for _ in range(m)]
