@@ -35,7 +35,7 @@ class Model(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        self.decode_obj = DecodeObj(cfg, [100, 100], alpha_bias=-2.0)
+        self.decode_obj = DecodeObj(cfg, [100, 100])
         self._decode_bkg = DecodeBkg(cfg, [200, 200])
 
         self.w_transition = WTransition(cfg, 50)
