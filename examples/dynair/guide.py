@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from dyn3d_modules import MLP, split_at
+from modules import MLP, split_at
 from utils import assert_size, batch_expand
 from transform import image_to_window
 

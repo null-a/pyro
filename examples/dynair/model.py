@@ -6,7 +6,7 @@ import pyro.poutine as poutine
 import pyro.distributions as dist
 
 from cache import Cache, cached
-from dyn3d_modules import MLP
+from modules import MLP
 from utils import assert_size
 from transform import window_to_image, over
 

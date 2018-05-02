@@ -11,7 +11,7 @@ import pyro.optim as optim
 import torch
 import torch.nn as nn
 
-from dyn3d import Config, DynAIR
+from dynair import Config, DynAIR
 from model import Model
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
