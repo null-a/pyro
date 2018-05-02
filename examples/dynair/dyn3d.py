@@ -48,7 +48,7 @@ def cached(f):
     return cached_f
 
 
-class PropCache():
+class Cache():
     def __init__(self):
         # TODO: Figure out why this didn't work with a
         # WeakValueDictionary.
@@ -106,11 +106,11 @@ class DynAIR(nn.Module):
         if use_cuda:
             self.cuda()
 
-    def clear_caches(self):
+    def clear_cache(self):
         for m in self.modules_with_cache:
             m.cache.clear()
 
-    def stats_for_caches(self):
+    def cache_stats(self):
         return dict((m._get_name(), m.cache.stats())
                     for m in self.modules_with_cache)
 
@@ -138,7 +138,7 @@ class DynAIR(nn.Module):
             extra_wss.append(ws)
             extra_zss.append(zs)
 
-        self.clear_caches()
+        self.clear_cache()
 
         return frames, wss, extra_frames, extra_wss
 
@@ -168,7 +168,7 @@ def window_to_image(arch_cfg, w, windows):
 class Model(nn.Module):
     def __init__(self, arch_cfg, use_cuda=False):
         super(Model, self).__init__()
-        self.cache = PropCache()
+        self.cache = Cache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
 
         # TODO: avoid copying all these as properties.
@@ -507,7 +507,7 @@ class GuideW_ObjRnn(nn.Module):
         x_embed_size = 800
         rnn_hid_sizes = [200]
 
-        self.cache = PropCache()
+        self.cache = Cache()
 
         self._x_embed = mod.MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
 
@@ -742,9 +742,9 @@ def run_svi(dynair, X_split, Y_split, num_epochs, vis_hook, output_path):
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
             if not vis_hook is None:
                 vis_hook(X_vis, Y_vis, i, j, num_batches*i+j)
-            dynair.clear_caches()
+            dynair.clear_cache()
             print()
-            pp(dynair.stats_for_caches())
+            pp(dynair.cache_stats())
 
 
         if (i+1) % 1000 == 0:
