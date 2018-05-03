@@ -107,7 +107,7 @@ class Guide(nn.Module):
         # following the prior?), while also supporting optional delta
         # style.
         assert not self.delta_w
-        w_mean = w_mean_or_delta + torch.tensor([3.0, 0, 0])
+        w_mean = w_mean_or_delta + torch.tensor([3.0, 0, 0]).type_as(w_mean_or_delta)
         return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
     def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
