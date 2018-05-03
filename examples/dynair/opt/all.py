@@ -38,6 +38,20 @@ def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
     print()
     pp(dynair.cache_stats())
 
+def load_bkg_params(dynair, path):
+    print('loading {}'.format(path))
+    state_dict = dict((bkg_to_dynair_name_map(k),v) for k, v in
+                      torch.load(path, map_location=lambda storage, loc: storage).items())
+    dynair.load_state_dict(state_dict, strict=False)
+
+def bkg_to_dynair_name_map(name):
+    if name.startswith('encode'):
+        return name.replace('encode', 'guide.guide_y', 1)
+    elif name.startswith('decode'):
+        return name.replace('decode', 'model._decode_bkg', 1)
+    else:
+        raise 'unexpected parameter name encountered'
+
 def opt_all(X_split, Y_split, cfg, args, output_path):
 
     X_train, X_test = X_split
@@ -71,6 +85,9 @@ def opt_all(X_split, Y_split, cfg, args, output_path):
                   use_cuda=args.cuda)
 
     dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
+
+    if args.bkg_params is not None:
+        load_bkg_params(dynair, args.bkg_params)
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs,
             partial(hook, args.vis, visdom.Visdom(), dynair, X_vis, Y_vis),

@@ -35,6 +35,9 @@ if __name__ == '__main__':
     all_parser.set_defaults(main=opt_all)
     bkg_parser.set_defaults(main=opt_bkg)
 
+    all_parser.add_argument('--bkg-params',
+                            help='path to pre-trained background model/guide parameters')
+
     args = parser.parse_args()
 
     data = load_data(args.data_path)
