@@ -103,6 +103,10 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
         print()
         pp(dynair.cache_stats())
 
+    if args.cuda:
+        X_train.cuda()
+        Y_train.cuda()
+
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path,
             elbo_scale=1.0/(cfg.seq_length*batch_size))
 
@@ -133,7 +137,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path, args.cuda)
+    data = load_data(args.data_path)
     X, Y = data # (sequences, counts)
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)

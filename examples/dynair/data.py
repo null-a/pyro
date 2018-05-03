@@ -8,12 +8,12 @@ def split(t, batch_size, num_test_batches):
     assert n % batch_size == 0
     num_train_batches = (n // batch_size) - num_test_batches
     assert batch_size * (num_train_batches + num_test_batches) == n
-    batches = t.chunk(n // batch_size)
+    batches = torch.stack(t.chunk(n // batch_size))
     train = batches[0:num_train_batches]
     test = batches[num_train_batches:(num_train_batches+num_test_batches)]
     return train, test
 
-def load_data(data_path, use_cuda):
+def load_data(data_path):
     print('loading {}'.format(data_path))
     data = np.load(data_path)
     X_np = data['X']
@@ -25,9 +25,6 @@ def load_data(data_path, use_cuda):
     X = X[:,:,0:3]
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
     assert X.size(0) == Y.size(0)
-    if use_cuda:
-        X = X.cuda()
-        Y = Y.cuda()
     return X, Y
 
 def data_params(data):
