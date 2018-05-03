@@ -7,7 +7,7 @@ from guide import ParamY
 from opt.run_svi import run_svi
 from vis import frames_to_rgb_list
 
-def opt_bkg(X_split, Y_split, cfg, args, output_path):
+def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis = visdom.Visdom()
     vae = VAE(ParamY(cfg), DecodeBkg(cfg), cfg.y_size, use_cuda=args.cuda)
 

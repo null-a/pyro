@@ -8,6 +8,7 @@ from dynair import DynAIR
 from model import Model, DecodeBkg
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from opt.run_svi import run_svi
+from opt.utils import md5sum
 from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
@@ -56,7 +57,7 @@ def is_bkg_param(module_name, param_name):
     return ((module_name == 'guide' and param_name.startswith('guide_y')) or
             (module_name == 'model' and param_name.startswith('_decode_bkg')))
 
-def opt_all(X_split, Y_split, cfg, args, output_path):
+def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
@@ -92,6 +93,10 @@ def opt_all(X_split, Y_split, cfg, args, output_path):
 
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
+        log_to_cond('bkg params path: {}'.format(args.bkg_params))
+        log_to_cond('bkg params md5: {}'.format(md5sum(args.bkg_params)))
+
+    log_to_cond('fixed bkg params: {}'.format(args.fix_bkg_params))
 
     def optim_args(module_name, param_name):
         if args.fix_bkg_params and is_bkg_param(module_name, param_name):
