@@ -163,7 +163,7 @@ if __name__ == '__main__':
     parser.add_argument('--window-size', type=int, default=22,
                         help='size of the object window')
 
-    subparsers = parser.add_subparsers(help='target')
+    subparsers = parser.add_subparsers(dest='target')
     all_parser = subparsers.add_parser('all')
     bkg_parser = subparsers.add_parser('bkg')
     all_parser.set_defaults(main=opt_all)
@@ -187,6 +187,7 @@ if __name__ == '__main__':
     print('output path: {}'.format(output_path))
     log_to_cond = partial(append_line, os.path.join(output_path, 'condition.txt'))
     log_to_cond(describe_env())
+    log_to_cond('target: {}'.format(args.target))
     log_to_cond('data path: {}'.format(args.data_path))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
