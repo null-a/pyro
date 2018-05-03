@@ -42,7 +42,7 @@ class Model(nn.Module):
         self.likelihood_sd = 0.3
 
         self.decode_obj = DecodeObj(cfg, [100, 100])
-        self._decode_bkg = DecodeBkg(cfg, [200, 200])
+        self._decode_bkg = DecodeBkg(cfg)
 
         self.w_transition = WTransition(cfg, 50)
         self.z_transition = ZTransition(cfg, 50)
@@ -259,11 +259,11 @@ class DecodeObj(nn.Module):
 
 
 class DecodeBkg(nn.Module):
-    def __init__(self, cfg, hids):
+    def __init__(self, cfg):
         super(DecodeBkg, self).__init__()
         self.num_chan = cfg.num_chan
         self.image_size = cfg.image_size
-        self.mlp = MLP(cfg.y_size, hids + [cfg.num_chan * cfg.image_size**2], nn.ReLU)
+        self.mlp = MLP(cfg.y_size, [200, 200, cfg.num_chan * cfg.image_size**2], nn.ReLU)
 
     def forward(self, y):
         batch_size = y.size(0)
