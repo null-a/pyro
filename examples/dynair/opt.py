@@ -16,7 +16,7 @@ from vae import VAE
 from model import Model, DecodeBkg
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
-from optutils import make_output_dir, append_line, describe_env, md5sum, throttle
+from opt.utils import make_output_dir, append_line, describe_env, md5sum, throttle
 from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
