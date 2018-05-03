@@ -37,6 +37,8 @@ if __name__ == '__main__':
 
     all_parser.add_argument('--bkg-params',
                             help='path to pre-trained background model/guide parameters')
+    all_parser.add_argument('--fix-bkg-params', action='store_true', default=False,
+                            help='do not optimise the background model/guide parameters')
 
     args = parser.parse_args()
 

@@ -52,6 +52,10 @@ def bkg_to_dynair_name_map(name):
     else:
         raise 'unexpected parameter name encountered'
 
+def is_bkg_param(module_name, param_name):
+    return ((module_name == 'guide' and param_name.startswith('guide_y')) or
+            (module_name == 'model' and param_name.startswith('_decode_bkg')))
+
 def opt_all(X_split, Y_split, cfg, args, output_path):
 
     X_train, X_test = X_split
@@ -90,7 +94,10 @@ def opt_all(X_split, Y_split, cfg, args, output_path):
         load_bkg_params(dynair, args.bkg_params)
 
     def optim_args(module_name, param_name):
-        return {'lr': 1e-4}
+        if args.fix_bkg_params and is_bkg_param(module_name, param_name):
+            return {'lr': 0.0}
+        else:
+            return {'lr': 1e-4}
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
             partial(hook, args.vis, visdom.Visdom(), dynair, X_vis, Y_vis),
