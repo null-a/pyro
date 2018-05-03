@@ -12,7 +12,8 @@ import torch
 import torch.nn as nn
 
 from dynair import Config, DynAIR
-from model import Model
+from vae import VAE
+from model import Model, DecodeBkg
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
 from optutils import make_output_dir, append_line, describe_env, md5sum
@@ -111,6 +112,30 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
             elbo_scale=1.0/(cfg.seq_length*batch_size))
 
 
+def opt_bkg(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
+    vis = visdom.Visdom()
+    vae = VAE(ParamY(cfg), DecodeBkg(cfg), cfg.y_size)
+
+    X_train, _ = X_split
+    # Extract backgrounds from the input sequences.
+    batches = X_train.mode(2)[0].view(X_train.size()[0:2] + (-1,))
+    batch_size = batches.size(1)
+    vis_batch = batches[0, 0:10]
+
+    if args.vis > 0:
+        vis.images(vis_batch.view(-1, cfg.num_chan, cfg.image_size, cfg.image_size), nrow=10)
+
+    def hook(epoch, batch, step):
+        if args.vis > 0 and (step + 1) % args.vis == 0:
+            x_mean = vae.recon(vis_batch).view(-1, cfg.num_chan, cfg.image_size, cfg.image_size)
+            vis.images(frames_to_rgb_list(x_mean), nrow=10)
+
+    if args.cuda:
+        batches = batches.cuda()
+
+    run_svi(vae, batches, args.epochs, hook, output_path, elbo_scale=1.0/batch_size)
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -132,7 +157,9 @@ if __name__ == '__main__':
 
     subparsers = parser.add_subparsers(help='target')
     all_parser = subparsers.add_parser('all')
+    bkg_parser = subparsers.add_parser('bkg')
     all_parser.set_defaults(main=opt_all)
+    bkg_parser.set_defaults(main=opt_bkg)
 
 
     args = parser.parse_args()
