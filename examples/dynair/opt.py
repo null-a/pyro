@@ -58,4 +58,4 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond(cfg)
 
-    args.main(data, X_split, Y_split, cfg, args, output_path)
+    args.main(X_split, Y_split, cfg, args, output_path)

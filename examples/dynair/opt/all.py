@@ -38,7 +38,7 @@ def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
     print()
     pp(dynair.cache_stats())
 
-def opt_all(data, X_split, Y_split, cfg, args, output_path):
+def opt_all(X_split, Y_split, cfg, args, output_path):
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
