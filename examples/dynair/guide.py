@@ -101,7 +101,13 @@ class Guide(nn.Module):
         return pyro.sample('y', dist.Normal(y_mean, y_sd).independent(1))
 
     def sample_w(self, t, i, w_prev, w_mean_or_delta, w_sd):
-        w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
+        #w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
+        # TODO: Figure out how to init. the guide such that we have
+        # sensible window scales at the start of optimisation (e.g.
+        # following the prior?), while also supporting optional delta
+        # style.
+        assert not self.delta_w
+        w_mean = w_mean_or_delta + torch.tensor([3.0, 0, 0])
         return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
     def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
