@@ -34,7 +34,7 @@ def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
     if period > 0 and (step+1) % period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
 
-def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
+def opt_all(data, X_split, Y_split, cfg, args, output_path):
     vis = visdom.Visdom()
 
     X_train, X_test = X_split
