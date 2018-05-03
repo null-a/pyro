@@ -35,8 +35,8 @@ def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
     if vis_period > 0 and (step+1) % vis_period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
     dynair.clear_cache()
-    print()
-    pp(dynair.cache_stats())
+    # print()
+    # pp(dynair.cache_stats())
 
 def load_bkg_params(dynair, path):
     print('loading {}'.format(path))
