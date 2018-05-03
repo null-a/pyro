@@ -1,12 +1,8 @@
 import os
 import argparse
-import time
-from datetime import timedelta
 from pprint import pprint as pp
 from functools import partial
 import visdom
-from pyro.infer import SVI, Trace_ELBO
-import pyro.optim as optim
 
 import torch
 import torch.nn as nn
@@ -16,7 +12,8 @@ from vae import VAE
 from model import Model, DecodeBkg
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
-from opt.utils import make_output_dir, append_line, describe_env, md5sum, throttle
+from opt.utils import make_output_dir, append_line, describe_env, md5sum
+from opt.run_svi import run_svi
 from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
@@ -43,37 +40,6 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
 def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
     if period > 0 and (step+1) % period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
-
-def run_svi(mod, batches, num_epochs, hook, output_path, save_period, elbo_scale=1.0):
-    t0 = time.time()
-    num_batches = len(batches)
-
-    def per_param_optim_args(module_name, param_name):
-        return {'lr': 1e-4}
-
-    svi = SVI(mod.model, mod.guide,
-              optim.Adam(per_param_optim_args),
-              loss=Trace_ELBO())
-
-    for i in range(num_epochs):
-        for j, batch in enumerate(batches):
-            step = num_batches*i+j
-            loss = svi.step(batch)
-            elbo = -loss * elbo_scale
-            report_progress(i, j, step, elbo, t0, output_path)
-            if not hook is None:
-                hook(i, j, step)
-
-        if save_period > 0 and (i+1) % save_period == 0:
-            torch.save(mod.state_dict(),
-                       os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
-
-@throttle(1)
-def report_progress(i, j, step, elbo, t0, output_path):
-    elapsed = timedelta(seconds=time.time() - t0)
-    print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
-    append_line(os.path.join(output_path, 'elbo.csv'),
-                '{:.2f},{:.1f},{}'.format(elbo, elapsed.total_seconds(), step))
 
 def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis = visdom.Visdom()
