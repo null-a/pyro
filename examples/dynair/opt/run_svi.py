@@ -4,6 +4,7 @@ from functools import wraps
 import time
 from datetime import timedelta
 
+import torch
 from pyro.infer import SVI, Trace_ELBO
 import pyro.optim as optim
 
