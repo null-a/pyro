@@ -1,3 +1,4 @@
+from functools import partial
 from pprint import pprint as pp
 
 import visdom
@@ -30,12 +31,14 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
         vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
-    if period > 0 and (step+1) % period == 0:
+def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
+    if vis_period > 0 and (step+1) % vis_period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
+    dynair.clear_cache()
+    print()
+    pp(dynair.cache_stats())
 
 def opt_all(data, X_split, Y_split, cfg, args, output_path):
-    vis = visdom.Visdom()
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
@@ -69,11 +72,7 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path):
 
     dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
 
-    def hook(epoch, batch, step):
-        vis_hook(args.vis, vis, dynair, X_vis, Y_vis, epoch, batch, step)
-        dynair.clear_cache()
-        print()
-        pp(dynair.cache_stats())
-
-    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path, args.s,
+    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs,
+            partial(hook, args.vis, visdom.Visdom(), dynair, X_vis, Y_vis),
+            output_path, args.s,
             elbo_scale=1.0/(cfg.seq_length*batch_size))
