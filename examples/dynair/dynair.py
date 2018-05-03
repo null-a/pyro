@@ -47,11 +47,9 @@ class DynAIR(nn.Module):
         return dict((m._get_name(), m.cache.stats())
                     for m in self.modules_with_cache)
 
-
-    def infer(self, batch, obj_counts, num_extra_frames=0):
-        batch_size = batch.size(0)
-        trace = poutine.trace(self.guide).get_trace(batch_size, batch, obj_counts)
-        frames, _, _ = poutine.replay(self.model, trace)(batch_size, batch, obj_counts)
+    def infer(self, seqs, obj_counts, num_extra_frames=0):
+        trace = poutine.trace(self.guide).get_trace((seqs, obj_counts))
+        frames, _, _ = poutine.replay(self.model, trace)((seqs, obj_counts))
         wss, zss, y = trace.nodes['_RETURN']['value']
 
         bkg = self.model.decode_bkg(y)

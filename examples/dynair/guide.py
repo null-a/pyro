@@ -37,15 +37,18 @@ class Guide(nn.Module):
         self.guide_y = arch['guide_y']
         self.guide_z = arch['guide_z']
 
-    def forward(self, batch_size, batch, obj_counts):
+    def forward(self, batch):
 
         pyro.module('guide', self)
         # for name, _ in self.named_parameters():
         #     print(name)
 
-        assert_size(batch, (batch_size,
-                            self.cfg.seq_length, self.cfg.num_chan,
-                            self.cfg.image_size, self.cfg.image_size))
+        seqs, obj_counts = batch
+        batch_size = seqs.size(0)
+
+        assert_size(seqs, (batch_size,
+                           self.cfg.seq_length, self.cfg.num_chan,
+                           self.cfg.image_size, self.cfg.image_size))
 
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
@@ -57,11 +60,11 @@ class Guide(nn.Module):
 
             # NOTE: Here we're guiding y based on the contents of the
             # first frame only.
-            y = self.sample_y(*self.guide_y(batch[:, 0]))
+            y = self.sample_y(*self.guide_y(seqs[:, 0]))
 
             for t in range(self.cfg.seq_length):
 
-                x = batch[:, t]
+                x = seqs[:, t]
                 w_guide_state_prev = None
                 mask_prev = None
 

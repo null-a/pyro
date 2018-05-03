@@ -56,17 +56,19 @@ class Model(nn.Module):
     def decode_bkg(self, *args, **kwargs):
         return self._decode_bkg(*args, **kwargs)
 
-    def forward(self, batch_size, batch, obj_counts):
+    def forward(self, batch):
 
         pyro.module('model', self)
         # for name, _ in self.named_parameters():
         #     print(name)
 
-        assert (batch is None) == (obj_counts is None)
-        if not batch is None:
-            assert_size(batch, (batch_size,
-                                self.cfg.seq_length, self.cfg.num_chan,
-                                self.cfg.image_size, self.cfg.image_size))
+        seqs, obj_counts = batch
+        batch_size = obj_counts.size(0)
+
+        if not seqs is None:
+            assert_size(seqs, (batch_size,
+                               self.cfg.seq_length, self.cfg.num_chan,
+                               self.cfg.image_size, self.cfg.image_size))
             assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
@@ -94,7 +96,7 @@ class Model(nn.Module):
                 wss.append(ws)
                 frames.append(frame_mean)
 
-                obs = batch[:,t] if not batch is None else None
+                obs = seqs[:,t] if not seqs is None else None
                 self.likelihood(t, frame_mean, obs)
 
         return frames, wss, zss

@@ -43,11 +43,9 @@ def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
     if period > 0 and (step+1) % period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
 
-def run_svi(mod, X_train, Y_train, num_epochs, hook, output_path, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, hook, output_path, elbo_scale=1.0):
     t0 = time.time()
-
-    num_batches = len(X_train)
-    batch_size = X_train[0].size(0)
+    num_batches = len(batches)
 
     def per_param_optim_args(module_name, param_name):
         return {'lr': 1e-4}
@@ -57,10 +55,9 @@ def run_svi(mod, X_train, Y_train, num_epochs, hook, output_path, elbo_scale=1.0
               loss=Trace_ELBO())
 
     for i in range(num_epochs):
-
-        for j, (X_batch, Y_batch) in enumerate(zip(X_train, Y_train)):
-            loss = svi.step(batch_size, X_batch, Y_batch)
-            elbo = (-loss / batch_size) * elbo_scale
+        for j, batch in enumerate(batches):
+            loss = svi.step(batch)
+            elbo = -loss * elbo_scale
             elapsed = timedelta(seconds=time.time()- t0)
             print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
             append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
@@ -76,6 +73,8 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
+
+    batch_size = X_train[0].size(0)
 
     # Produce visualisations for the first train & test data points
     # where possible.
@@ -104,8 +103,8 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
         print()
         pp(dynair.cache_stats())
 
-    run_svi(dynair, X_train, Y_train, args.epochs, hook, output_path,
-            elbo_scale=1.0/cfg.seq_length)
+    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path,
+            elbo_scale=1.0/(cfg.seq_length*batch_size))
 
 
 if __name__ == '__main__':
