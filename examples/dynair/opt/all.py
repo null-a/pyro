@@ -65,7 +65,7 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
     if args.cuda:
         X_train = X_train.cuda()
         Y_train = Y_train.cuda()
-        X_tes = X_test.cuda()
+        X_test = X_test.cuda()
         Y_test = Y_test.cuda()
 
     batch_size = X_train[0].size(0)
