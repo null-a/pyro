@@ -1,114 +1,12 @@
 import os
 import argparse
-from pprint import pprint as pp
 from functools import partial
-import visdom
 
-import torch
-import torch.nn as nn
-
-from dynair import Config, DynAIR
-from vae import VAE
-from model import Model, DecodeBkg
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
+from dynair import Config
 from data import split, load_data, data_params
 from opt.utils import make_output_dir, append_line, describe_env, md5sum
-from opt.run_svi import run_svi
-from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
-
-def run_vis(vis, dynair, X, Y, epoch, batch):
-    n = X.size(0)
-
-    frames, wss, extra_frames, extra_wss = dynair.infer(X, Y, 15)
-
-    frames = frames_to_tensor(frames)
-    ws = latents_to_tensor(wss)
-    extra_frames = frames_to_tensor(extra_frames)
-    extra_ws = latents_to_tensor(extra_wss)
-
-    for k in range(n):
-        out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k], Y[k])
-        vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
-                   opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
-        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
-                   opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
-
-        out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k], Y[k])
-        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
-                   opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
-
-def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
-    if period > 0 and (step+1) % period == 0:
-        run_vis(vis, dynair, X, Y, epoch, batch)
-
-def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
-    vis = visdom.Visdom()
-
-    X_train, X_test = X_split
-    Y_train, Y_test = Y_split
-
-    if args.cuda:
-        X_train = X_train.cuda()
-        Y_train = Y_train.cuda()
-        X_tes = X_test.cuda()
-        Y_test = Y_test.cuda()
-
-    batch_size = X_train[0].size(0)
-
-    # Produce visualisations for the first train & test data points
-    # where possible.
-    if len(X_test) > 0:
-        X_vis = torch.cat((X_train[0][0:1], X_test[0][0:1]))
-        Y_vis = torch.cat((Y_train[0][0:1], Y_test[0][0:1]))
-    else:
-        X_vis = X_train[0][0:1]
-        Y_vis = Y_train[0][0:1]
-
-    model = Model(cfg,
-                  delta_w=True, # Previous experiment use delta style here only.
-                  use_cuda=args.cuda)
-    guide = Guide(cfg,
-                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
-                       #guide_w=GuideW_ImageSoFar(cfg, model),
-                       guide_y=ParamY(cfg),
-                       guide_z=GuideZ(cfg, dedicated_t0=False)),
-                  use_cuda=args.cuda)
-
-    dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
-
-    def hook(epoch, batch, step):
-        vis_hook(args.vis, vis, dynair, X_vis, Y_vis, epoch, batch, step)
-        dynair.clear_cache()
-        print()
-        pp(dynair.cache_stats())
-
-    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path, args.s,
-            elbo_scale=1.0/(cfg.seq_length*batch_size))
-
-
-def opt_bkg(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
-    vis = visdom.Visdom()
-    vae = VAE(ParamY(cfg), DecodeBkg(cfg), cfg.y_size, use_cuda=args.cuda)
-
-    X_train, _ = X_split
-    # Extract backgrounds from the input sequences.
-    batches = X_train.mode(2)[0].view(X_train.size()[0:2] + (-1,))
-    if args.cuda:
-        batches = batches.cuda()
-
-    vis_batch = batches[0, 0:10]
-    batch_size = batches.size(1)
-
-    if args.vis > 0:
-        vis.images(vis_batch.cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size), nrow=10)
-
-    def hook(epoch, batch, step):
-        if args.vis > 0 and (step + 1) % args.vis == 0:
-            x_mean = vae.recon(vis_batch).cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size)
-            vis.images(frames_to_rgb_list(x_mean), nrow=10)
-
-    run_svi(vae, batches, args.epochs, hook, output_path, args.s, elbo_scale=1.0/batch_size)
-
+from opt.all import opt_all
+from opt.bkg import opt_bkg
 
 if __name__ == '__main__':
 
@@ -136,7 +34,6 @@ if __name__ == '__main__':
     bkg_parser = subparsers.add_parser('bkg')
     all_parser.set_defaults(main=opt_all)
     bkg_parser.set_defaults(main=opt_bkg)
-
 
     args = parser.parse_args()
 
