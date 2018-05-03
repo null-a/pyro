@@ -89,7 +89,10 @@ def opt_all(X_split, Y_split, cfg, args, output_path):
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
 
-    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs,
+    def optim_args(module_name, param_name):
+        return {'lr': 1e-4}
+
+    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
             partial(hook, args.vis, visdom.Visdom(), dynair, X_vis, Y_vis),
             output_path, args.s,
             elbo_scale=1.0/(cfg.seq_length*batch_size))

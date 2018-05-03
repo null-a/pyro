@@ -28,4 +28,7 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path):
             x_mean = vae.recon(vis_batch).cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size)
             vis.images(frames_to_rgb_list(x_mean), nrow=10)
 
-    run_svi(vae, batches, args.epochs, hook, output_path, args.s, elbo_scale=1.0/batch_size)
+    optim_args = {'lr': 1e-4}
+
+    run_svi(vae, batches, args.epochs, optim_args, hook,
+            output_path, args.s, elbo_scale=1.0/batch_size)

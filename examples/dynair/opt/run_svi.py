@@ -9,15 +9,12 @@ import pyro.optim as optim
 
 from opt.utils import append_line
 
-def run_svi(mod, batches, num_epochs, hook, output_path, save_period, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
-    def per_param_optim_args(module_name, param_name):
-        return {'lr': 1e-4}
-
     svi = SVI(mod.model, mod.guide,
-              optim.Adam(per_param_optim_args),
+              optim.Adam(optim_args),
               loss=Trace_ELBO())
 
     for i in range(num_epochs):
