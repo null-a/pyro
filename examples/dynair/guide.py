@@ -162,12 +162,12 @@ class GuideW_ObjRnn(nn.Module):
     def __init__(self, cfg, dedicated_t0):
         super(GuideW_ObjRnn, self).__init__()
 
-        x_embed_size = 800
+        x_embed_size = 200
         rnn_hid_sizes = [200]
 
         self.cache = Cache()
 
-        self._x_embed = MLP(cfg.x_size, [800, x_embed_size], nn.ReLU, True)
+        self._x_embed = MLP(cfg.x_size, [500, x_embed_size], nn.ReLU, True)
 
         self.w_param = ParamW(
             x_embed_size + cfg.w_size + cfg.z_size, # input size
