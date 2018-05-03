@@ -3,6 +3,7 @@ import subprocess
 import time
 import torch
 from hashlib import md5
+from functools import wraps
 
 def git_rev():
     return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode().strip()
@@ -46,3 +47,19 @@ def md5sum(fn):
         for chunk in iter(lambda: f.read(128 * hash.block_size), b""):
             hash.update(chunk)
     return hash.hexdigest()
+
+class throttle(object):
+    def __init__(self, period):
+        self.period = period
+        self.time_of_last_call = 0
+
+    def __call__(self, f):
+        @wraps(f)
+        def throttled(*args, **kwargs):
+            now = time.time()
+
+            if now - self.time_of_last_call > self.period:
+                self.time_of_last_call = now
+                return f(*args, **kwargs)
+
+        return throttled

@@ -16,7 +16,7 @@ from vae import VAE
 from model import Model, DecodeBkg
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from data import split, load_data, data_params
-from optutils import make_output_dir, append_line, describe_env, md5sum
+from optutils import make_output_dir, append_line, describe_env, md5sum, throttle
 from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
@@ -57,17 +57,23 @@ def run_svi(mod, batches, num_epochs, hook, output_path, save_period, elbo_scale
 
     for i in range(num_epochs):
         for j, batch in enumerate(batches):
+            step = num_batches*i+j
             loss = svi.step(batch)
             elbo = -loss * elbo_scale
-            elapsed = timedelta(seconds=time.time()- t0)
-            print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
-            append_line(os.path.join(output_path, 'elbo.csv'), '{:.1f},{:.2f}'.format(elapsed.total_seconds(), elbo))
+            report_progress(i, j, step, elbo, t0, output_path)
             if not hook is None:
-                hook(i, j, num_batches*i+j)
+                hook(i, j, step)
 
         if save_period > 0 and (i+1) % save_period == 0:
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
+
+@throttle(1)
+def report_progress(i, j, step, elbo, t0, output_path):
+    elapsed = timedelta(seconds=time.time() - t0)
+    print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
+    append_line(os.path.join(output_path, 'elbo.csv'),
+                '{:.2f},{:.1f},{}'.format(elbo, elapsed.total_seconds(), step))
 
 def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis = visdom.Visdom()

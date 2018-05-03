@@ -8,23 +8,28 @@ plt.style.use('seaborn-ticks')
 
 def read(path):
     with open(path) as f:
-        data = [[float(c.strip()) for c in line.split(',')] for line in f]
+        data = [parse_line(line) for line in f]
     return tuple(zip(*data))
+
+def parse_line(line):
+    strs = [col.strip() for col in line.split(',')]
+    return (float(strs[0]), # elbo
+            float(strs[1]), # wall
+            int(strs[2]))   # step
 
 def main(path, num_batches):
 
     runs = [(fn,) + read(fn) for fn in glob.glob(path)]
 
-    for (fn, wall, elbo) in runs:
+    # print(runs)
+    # assert False
+
+    for (fn, elbo, wall, step) in runs:
 
         label = dirname(abspath(fn)).split(os.sep)[-1]
 
-        xs = range(len(elbo))
-        if not num_batches is None:
-            xs = [(float(x) / num_batches) for x in xs]
-
-        plt.plot(xs, elbo, label=label)
-        plt.xlabel('steps' if num_batches is None else 'epochs')
+        plt.plot(step, elbo, label=label)
+        plt.xlabel('step')
         plt.ylabel('elbo')
 
     plt.grid()
