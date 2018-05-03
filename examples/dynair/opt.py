@@ -44,7 +44,7 @@ def vis_hook(period, vis, dynair, X, Y, epoch, batch, step):
     if period > 0 and (step+1) % period == 0:
         run_vis(vis, dynair, X, Y, epoch, batch)
 
-def run_svi(mod, batches, num_epochs, hook, output_path, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, hook, output_path, save_period, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
@@ -65,7 +65,7 @@ def run_svi(mod, batches, num_epochs, hook, output_path, elbo_scale=1.0):
             if not hook is None:
                 hook(i, j, num_batches*i+j)
 
-        if (i+1) % 1000 == 0:
+        if save_period > 0 and (i+1) % save_period == 0:
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
@@ -108,7 +108,7 @@ def opt_all(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
         X_train.cuda()
         Y_train.cuda()
 
-    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path,
+    run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, hook, output_path, args.s,
             elbo_scale=1.0/(cfg.seq_length*batch_size))
 
 
@@ -133,7 +133,7 @@ def opt_bkg(data, X_split, Y_split, cfg, args, output_path, log_to_cond):
     if args.cuda:
         batches = batches.cuda()
 
-    run_svi(vae, batches, args.epochs, hook, output_path, elbo_scale=1.0/batch_size)
+    run_svi(vae, batches, args.epochs, hook, output_path, args.s, elbo_scale=1.0/batch_size)
 
 
 if __name__ == '__main__':
@@ -148,6 +148,8 @@ if __name__ == '__main__':
     parser.add_argument('--vis', type=int, default=0,
                         help='visualise inferences during optimisation (zero disables, otherwise specifies period)')
     parser.add_argument('-o', default='./runs', help='base output path')
+    parser.add_argument('-s', type=int, default=0,
+                        help='save parameters (zero disables, otherwise specifies period in epochs')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
