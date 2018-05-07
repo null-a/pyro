@@ -13,7 +13,7 @@ from opt.utils import append_line
 
 def run_svi(mod, batches, num_epochs, optim_args, hook,
             output_path, save_period, progress_period,
-            record_grad_norm, elbo_scale=1.0):
+            record_grad_norm, clip_threshold, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
@@ -24,7 +24,7 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
     svi = SVI(mod.model, mod.guide,
               optim.Adam(optim_args),
               loss=Trace_ELBO(),
-              param_hook=partial(param_hook, grad_norm_dict, record_grad_norm))
+              param_hook=partial(param_hook, grad_norm_dict, record_grad_norm, clip_threshold))
 
     for i in range(num_epochs):
         for j, batch in enumerate(batches):
@@ -39,9 +39,9 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
-def param_hook(grad_norm_dict, record_grad_norm, params):
+def param_hook(grad_norm_dict, record_grad_norm, clip_threshold, params):
     if record_grad_norm:
-        grad_norm_dict['value'] = clip_grad_norm_(params, float('inf'))
+        grad_norm_dict['value'] = clip_grad_norm_(params, clip_threshold)
 
 class throttle(object):
     def __init__(self, period):

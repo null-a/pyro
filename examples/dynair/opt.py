@@ -26,6 +26,8 @@ if __name__ == '__main__':
                         help='record norm of gradient during optimisation')
     parser.add_argument('-t', type=float, default=0.0,
                         help='throttle progress updates')
+    parser.add_argument('-c', type=float, default=float('inf'),
+                        help='threshold at which to clip the l2 norm of the gradient')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
@@ -65,6 +67,7 @@ if __name__ == '__main__':
     log_to_cond('data path: {}'.format(args.data_path))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
+    log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
     log_to_cond(cfg)
 
     args.main(X_split, Y_split, cfg, args, output_path, log_to_cond)
