@@ -10,13 +10,17 @@ import pyro.optim as optim
 
 from opt.utils import append_line
 
-def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period, record_grad_norm, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, optim_args, hook,
+            output_path, save_period, progress_period,
+            record_grad_norm, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
     grad_norm_dict = dict(value=0)
     if record_grad_norm:
         add_grad_hooks(mod, grad_norm_dict)
+
+    throttled_report_progress = throttle(progress_period)(report_progress)
 
     svi = SVI(mod.model, mod.guide,
               optim.Adam(optim_args),
@@ -29,7 +33,7 @@ def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period
             grad_norm = grad_norm_dict['value']
             grad_norm_dict['value'] = 0
             elbo = -loss * elbo_scale
-            report_progress(i, j, step, elbo, grad_norm, t0, output_path)
+            throttled_report_progress(i, j, step, elbo, grad_norm, t0, output_path)
             if not hook is None:
                 hook(i, j, step)
 
@@ -63,7 +67,6 @@ class throttle(object):
 
         return throttled
 
-@throttle(1)
 def report_progress(i, j, step, elbo, grad_norm, t0, output_path):
     elapsed = timedelta(seconds=time.time() - t0)
     print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')

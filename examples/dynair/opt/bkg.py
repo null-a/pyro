@@ -31,4 +31,4 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     optim_args = {'lr': 1e-4}
 
     run_svi(vae, batches, args.epochs, optim_args, hook,
-            output_path, args.s, args.g, elbo_scale=1.0/batch_size)
+            output_path, args.s, args.t, args.g, elbo_scale=1.0/batch_size)

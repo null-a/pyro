@@ -24,6 +24,8 @@ if __name__ == '__main__':
                         help='save parameters (zero disables, otherwise specifies period in epochs')
     parser.add_argument('-g', action='store_true', default=False,
                         help='record norm of gradient during optimisation')
+    parser.add_argument('-t', type=float, default=0.0,
+                        help='throttle progress updates')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
