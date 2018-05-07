@@ -33,10 +33,13 @@ class SVI(object):
                  optim,
                  loss,
                  loss_and_grads=None,
+                 param_hook=None,
                  **kwargs):
         self.model = model
         self.guide = guide
         self.optim = optim
+
+        self.param_hook = param_hook
 
         if isinstance(loss, ELBO):
             self.loss = loss.loss
@@ -76,6 +79,9 @@ class SVI(object):
 
         params = set(site["value"].unconstrained()
                      for site in param_capture.trace.nodes.values())
+
+        if not self.param_hook is None:
+            self.param_hook(params)
 
         # actually perform gradient steps
         # torch.optim objects gets instantiated for any params that haven't been seen yet
