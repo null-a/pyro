@@ -14,8 +14,9 @@ def read(path):
 def parse_line(line):
     strs = [col.strip() for col in line.split(',')]
     return (float(strs[0]), # elbo
-            float(strs[1]), # wall
-            int(strs[2]))   # step
+            float(strs[1]), # grad norm
+            float(strs[2]), # wall
+            int(strs[3]))   # step
 
 def main(path, num_batches):
 
@@ -24,7 +25,7 @@ def main(path, num_batches):
     # print(runs)
     # assert False
 
-    for (fn, elbo, wall, step) in runs:
+    for (fn, elbo, grad_norm, wall, step) in runs:
 
         label = dirname(abspath(fn)).split(os.sep)[-1]
 

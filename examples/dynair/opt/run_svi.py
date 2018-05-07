@@ -1,6 +1,6 @@
 import os
 import time
-from functools import wraps
+from functools import wraps, partial
 import time
 from datetime import timedelta
 
@@ -10,9 +10,13 @@ import pyro.optim as optim
 
 from opt.utils import append_line
 
-def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period, record_grad_norm, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
+
+    grad_norm_dict = dict(value=0)
+    if record_grad_norm:
+        add_grad_hooks(mod, grad_norm_dict)
 
     svi = SVI(mod.model, mod.guide,
               optim.Adam(optim_args),
@@ -22,14 +26,26 @@ def run_svi(mod, batches, num_epochs, optim_args, hook, output_path, save_period
         for j, batch in enumerate(batches):
             step = num_batches*i+j
             loss = svi.step(batch)
+            grad_norm = grad_norm_dict['value']
+            grad_norm_dict['value'] = 0
             elbo = -loss * elbo_scale
-            report_progress(i, j, step, elbo, t0, output_path)
+            report_progress(i, j, step, elbo, grad_norm, t0, output_path)
             if not hook is None:
                 hook(i, j, step)
 
         if save_period > 0 and (i+1) % save_period == 0:
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
+
+# Based on:
+# https://github.com/uber/pyro/blob/5b67518dc1ded8aac59b6dfc51d0892223e8faad/tutorial/source/gmm.ipynb
+def add_grad_hooks(module, grad_norm_dict):
+    def hook(name, counter, value, grad):
+        count = counter['count']
+        grad_norm_dict['value'] += (grad.detach() ** 2).sum().item()
+        counter['count'] += 1
+    for name, value in module.named_parameters():
+        value.register_hook(partial(hook, name, dict(count=0), value))
 
 class throttle(object):
     def __init__(self, period):
@@ -48,8 +64,8 @@ class throttle(object):
         return throttled
 
 @throttle(1)
-def report_progress(i, j, step, elbo, t0, output_path):
+def report_progress(i, j, step, elbo, grad_norm, t0, output_path):
     elapsed = timedelta(seconds=time.time() - t0)
     print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
     append_line(os.path.join(output_path, 'elbo.csv'),
-                '{:.2f},{:.1f},{}'.format(elbo, elapsed.total_seconds(), step))
+                '{:.2f},{:e},{:.1f},{}'.format(elbo, grad_norm, elapsed.total_seconds(), step))

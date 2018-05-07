@@ -106,5 +106,5 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
             partial(hook, args.vis, visdom.Visdom(), dynair, X_vis, Y_vis),
-            output_path, args.s,
+            output_path, args.s, args.g,
             elbo_scale=1.0/(cfg.seq_length*batch_size))

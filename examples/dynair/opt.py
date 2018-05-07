@@ -22,6 +22,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', default='./runs', help='base output path')
     parser.add_argument('-s', type=int, default=0,
                         help='save parameters (zero disables, otherwise specifies period in epochs')
+    parser.add_argument('-g', action='store_true', default=False,
+                        help='record norm of gradient during optimisation')
     parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
