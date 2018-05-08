@@ -64,5 +64,5 @@ class throttle(object):
 def report_progress(i, j, step, elbo, grad_norm, t0, output_path):
     elapsed = timedelta(seconds=time.time() - t0)
     print('\33[2K\repoch={}, batch={}, elbo={:.2f}, elapsed={}'.format(i, j, elbo, elapsed), end='')
-    append_line(os.path.join(output_path, 'elbo.csv'),
+    append_line(os.path.join(output_path, 'log.csv'),
                 '{:.2f},{:e},{:.1f},{}'.format(elbo, grad_norm, elapsed.total_seconds(), step))
