@@ -18,7 +18,7 @@ def parse_line(line):
             float(strs[2]), # wall
             int(strs[3]))   # step
 
-def main(path, num_batches):
+def main(path):
 
     runs = [(fn,) + read(fn) for fn in glob.glob(path)]
 
@@ -53,7 +53,7 @@ def main(path, num_batches):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('path')
-    parser.add_argument('-n', '--num-batches', type=int,
-                        help='number of batches per epoch, shows epochs on x axis')
+    # parser.add_argument('-n', '--num-batches', type=int,
+    #                     help='number of batches per epoch, shows epochs on x axis')
     args = parser.parse_args()
-    main(args.path, args.num_batches)
+    main(args.path)
