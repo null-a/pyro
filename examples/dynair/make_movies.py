@@ -1,5 +1,5 @@
-from dyn3d import DynAIR, load_data, frames_to_rgb_list, latents_to_tensor, frames_to_tensor, overlay_multiple_window_outlines
-
+import argparse
+import json
 import subprocess
 import torch
 import numpy as np
@@ -7,6 +7,11 @@ from matplotlib import pyplot as plt
 import pyro
 import pyro.poutine as poutine
 from PIL import Image, ImageDraw
+
+from dynair import config
+from data import load_data, data_params
+from opt.all import build_module
+from vis import frames_to_tensor, latents_to_tensor, frames_to_rgb_list, overlay_multiple_window_outlines
 
 def show_seq(seq, layout_shape):
     cols, rows = layout_shape
@@ -48,10 +53,10 @@ def make_video(dynair, x, y, out_fn):
     # numpy and/or torch directly, so fix?
     input_seq = np.array(frames_to_rgb_list(x))
 
-    out = overlay_multiple_window_outlines(dynair, frames[0], ws[0], y)
+    out = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
     recon_seq = np.array(frames_to_rgb_list(out))
 
-    out2 = overlay_multiple_window_outlines(dynair, extra_frames[0], extra_ws[0], y)
+    out2 = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
     extra_seq = np.array(frames_to_rgb_list(out2))
 
     # show_seq(input_seq, (10,2))
@@ -78,18 +83,30 @@ def make_video(dynair, x, y, out_fn):
 def get_ix_of_first_ex_of_each_count(Y, max_obj_count):
     return [(count,int((Y==count).nonzero()[0])) for count in range(1, max_obj_count+1)]
 
-#pyro.set_rng_seed(42)
+if __name__ == '__main__':
 
-TMP_DIR = './tmp'
-PARAMS_FILE = '/Users/paul/Downloads/dyn3d-98f71330.pytorch'
-FORMAT = 'gif' # e.g. gif, mp4, etc. (ffmpeg will determine the format based on the file extension.)
+    #pyro.set_rng_seed(42)
 
-X, Y = load_data(use_cuda=False)
-dynair = DynAIR(use_cuda=False)
-dynair.load_state_dict(torch.load(PARAMS_FILE, map_location=lambda storage, loc: storage))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('data_path')
+    parser.add_argument('module_config_path')
+    parser.add_argument('params_path')
+    parser.add_argument('indices', type=int, nargs='+',
+                        help='indices of data points for which to make movies')
+    args = parser.parse_args()
 
-for count, ix in get_ix_of_first_ex_of_each_count(Y, dynair.max_obj_count):
-    make_video(dynair, X[ix], Y[ix], 'train_{}.{}'.format(count, FORMAT))
-# The last batch (of size 25) was not used for optimization.
-for count, ix in get_ix_of_first_ex_of_each_count(Y[975:], dynair.max_obj_count):
-    make_video(dynair, X[975+ix], Y[975+ix], 'test_{}.{}'.format(count, FORMAT))
+    TMP_DIR = './tmp'
+    FORMAT = 'gif' # e.g. gif, mp4, etc. (ffmpeg will determine the format based on the file extension.)
+
+    data = load_data(args.data_path)
+    X, Y = data
+
+    with open(args.module_config_path) as f:
+        module_config = json.load(f)
+    cfg = config(module_config, data_params(data))
+
+    dynair = build_module(cfg, use_cuda=False)
+    dynair.load_state_dict(torch.load(args.params_path, map_location=lambda storage, loc: storage))
+
+    for ix in args.indices:
+        make_video(dynair, X[ix], Y[ix], 'movie_{}.{}'.format(ix, FORMAT))
