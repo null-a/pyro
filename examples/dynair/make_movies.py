@@ -93,9 +93,10 @@ if __name__ == '__main__':
     parser.add_argument('params_path')
     parser.add_argument('indices', type=int, nargs='+',
                         help='indices of data points for which to make movies')
+    # e.g. gif, mp4, etc. (relies on the fact that ffmpeg will
+    # determine the format based on the file extension.)
+    parser.add_argument('-f', default='gif')
     args = parser.parse_args()
-
-    FORMAT = 'gif' # e.g. gif, mp4, etc. (ffmpeg will determine the format based on the file extension.)
 
     data = load_data(args.data_path)
     X, Y = data
@@ -112,4 +113,4 @@ if __name__ == '__main__':
         os.mkdir(tmp_dir)
 
     for ix in args.indices:
-        make_video(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, FORMAT))
+        make_video(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f))
