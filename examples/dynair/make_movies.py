@@ -5,7 +5,6 @@ import torch
 import numpy as np
 from matplotlib import pyplot as plt
 import pyro
-import pyro.poutine as poutine
 from PIL import Image, ImageDraw
 
 from dynair import config
