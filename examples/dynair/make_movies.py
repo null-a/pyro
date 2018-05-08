@@ -1,3 +1,4 @@
+import os
 import argparse
 import json
 import subprocess
@@ -31,7 +32,7 @@ def frame_to_img(frame, mark=False):
         draw.rectangle([(0,0), (5,5)], fill=(255,255,255,127))
     return img
 
-def make_video(dynair, x, y, out_fn):
+def make_video(dynair, x, y, tmp_dir, out_fn):
     # x is an input sequence
     # y is the object count
 
@@ -69,15 +70,15 @@ def make_video(dynair, x, y, out_fn):
         img = Image.new('RGB', (100,50))
         img.paste(input_img, (0,0))
         img.paste(infer_img, (size,0))
-        img.save('{}/frame_{:02d}.png'.format(TMP_DIR, i))
+        img.save('{}/frame_{:02d}.png'.format(tmp_dir, i))
 
     for i, extra_frame in enumerate(extra_seq):
         extra_img = frame_to_img(extra_frame)
         img = Image.new('RGB', (2*size,size))
         img.paste(extra_img, box=(size,0))
-        img.save('{}/frame_{:02d}.png'.format(TMP_DIR, i + input_seq.shape[0]))
+        img.save('{}/frame_{:02d}.png'.format(tmp_dir, i + input_seq.shape[0]))
 
-    subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(TMP_DIR), '-y', '-s', '400x200', out_fn])
+    subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-y', '-s', '400x200', out_fn])
 
 def get_ix_of_first_ex_of_each_count(Y, max_obj_count):
     return [(count,int((Y==count).nonzero()[0])) for count in range(1, max_obj_count+1)]
@@ -94,7 +95,6 @@ if __name__ == '__main__':
                         help='indices of data points for which to make movies')
     args = parser.parse_args()
 
-    TMP_DIR = './tmp'
     FORMAT = 'gif' # e.g. gif, mp4, etc. (ffmpeg will determine the format based on the file extension.)
 
     data = load_data(args.data_path)
@@ -107,5 +107,9 @@ if __name__ == '__main__':
     dynair = build_module(cfg, use_cuda=False)
     dynair.load_state_dict(torch.load(args.params_path, map_location=lambda storage, loc: storage))
 
+    tmp_dir = './tmp'
+    if not os.path.exists(tmp_dir):
+        os.mkdir(tmp_dir)
+
     for ix in args.indices:
-        make_video(dynair, X[ix], Y[ix], 'movie_{}.{}'.format(ix, FORMAT))
+        make_video(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, FORMAT))
