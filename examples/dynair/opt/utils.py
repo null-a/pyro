@@ -23,6 +23,8 @@ def make_output_dir(base_path):
         if os.path.exists(symlink_path):
             os.remove(symlink_path)
         os.symlink(name, symlink_path)
+        with open(os.path.join(path, 'timestamp.txt'), 'w') as f:
+            f.write(name)
         return path
 
 def describe_env():
