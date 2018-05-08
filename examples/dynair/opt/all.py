@@ -57,6 +57,22 @@ def is_bkg_param(module_name, param_name):
     return ((module_name == 'guide' and param_name.startswith('guide_y')) or
             (module_name == 'model' and param_name.startswith('_decode_bkg')))
 
+# TODO: Factor out the bit of this that creates the background
+# model/guide, then use that in bkg.py to get hold of the relevant
+# background modules based on the supplied CLA.
+def build_module(cfg, use_cuda):
+    model = Model(cfg,
+                  delta_w=True, # Previous experiment use delta style here only.
+                  use_cuda=use_cuda)
+    guide = Guide(cfg,
+                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
+                       #guide_w=GuideW_ImageSoFar(cfg, model),
+                       guide_y=ParamY(cfg),
+                       guide_z=GuideZ(cfg, dedicated_t0=False)),
+                  use_cuda=use_cuda)
+
+    return DynAIR(cfg, model, guide, use_cuda=use_cuda)
+
 def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     X_train, X_test = X_split
@@ -79,17 +95,7 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
         X_vis = X_train[0][0:1]
         Y_vis = Y_train[0][0:1]
 
-    model = Model(cfg,
-                  delta_w=True, # Previous experiment use delta style here only.
-                  use_cuda=args.cuda)
-    guide = Guide(cfg,
-                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
-                       #guide_w=GuideW_ImageSoFar(cfg, model),
-                       guide_y=ParamY(cfg),
-                       guide_z=GuideZ(cfg, dedicated_t0=False)),
-                  use_cuda=args.cuda)
-
-    dynair = DynAIR(cfg, model, guide, use_cuda=args.cuda)
+    dynair = build_module(cfg, args.cuda)
 
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
