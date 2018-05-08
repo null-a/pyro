@@ -18,7 +18,7 @@ def parse_line(line):
             float(strs[2]), # wall
             int(strs[3]))   # step
 
-def main(path):
+def main(path, y_label):
 
     runs = [(fn,) + read(fn) for fn in glob.glob(path)]
 
@@ -29,11 +29,16 @@ def main(path):
 
         label = dirname(abspath(fn)).split(os.sep)[-1]
 
-        plt.plot(step, elbo, label=label)
+        y = dict(elbo=elbo, grad_norm=grad_norm)[y_label]
+
+        plt.plot(step, y, label=label)
         plt.xlabel('step')
-        plt.ylabel('elbo')
+        plt.ylabel(y_label)
 
     plt.grid()
+
+    if y_label == 'grad_norm':
+        plt.yscale('log')
 
     if len(runs) > 1:
         plt.legend()
@@ -57,5 +62,6 @@ if __name__ == '__main__':
     parser.add_argument('path')
     # parser.add_argument('-n', '--num-batches', type=int,
     #                     help='number of batches per epoch, shows epochs on x axis')
+    parser.add_argument('y', choices=['elbo', 'grad_norm'])
     args = parser.parse_args()
-    main(args.path)
+    main(args.path, args.y)
