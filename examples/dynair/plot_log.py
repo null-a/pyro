@@ -34,7 +34,9 @@ def main(path):
         plt.ylabel('elbo')
 
     plt.grid()
-    plt.legend()
+
+    if len(runs) > 1:
+        plt.legend()
 
     # fig, ax1 = plt.subplots()
 
