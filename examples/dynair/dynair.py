@@ -14,6 +14,15 @@ Config = namedtuple('Config',
                      'window_size',
                     ])
 
+def config(module_config, data_config):
+    return Config(**merge(module_config, data_config))
+
+def merge(*dicts):
+    out = {}
+    for d in dicts:
+        out.update(**d)
+    return out
+
 def get_modules_with_cache(parent):
     out = []
     if has_cache(parent):

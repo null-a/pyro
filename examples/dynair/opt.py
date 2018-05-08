@@ -1,8 +1,9 @@
 import os
 import argparse
 from functools import partial
+import json
 
-from dynair import Config
+from dynair import config
 from data import split, load_data, data_params
 from opt.utils import make_output_dir, append_line, describe_env, md5sum
 from opt.all import opt_all
@@ -53,11 +54,11 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    cfg = Config(w_size=3,
-                 y_size=args.y_size,
-                 z_size=args.z_size,
-                 window_size=args.window_size,
-                 **data_params(data))
+    module_config = dict(w_size=3,
+                         y_size=args.y_size,
+                         z_size=args.z_size,
+                         window_size=args.window_size)
+    cfg = config(module_config, data_params(data))
 
     output_path = make_output_dir(args.o)
     print('output path: {}'.format(output_path))
@@ -69,5 +70,8 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
     log_to_cond(cfg)
+
+    with open(os.path.join(output_path, 'module_config.json'), 'w') as f:
+        json.dump(module_config, f)
 
     args.main(X_split, Y_split, cfg, args, output_path, log_to_cond)
