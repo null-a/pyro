@@ -29,7 +29,14 @@ def main(path, y_label):
 
         label = dirname(abspath(fn)).split(os.sep)[-1]
 
-        y = dict(elbo=elbo, grad_norm=grad_norm)[y_label]
+        if y_label == 'elbo':
+            y = elbo
+        elif y_label == 'grad_norm':
+            y = grad_norm
+        elif y_label == 'wall_delta':
+            y = [stop-start for start, stop in zip([0] + list(wall), wall)]
+        else:
+            raise('not possible')
 
         plt.plot(step, y, label=label)
         plt.xlabel('step')
@@ -62,6 +69,6 @@ if __name__ == '__main__':
     parser.add_argument('path')
     # parser.add_argument('-n', '--num-batches', type=int,
     #                     help='number of batches per epoch, shows epochs on x axis')
-    parser.add_argument('y', choices=['elbo', 'grad_norm'])
+    parser.add_argument('y', choices=['elbo', 'grad_norm', 'wall_delta'])
     args = parser.parse_args()
     main(args.path, args.y)
