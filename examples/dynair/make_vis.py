@@ -3,6 +3,7 @@ import argparse
 import json
 import subprocess
 import torch
+from torchvision.utils import make_grid, save_image
 import numpy as np
 from matplotlib import pyplot as plt
 import pyro
@@ -60,6 +61,17 @@ def make_movie(dynair, x, y, tmp_dir, out_fn):
 
     subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-y', '-s', '400x200', out_fn])
 
+def frames_main(dynair, X, Y, args):
+    for ix in args.indices:
+        x = X[ix]
+        y = Y[ix]
+        frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20)
+        frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
+        extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
+        save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
+        save_image(make_grid(frames_with_windows, nrow=10), 'frames_{}_recon.png'.format(ix))
+        save_image(make_grid(extra_frames_with_windows, nrow=10), 'frames_{}_extra.png'.format(ix))
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
@@ -70,7 +82,9 @@ def main():
 
     subparsers = parser.add_subparsers(dest='target')
     movie_parser = subparsers.add_parser('movie')
+    frames_parser = subparsers.add_parser('frames')
     movie_parser.set_defaults(main=movie_main)
+    frames_parser.set_defaults(main=frames_main)
 
     # e.g. gif, mp4, etc. (relies on the fact that ffmpeg will
     # determine the format based on the file extension.)
