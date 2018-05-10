@@ -24,15 +24,9 @@ class Model(nn.Module):
         self.delta_z = delta_z
 
         # Priors:
-
         self.y_prior_mean = self.prototype.new_zeros(cfg.y_size)
         self.y_prior_sd = self.prototype.new_ones(cfg.y_size)
 
-        # TODO: Using a (reparameterized) uniform would probably be
-        # better for the cubes data set. (Though this would makes less
-        # sense if we allowed objects to begin off screen.)
-
-        # better for the cubes data set.
         self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
         self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
