@@ -20,11 +20,11 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis_batch = batches[0, 0:10]
     batch_size = batches.size(1)
 
-    if args.vis > 0:
+    if args.v > 0:
         vis.images(vis_batch.cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size), nrow=10)
 
     def hook(epoch, batch, step):
-        if args.vis > 0 and (step + 1) % args.vis == 0:
+        if args.v > 0 and (step + 1) % args.v == 0:
             x_mean = vae.recon(vis_batch).cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size)
             vis.images(frames_to_rgb_list(x_mean), nrow=10)
 

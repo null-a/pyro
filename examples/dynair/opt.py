@@ -18,8 +18,8 @@ if __name__ == '__main__':
                         help='number of optimisation epochs to perform')
     parser.add_argument('--hold-out', type=int, default=0,
                         help='number of batches to hold out')
-    parser.add_argument('--vis', type=int, default=0,
-                        help='visualise inferences during optimisation (zero disables, otherwise specifies period)')
+    parser.add_argument('-v', type=int, default=0,
+                        help='visualise inferences during optimisation (zero disables, otherwise specifies period in steps)')
     parser.add_argument('-o', default='./runs', help='base output path')
     parser.add_argument('-s', type=int, default=0,
                         help='save parameters (zero disables, otherwise specifies period in epochs')
