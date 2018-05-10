@@ -5,10 +5,12 @@ import torch
 from hashlib import md5
 
 def git_rev():
-    return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode().strip()
+    git_dir = os.path.dirname(__file__)
+    return subprocess.check_output(['git', '-C', git_dir, 'rev-parse', '--short', 'HEAD']).decode().strip()
 
 def git_wd_is_clean():
-    out = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
+    git_dir = os.path.dirname(__file__)
+    out = subprocess.check_output(['git', '-C', git_dir, 'status', '--porcelain']).decode().strip()
     return len(out) == 0
 
 def make_output_dir(base_path):
