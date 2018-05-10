@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import pyro.poutine as poutine
 from collections import namedtuple
@@ -33,6 +34,17 @@ def get_modules_with_cache(parent):
 
 def has_cache(m):
     return hasattr(m, 'cache')
+
+# It's convenient to detach here for consumers of `infer`. e.g.
+# visualisation code can call `numpy()` directly on these.
+
+def frames_to_tensor(arr):
+    # Turn an array of frames (of length seq_len) returned by the
+    # model into a (batch, seq_len, rest...) tensor.
+    return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1).detach()
+
+def latents_to_tensor(xss):
+    return torch.stack([torch.stack(xs) for xs in xss]).transpose(2, 0).detach()
 
 class DynAIR(nn.Module):
     def __init__(self, cfg, model, guide, use_cuda=False):
@@ -79,4 +91,7 @@ class DynAIR(nn.Module):
 
         self.clear_cache()
 
-        return frames, wss, extra_frames, extra_wss
+        return (frames_to_tensor(frames),
+                latents_to_tensor(wss),
+                frames_to_tensor(extra_frames),
+                latents_to_tensor(extra_wss))

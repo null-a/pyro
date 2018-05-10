@@ -5,9 +5,6 @@ from PIL import Image, ImageDraw
 from transform import window_to_image, over
 from utils import batch_expand
 
-def frames_to_rgb_list(frames):
-    return frames[:, 0:3].data.numpy().tolist()
-
 def img_to_arr(img):
     assert img.mode == 'RGBA'
     channels = 4
@@ -45,14 +42,6 @@ def overlay_multiple_window_outlines(cfg, frame, ws, obj_count):
     for i in range(obj_count):
         acc = overlay_window_outlines(cfg, acc, ws[i], ['red', 'green', 'blue'][i % 3])
     return acc
-
-def frames_to_tensor(arr):
-    # Turn an array of frames (of length seq_len) returned by the
-    # model into a (batch, seq_len, rest...) tensor.
-    return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1)
-
-def latents_to_tensor(xss):
-    return torch.stack([torch.stack(xs) for xs in xss]).transpose(2, 0)
 
 def arr_to_img(nparr):
     assert nparr.shape[0] == 4 # required for RGBA

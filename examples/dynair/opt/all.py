@@ -9,27 +9,21 @@ from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from opt.run_svi import run_svi
 from opt.utils import md5sum
-from vis import frames_to_tensor, latents_to_tensor, overlay_multiple_window_outlines, frames_to_rgb_list
+from vis import overlay_multiple_window_outlines
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
     n = X.size(0)
-
-    frames, wss, extra_frames, extra_wss = dynair.infer(X, Y, 15)
-
-    frames = frames_to_tensor(frames)
-    ws = latents_to_tensor(wss)
-    extra_frames = frames_to_tensor(extra_frames)
-    extra_ws = latents_to_tensor(extra_wss)
+    frames, ws, extra_frames, extra_ws = dynair.infer(X, Y, 15)
 
     for k in range(n):
         out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k], Y[k])
-        vis.images(frames_to_rgb_list(X[k].cpu()), nrow=10,
+        vis.images(X[k].cpu(), nrow=10,
                    opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
-        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
+        vis.images(out.cpu(), nrow=10,
                    opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
         out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k], Y[k])
-        vis.images(frames_to_rgb_list(out.cpu()), nrow=10,
+        vis.images(out.cpu(), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
 def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):

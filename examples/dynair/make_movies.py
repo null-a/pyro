@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 from dynair import config
 from data import load_data, data_params
 from opt.all import build_module
-from vis import frames_to_tensor, latents_to_tensor, frames_to_rgb_list, overlay_multiple_window_outlines
+from vis import overlay_multiple_window_outlines
 
 def show_seq(seq, layout_shape):
     cols, rows = layout_shape
@@ -41,23 +41,11 @@ def make_video(dynair, x, y, tmp_dir, out_fn):
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
-    frames, wss, extra_frames, extra_wss = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20)
+    frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20)
 
-    frames = frames_to_tensor(frames)
-    ws = latents_to_tensor(wss)
-    extra_frames = frames_to_tensor(extra_frames)
-    extra_ws = latents_to_tensor(extra_wss)
-
-    # TODO: Converting this to a list and back is silly. I guess this
-    # is happening in the model vis too. I think visdom now support
-    # numpy and/or torch directly, so fix?
-    input_seq = np.array(frames_to_rgb_list(x))
-
-    out = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
-    recon_seq = np.array(frames_to_rgb_list(out))
-
-    out2 = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
-    extra_seq = np.array(frames_to_rgb_list(out2))
+    input_seq = x
+    recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
+    extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
 
     # show_seq(input_seq, (10,2))
     # show_seq(recon_seq, (10,2))
@@ -65,15 +53,15 @@ def make_video(dynair, x, y, tmp_dir, out_fn):
     # plt.show()
 
     for i, (input_frame, recon_frame) in enumerate(zip(input_seq, recon_seq)):
-        input_img = frame_to_img(input_frame)
-        infer_img = frame_to_img(recon_frame)
+        input_img = frame_to_img(input_frame.numpy())
+        infer_img = frame_to_img(recon_frame.numpy())
         img = Image.new('RGB', (100,50))
         img.paste(input_img, (0,0))
         img.paste(infer_img, (size,0))
         img.save('{}/frame_{:02d}.png'.format(tmp_dir, i))
 
     for i, extra_frame in enumerate(extra_seq):
-        extra_img = frame_to_img(extra_frame)
+        extra_img = frame_to_img(extra_frame.numpy())
         img = Image.new('RGB', (2*size,size))
         img.paste(extra_img, box=(size,0))
         img.save('{}/frame_{:02d}.png'.format(tmp_dir, i + input_seq.shape[0]))

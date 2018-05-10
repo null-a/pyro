@@ -46,4 +46,4 @@ class VAE(nn.Module):
     def recon(self, batch):
         trace = poutine.trace(self.guide).get_trace(batch)
         _, _, x_mean = poutine.replay(self.model, trace)(batch)
-        return x_mean
+        return x_mean.detach() # detach here, following dynair.infer()

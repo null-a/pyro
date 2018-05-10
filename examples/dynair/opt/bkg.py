@@ -4,7 +4,6 @@ import torch
 from vae import VAE
 from opt.all import bkg_modules
 from opt.run_svi import run_svi
-from vis import frames_to_rgb_list
 
 def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis = visdom.Visdom()
@@ -26,7 +25,7 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     def hook(epoch, batch, step):
         if args.v > 0 and (step + 1) % args.v == 0:
             x_mean = vae.recon(vis_batch).cpu().view(-1, cfg.num_chan, cfg.image_size, cfg.image_size)
-            vis.images(frames_to_rgb_list(x_mean), nrow=10)
+            vis.images(x_mean, nrow=10)
 
     optim_args = {'lr': 1e-4}
 
