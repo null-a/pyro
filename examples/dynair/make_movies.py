@@ -13,15 +13,6 @@ from data import load_data, data_params
 from opt.all import build_module
 from vis import overlay_multiple_window_outlines
 
-def show_seq(seq, layout_shape):
-    cols, rows = layout_shape
-    plt.figure(figsize=(8, 2))
-    for r in range(rows):
-        for c in range(cols):
-            plt.subplot(rows, cols, r * cols + c + 1)
-            plt.axis('off')
-            plt.imshow(seq[r * cols + c].transpose((1,2,0)))
-
 def frame_to_img(frame, mark=False):
     assert frame.shape[0] == 3
     shape = frame.shape[1:]
@@ -47,11 +38,6 @@ def make_video(dynair, x, y, tmp_dir, out_fn):
     recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
     extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
 
-    # show_seq(input_seq, (10,2))
-    # show_seq(recon_seq, (10,2))
-    # show_seq(extra_seq, (10,2))
-    # plt.show()
-
     for i, (input_frame, recon_frame) in enumerate(zip(input_seq, recon_seq)):
         input_img = frame_to_img(input_frame.numpy())
         infer_img = frame_to_img(recon_frame.numpy())
@@ -68,12 +54,7 @@ def make_video(dynair, x, y, tmp_dir, out_fn):
 
     subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-y', '-s', '400x200', out_fn])
 
-def get_ix_of_first_ex_of_each_count(Y, max_obj_count):
-    return [(count,int((Y==count).nonzero()[0])) for count in range(1, max_obj_count+1)]
-
 if __name__ == '__main__':
-
-    #pyro.set_rng_seed(42)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
