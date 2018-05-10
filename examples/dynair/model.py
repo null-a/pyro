@@ -11,7 +11,7 @@ from utils import assert_size, delta_mean
 from transform import window_to_image, over
 
 class Model(nn.Module):
-    def __init__(self, cfg, delta_w=False, delta_z=False, use_cuda=False):
+    def __init__(self, cfg, arch, delta_w=False, delta_z=False, use_cuda=False):
         super(Model, self).__init__()
         self.cache = Cache()
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
@@ -41,12 +41,10 @@ class Model(nn.Module):
 
         self.likelihood_sd = 0.3
 
-        self.decode_obj = DecodeObj(cfg, [100, 100])
-        self._decode_bkg = DecodeBkg(cfg)
-
-        self.w_transition = WTransition(cfg, 50)
-        self.z_transition = ZTransition(cfg, 50)
-        #self.z_transition = ZGatedTransition(self.z_size, 50, 50)
+        self.decode_obj = arch['decode_obj']
+        self._decode_bkg = arch['decode_bkg']
+        self.w_transition = arch['w_transition']
+        self.z_transition = arch['z_transition']
 
 
     # We wrap `_decode_bkg` here to enable caching without

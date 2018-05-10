@@ -5,7 +5,7 @@ import visdom
 import torch
 
 from dynair import DynAIR
-from model import Model, DecodeBkg
+from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
 from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
 from opt.run_svi import run_svi
 from opt.utils import md5sum
@@ -62,6 +62,10 @@ def is_bkg_param(module_name, param_name):
 # background modules based on the supplied CLA.
 def build_module(cfg, use_cuda):
     model = Model(cfg,
+                  dict(decode_obj=DecodeObj(cfg, [100, 100]),
+                       decode_bkg=DecodeBkg(cfg),
+                       w_transition=WTransition(cfg, 50),
+                       z_transition=ZTransition(cfg, 50)),
                   delta_w=True, # Previous experiment use delta style here only.
                   use_cuda=use_cuda)
     guide = Guide(cfg,
