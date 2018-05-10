@@ -57,13 +57,11 @@ def is_bkg_param(module_name, param_name):
     return ((module_name == 'guide' and param_name.startswith('guide_y')) or
             (module_name == 'model' and param_name.startswith('_decode_bkg')))
 
-# TODO: Factor out the bit of this that creates the background
-# model/guide, then use that in bkg.py to get hold of the relevant
-# background modules based on the supplied CLA.
 def build_module(cfg, use_cuda):
+    decode_bkg, guide_y = bkg_modules(cfg)
     model = Model(cfg,
                   dict(decode_obj=DecodeObj(cfg, [100, 100]),
-                       decode_bkg=DecodeBkg(cfg),
+                       decode_bkg=decode_bkg,
                        w_transition=WTransition(cfg, 50),
                        z_transition=ZTransition(cfg, 50)),
                   delta_w=True, # Previous experiment use delta style here only.
@@ -71,11 +69,14 @@ def build_module(cfg, use_cuda):
     guide = Guide(cfg,
                   dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
                        #guide_w=GuideW_ImageSoFar(cfg, model),
-                       guide_y=ParamY(cfg),
+                       guide_y=guide_y,
                        guide_z=GuideZ(cfg, dedicated_t0=False)),
                   use_cuda=use_cuda)
 
     return DynAIR(cfg, model, guide, use_cuda=use_cuda)
+
+def bkg_modules(cfg):
+    return DecodeBkg(cfg), ParamY(cfg)
 
 def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 

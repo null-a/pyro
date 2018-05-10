@@ -2,14 +2,14 @@ import visdom
 import torch
 
 from vae import VAE
-from model import DecodeBkg
-from guide import ParamY
+from opt.all import bkg_modules
 from opt.run_svi import run_svi
 from vis import frames_to_rgb_list
 
 def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     vis = visdom.Visdom()
-    vae = VAE(ParamY(cfg), DecodeBkg(cfg), cfg.y_size, use_cuda=args.cuda)
+    decode_bkg, guide_y = bkg_modules(cfg)
+    vae = VAE(guide_y, decode_bkg, cfg.y_size, use_cuda=args.cuda)
 
     X_train, _ = X_split
     # Extract backgrounds from the input sequences.
