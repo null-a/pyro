@@ -23,12 +23,18 @@ def frame_to_img(frame, mark=False):
         draw.rectangle([(0,0), (5,5)], fill=(255,255,255,127))
     return img
 
-def make_video(dynair, x, y, tmp_dir, out_fn):
+def movie_main(dynair, X, Y, args):
+    tmp_dir = './tmp'
+    if not os.path.exists(tmp_dir):
+        os.mkdir(tmp_dir)
+
+    for ix in args.indices:
+        make_movie(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f))
+
+def make_movie(dynair, x, y, tmp_dir, out_fn):
     # x is an input sequence
     # y is the object count
-
-    assert X.shape[3] == X.shape[4] # I've assumed square inputs throughout.
-    size = X.shape[3]
+    size = dynair.cfg.image_size
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
@@ -54,17 +60,22 @@ def make_video(dynair, x, y, tmp_dir, out_fn):
 
     subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-y', '-s', '400x200', out_fn])
 
-if __name__ == '__main__':
-
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
     parser.add_argument('module_config_path')
     parser.add_argument('params_path')
     parser.add_argument('indices', type=int, nargs='+',
-                        help='indices of data points for which to make movies')
+                        help='indices of data points for which to create visualisations')
+
+    subparsers = parser.add_subparsers(dest='target')
+    movie_parser = subparsers.add_parser('movie')
+    movie_parser.set_defaults(main=movie_main)
+
     # e.g. gif, mp4, etc. (relies on the fact that ffmpeg will
     # determine the format based on the file extension.)
-    parser.add_argument('-f', default='gif')
+    movie_parser.add_argument('-f', default='gif', help='output format')
+
     args = parser.parse_args()
 
     data = load_data(args.data_path)
@@ -77,9 +88,7 @@ if __name__ == '__main__':
     dynair = build_module(cfg, use_cuda=False)
     dynair.load_state_dict(torch.load(args.params_path, map_location=lambda storage, loc: storage))
 
-    tmp_dir = './tmp'
-    if not os.path.exists(tmp_dir):
-        os.mkdir(tmp_dir)
+    args.main(dynair, X, Y, args)
 
-    for ix in args.indices:
-        make_video(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f))
+if __name__ == '__main__':
+    main()
