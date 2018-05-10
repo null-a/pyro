@@ -7,7 +7,8 @@ examples/*/processed
 examples/*/results
 examples/*/raw
 examples/dmm/*.pkl
-examples/dynair/data
+!examples/dynair/data
+examples/dynair/data/*.npz
 examples/dynair/runs
 pyro/contrib/examples/processed
 pyro/contrib/examples/results
