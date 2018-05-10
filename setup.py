@@ -32,23 +32,7 @@ if commit_sha:
 with open(os.path.join(PROJECT_PATH, 'pyro', '_version.py'), 'w') as f:
     f.write(VERSION.format(version))
 
-# Convert README.md to rst for display at https://pypi.python.org/pypi/pyro-ppl
-# When releasing on pypi, make sure pandoc is on your system:
-# $ brew install pandoc          # OS X
-# $ sudo apt-get install pandoc  # Ubuntu Linux
-try:
-    import pypandoc
-    long_description = pypandoc.convert('README.md', 'rst')
-except (IOError, ImportError, OSError) as e:
-    sys.stderr.write('Failed to convert README.md to rst:\n  {}\n'.format(e))
-    sys.stderr.flush()
-    long_description = open('README.md').read()
-
-# Remove badges since they will always be obsolete.
-blacklist = ['Build Status', 'Latest Version', 'Documentation Status',
-             'travis-ci.org', 'pypi.python.org', 'pyro-ppl.readthedocs.io']
-long_description = '\n'.join(
-    [line for line in long_description.split('\n') if not any(patt in line for patt in blacklist)])
+long_description = ''
 
 # examples/tutorials
 EXTRAS_REQUIRE = [
