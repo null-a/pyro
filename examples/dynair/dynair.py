@@ -13,6 +13,7 @@ Config = namedtuple('Config',
                      'y_size',
                      'z_size',
                      'window_size',
+                     'guide_w'
                     ])
 
 def config(module_config, data_config):

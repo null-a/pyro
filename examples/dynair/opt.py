@@ -36,6 +36,9 @@ if __name__ == '__main__':
     parser.add_argument('--window-size', type=int, default=22,
                         help='size of the object window')
 
+    parser.add_argument('--guide-w', default='objrnn1',
+                        help='architecture of guide for w')
+
     subparsers = parser.add_subparsers(dest='target')
     all_parser = subparsers.add_parser('all')
     bkg_parser = subparsers.add_parser('bkg')
@@ -57,7 +60,8 @@ if __name__ == '__main__':
     module_config = dict(w_size=3,
                          y_size=args.y_size,
                          z_size=args.z_size,
-                         window_size=args.window_size)
+                         window_size=args.window_size,
+                         guide_w=args.guide_w)
     cfg = config(module_config, data_params(data))
 
     output_path = make_output_dir(args.o)

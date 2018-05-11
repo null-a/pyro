@@ -60,8 +60,23 @@ def build_module(cfg, use_cuda):
                        z_transition=ZTransition(cfg, 50)),
                   delta_w=True, # Previous experiment use delta style here only.
                   use_cuda=use_cuda)
+
+    # TODO: Figure out how best to specify the desired model/guide
+    # architecture. I'd rather not have to add(/maintain) a
+    # complicated set of hierarchical options to argparse, but I also
+    # need to avoid the combinatorial explosion that would likely
+    # arise if I tried to name all of the variations of e.g. w guide
+    # we might be interested in.
+
+    if cfg.guide_w == 'objrnn1':
+        guide_w = GuideW_ObjRnn(cfg, [200], dedicated_t0=False)
+    elif cfg.guide_w == 'objrnn2':
+        guide_w = GuideW_ObjRnn(cfg, [200, 200], dedicated_t0=False)
+    else:
+        raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
+
     guide = Guide(cfg,
-                  dict(guide_w=GuideW_ObjRnn(cfg, dedicated_t0=False),
+                  dict(guide_w=guide_w,
                        #guide_w=GuideW_ImageSoFar(cfg, model),
                        guide_y=guide_y,
                        guide_z=GuideZ(cfg, dedicated_t0=False)),

@@ -159,11 +159,10 @@ class GuideZ(nn.Module):
 
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, cfg, dedicated_t0):
+    def __init__(self, cfg, rnn_hid_sizes, dedicated_t0):
         super(GuideW_ObjRnn, self).__init__()
 
         x_embed_size = 200
-        rnn_hid_sizes = [200]
 
         self.cache = Cache()
 
@@ -213,7 +212,6 @@ class GuideW_ImageSoFar(nn.Module):
     def __init__(self, cfg, model):
         super(GuideW_ImageSoFar, self).__init__()
 
-        # TODO: Figure out how best to specify the desired architecture.
         self.w_param = ParamW_Isf_Mlp(cfg)
         #self.w_param = ParamW_Isf_Cnn_Mixin(cfg)
         #self.w_param = ParamW_Isf_Cnn_AM(cfg)
