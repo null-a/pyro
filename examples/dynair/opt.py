@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 from functools import partial
 import json
@@ -82,6 +83,7 @@ if __name__ == '__main__':
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
     log_to_cond(cfg)
 
+    append_line(os.path.join(output_path, 'argv.txt'), ' '.join(sys.argv))
     with open(os.path.join(output_path, 'module_config.json'), 'w') as f:
         json.dump(module_config, f)
 
