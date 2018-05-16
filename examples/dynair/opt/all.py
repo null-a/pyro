@@ -58,7 +58,8 @@ def build_module(cfg, use_cuda):
                        decode_bkg=decode_bkg,
                        w_transition=WTransition(cfg, 50),
                        z_transition=ZTransition(cfg, 50)),
-                  delta_w=True, # Previous experiment use delta style here only.
+                  delta_w=cfg.model_delta_w,
+                  delta_z=cfg.model_delta_z,
                   use_cuda=use_cuda)
 
     # TODO: Figure out how best to specify the desired model/guide

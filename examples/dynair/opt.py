@@ -36,6 +36,11 @@ if __name__ == '__main__':
     parser.add_argument('--window-size', type=int, default=22,
                         help='size of the object window')
 
+    parser.add_argument('--model-delta-w', action='store_true', default=False,
+                        help='use w transition output as delta from previous value to next mean')
+    parser.add_argument('--model-delta-z', action='store_true', default=False,
+                        help='use z transition output as delta from previous value to next mean')
+
     parser.add_argument('--guide-w', default='objrnn1',
                         help='architecture of guide for w')
 
@@ -61,6 +66,8 @@ if __name__ == '__main__':
                          y_size=args.y_size,
                          z_size=args.z_size,
                          window_size=args.window_size,
+                         model_delta_w=args.model_delta_w,
+                         model_delta_z=args.model_delta_z,
                          guide_w=args.guide_w)
     cfg = config(module_config, data_params(data))
 

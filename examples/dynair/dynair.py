@@ -13,6 +13,8 @@ Config = namedtuple('Config',
                      'y_size',
                      'z_size',
                      'window_size',
+                     'model_delta_w',
+                     'model_delta_z',
                      'guide_w'
                     ])
 
