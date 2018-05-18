@@ -164,20 +164,26 @@ class GuideW_ObjRnn(nn.Module):
 
         x_embed_size = 200
 
+        self.dedicated_t0 = dedicated_t0
         self.cache = Cache()
 
         self._x_embed = MLP(cfg.x_size, [500, x_embed_size], nn.ReLU, True)
 
         self.w_param = ParamW(
-            x_embed_size + cfg.w_size + cfg.z_size, # input size
-            rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
+            x_embed_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
+            rnn_hid_sizes, [], cfg.w_size,
             sd_bias=-2.25)
+        self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
+        self.z_t_prev_init = nn.Parameter(torch.zeros(cfg.z_size))
+
 
         if dedicated_t0:
             self.w0_param = ParamW(
-                x_embed_size, # input size
-                rnn_hid_sizes, [], cfg.w_size, cfg.z_size,
+                x_embed_size + cfg.w_size + cfg.z_size, # input size
+                rnn_hid_sizes, [], cfg.w_size,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
+            self.w_t_prev_init0 = nn.Parameter(torch.zeros(cfg.w_size))
+            self.z_t_prev_init0 = nn.Parameter(torch.zeros(cfg.z_size))
         else:
             # TODO: Does it make sense that this is a parameter
             # (rather than fixed) in the case where the guide
@@ -196,14 +202,27 @@ class GuideW_ObjRnn(nn.Module):
 
         x_embed = self.x_embed(x)
 
-        if t == 0 and hasattr(self, 'w0_param'):
-            w_mean, w_sd, rnn_hid = self.w0_param(x_embed, w_t_prev, z_t_prev, rnn_hid_prev)
+        if i == 0:
+            assert w_t_prev is None and z_t_prev is None
+            if t == 0 and self.dedicated_t0:
+                w_t_prev = batch_expand(self.w_t_prev_init0, batch_size)
+                z_t_prev = batch_expand(self.z_t_prev_init0, batch_size)
+            else:
+                w_t_prev = batch_expand(self.w_t_prev_init, batch_size)
+                z_t_prev = batch_expand(self.z_t_prev_init, batch_size)
+
+        if t == 0 and self.dedicated_t0:
+            rnn_input = torch.cat((x_embed, w_t_prev, z_t_prev), 1)
+            w_mean, w_sd, rnn_hid = self.w0_param(rnn_input, rnn_hid_prev)
         else:
             if t == 0:
                 assert w_prev_i is None and z_prev_i is None
                 w_prev_i = batch_expand(self.w_init, batch_size)
                 z_prev_i = batch_expand(self.z_init, batch_size)
-            w_mean, w_sd, rnn_hid = self.w_param(torch.cat((x_embed, w_prev_i, z_prev_i), 1), w_t_prev, z_t_prev, rnn_hid_prev)
+            # Could consider other ways of combining x with and the
+            # ws/zs.
+            rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
+            w_mean, w_sd, rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
 
         return (w_mean, w_sd), rnn_hid
 
@@ -354,16 +373,14 @@ class ParamW_Isf_Cnn_AM(nn.Module):
 
 
 class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, z_size, sd_bias=0.0):
+    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, sd_bias=0.0):
         super(ParamW, self).__init__()
 
         assert len(rnn_hid_sizes) > 0
 
         self.input_size = input_size
-        self.w_size = w_size
-        self.z_size = z_size
 
-        rnn_input_sizes = [input_size + w_size + z_size] + rnn_hid_sizes[0:-1]
+        rnn_input_sizes = [input_size] + rnn_hid_sizes[0:-1]
 
         self.rnns = nn.ModuleList(
             [nn.RNNCell(i, h) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
@@ -378,9 +395,6 @@ class ParamW(nn.Module):
 
         self.col_widths = [w_size, w_size]
         self.mlp = MLP(rnn_hid_sizes[-1], hids + [sum(self.col_widths)], nn.ReLU)
-
-        self.w_t_prev_init = nn.Parameter(torch.zeros(w_size))
-        self.z_t_prev_init = nn.Parameter(torch.zeros(z_size))
 
         # Adjust the init. of the parameter MLP in an attempt to:
 
@@ -398,7 +412,7 @@ class ParamW(nn.Module):
         self.mlp.seq[-1].bias.data *= 0.0
         self.mlp.seq[-1].bias.data[w_size:] += sd_bias
 
-    def forward(self, inp, w_t_prev, z_t_prev, rnn_hids_prev):
+    def forward(self, inp, rnn_hids_prev):
         batch_size = inp.size(0)
         assert inp.size(1) == self.input_size
 
@@ -408,13 +422,7 @@ class ParamW(nn.Module):
         else:
             hids_prev = rnn_hids_prev
 
-        if w_t_prev is None:
-            w_t_prev = self.w_t_prev_init.expand(batch_size, self.w_size)
-        if z_t_prev is None:
-            z_t_prev = self.z_t_prev_init.expand(batch_size, self.z_size)
-
-        rnn_input = torch.cat((inp, w_t_prev, z_t_prev), 1)
-        hids = self.apply_rnn_stack(hids_prev, rnn_input)
+        hids = self.apply_rnn_stack(hids_prev, inp)
         out = self.mlp(hids[-1])
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
