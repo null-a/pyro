@@ -3,10 +3,12 @@ from pprint import pprint as pp
 
 import visdom
 import torch
+import torch.nn as nn
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, Identity
+from modules import MLP
 from opt.run_svi import run_svi
 from opt.utils import md5sum
 from vis import overlay_multiple_window_outlines
@@ -83,7 +85,14 @@ def build_module(cfg, use_cuda):
                   dict(guide_w=guide_w,
                        #guide_w=GuideW_ImageSoFar(cfg, model),
                        guide_y=guide_y,
-                       guide_z=GuideZ(cfg)),
+                       guide_z=GuideZ(cfg, partial(CombineMixin,
+                                                   #Identity,
+                                                   partial(ImgEmbedMlp, hids=[100, 100]),
+                                                   #partial(ImgEmbedResNet, hids=[100, 100]),
+                                                   partial(MLP, out_sizes=[100],
+                                                           non_linear_layer=nn.ReLU,
+                                                           output_non_linearity=True)))
+                  ),
                   use_cuda=use_cuda)
 
     return DynAIR(cfg, model, guide, use_cuda=use_cuda)

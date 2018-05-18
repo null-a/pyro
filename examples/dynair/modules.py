@@ -21,6 +21,7 @@ class MLP(nn.Module):
         if output_non_linearity:
             layers.append(non_linear_layer())
         self.seq = nn.Sequential(*layers)
+        self.output_size = out_sizes[-1]
 
     def forward(self, x):
         return self.seq(x)

@@ -115,37 +115,39 @@ class Guide(nn.Module):
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
 
-# TODO: Extend with CNN variants used for guide for w. (Are there
-# opportunities for code re-use, since for both w and z compute
-# parameters from main + side input. The different been that there is
-# no recurrent part of the guide for z.)
+# TODO: Extend with CNN variants used for guide for w.
 class GuideZ(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, combine_module):
         super(GuideZ, self).__init__()
 
         x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
-        x_att_embed_size = 100
 
-        # TODO: Having only a single hidden layer between z_prev and z
-        # may be insufficient?
-        self.z_param = ParamZ(
-            [100],
-            cfg.w_size + x_att_embed_size + cfg.z_size, # input size
-            cfg.z_size)
+        self.col_widths = [cfg.z_size, cfg.z_size]
+        self.combine = combine_module(x_att_size,              # main input size
+                                      cfg.w_size + cfg.z_size) # side input size
+
+        # Note that because we add a linear layer here, we almost
+        # certainly want the final layer of the combiner's output net
+        # includes a non-linearity.
+        self.output_layer = nn.Linear(self.combine.output_size,
+                                      sum(self.col_widths))
+
+        nn.init.normal_(self.output_layer.weight, std=0.01)
+        self.output_layer.bias.data *= 0.0
+        self.output_layer.bias.data[cfg.z_size:] -= 2.25
 
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-        self.x_att_embed = MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
-
-
     def forward(self, t, i, w, x_att, z_prev_i):
         batch_size = w.size(0)
-        x_att_flat = x_att.view(x_att.size(0), -1)
-        x_att_embed = self.x_att_embed(x_att_flat)
         if t == 0:
             assert z_prev_i is None
             z_prev_i = batch_expand(self.z_init, batch_size)
-        z_mean, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
+
+        out = self.output_layer(self.combine(x_att, torch.cat((w, z_prev_i), 1)))
+        cols = split_at(out, self.col_widths)
+        z_mean = cols[0]
+        z_sd = softplus(cols[1])
         return z_mean, z_sd
 
 
@@ -177,6 +179,16 @@ class ImgEmbedResNet(nn.Module):
         batch_size = img.size(0)
         img_flat = img.view(batch_size, -1)
         return self.net(img_flat)
+
+
+# Identity embed net.
+class Identity(nn.Module):
+    def __init__(self, in_size):
+        super(Identity, self).__init__()
+        self.output_size = in_size
+
+    def forward(self, x):
+        return x
 
 
 class GuideW_ObjRnn(nn.Module):
@@ -435,22 +447,17 @@ class ParamW(nn.Module):
         return hids
 
 
-class ParamZ(nn.Module):
-    def __init__(self, hids, in_size, z_size):
-        super(ParamZ, self).__init__()
-        self.col_widths = [z_size, z_size]
-        self.mlp = MLP(in_size, hids + [sum(self.col_widths)], nn.ReLU)
+class CombineMixin(nn.Module):
+    def __init__(self, embed_module, output_module,
+                 main_size, side_size):
+        super(CombineMixin, self).__init__()
+        self.embed_net = embed_module(main_size)
+        self.output_net = output_module(self.embed_net.output_size + side_size)
+        self.output_size = self.output_net.output_size
 
-        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
-        self.mlp.seq[-1].bias.data *= 0.0
-        self.mlp.seq[-1].bias.data[z_size:] -= 2.25
-
-    def forward(self, inp):
-        out = self.mlp(inp)
-        cols = split_at(out, self.col_widths)
-        z_mean = cols[0]
-        z_sd = softplus(cols[1])
-        return z_mean, z_sd
+    def forward(self, main, side):
+        main_embedding = self.embed_net(main)
+        return self.output_net(torch.cat((main_embedding, side), 1))
 
 
 class ParamY(nn.Module):
