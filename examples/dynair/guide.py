@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, ResNet, split_at
+from modules import MLP, ResNet, Flatten, split_at
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -324,7 +324,7 @@ class InputCnn(nn.Module):
     def __init__(self, cfg):
         super(InputCnn, self).__init__()
         assert cfg.image_size == 50
-        self.output_size = (256, 2, 2)
+        self.output_size = 256 * 2 * 2
         self.cnn = nn.Sequential(
             nn.Conv2d(cfg.num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
             nn.ReLU(),
@@ -334,12 +334,11 @@ class InputCnn(nn.Module):
             nn.ReLU(),
             nn.Conv2d(128, 256, 4, stride=2, padding=0), # => 256 x 2 x 2
             nn.ReLU(),
+            Flatten()
         )
 
     def forward(self, img):
-        out = self.cnn(img)
-        assert(out.size()[1:] == self.output_size)
-        return out
+        return self.cnn(img)
 
 
 class ParamW_Isf_Cnn_Mixin(nn.Module):
@@ -350,15 +349,14 @@ class ParamW_Isf_Cnn_Mixin(nn.Module):
 
         self.cnn = InputCnn(cfg)
 
-        self.mlp = MLP(product(self.cnn.output_size) + cfg.w_size + cfg.z_size,
+        self.mlp = MLP(self.cnn.output_size + cfg.w_size + cfg.z_size,
                        [200, 200, sum(self.col_widths)],
                        nn.ReLU)
 
 
     def forward(self, img, w_prev, z_prev):
-        batch_size = img.size(0)
-        cnn_out_flat = self.cnn(img).view(batch_size, -1)
-        out = self.mlp(torch.cat((cnn_out_flat, w_prev, z_prev), 1))
+        cnn_out = self.cnn(img)
+        out = self.mlp(torch.cat((cnn_out, w_prev, z_prev), 1))
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])
@@ -380,16 +378,15 @@ class ParamW_Isf_Cnn_AM(nn.Module):
         # TODO: Check appropriateness of hidden sizes here.
         self.am_mlp = MLP(cfg.w_size + cfg.z_size, [200, 200, cfg.x_size], nn.ReLU)
         self.cnn = InputCnn(cfg)
-        self.output_mlp = MLP(product(self.cnn.output_size),
-                              [sum(self.col_widths)], nn.ReLU)
+        self.output_mlp = MLP(self.cnn.output_size, [sum(self.col_widths)], nn.ReLU)
 
 
     def forward(self, img, w_prev, z_prev):
         batch_size = img.size(0)
         am_flat = self.am_mlp(torch.cat((w_prev, z_prev), 1))
         am = am_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)
-        cnn_out_flat = self.cnn(img * am).view(batch_size, -1)
-        out = self.output_mlp(cnn_out_flat)
+        cnn_out = self.cnn(img * am)
+        out = self.output_mlp(cnn_out)
         cols = split_at(out, self.col_widths)
         w_mean = cols[0]
         w_sd = softplus(cols[1])

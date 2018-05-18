@@ -6,7 +6,7 @@ import torch
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn
 from opt.run_svi import run_svi
 from opt.utils import md5sum
 from vis import overlay_multiple_window_outlines
@@ -71,6 +71,7 @@ def build_module(cfg, use_cuda):
 
     x_embed = ImgEmbedMlp(cfg.x_size, [500, 200])
     # x_embed = ImgEmbedResNet(cfg.x_size, [500, 200])
+    # x_embed = InputCnn(cfg)
     if cfg.guide_w == 'objrnn1':
         guide_w = GuideW_ObjRnn(cfg, [200], x_embed, dedicated_t0=False, rnn_cell_use_tanh=True)
     elif cfg.guide_w == 'objrnn2':
