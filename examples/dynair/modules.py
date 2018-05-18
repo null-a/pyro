@@ -58,6 +58,15 @@ class ResNet(nn.Module):
         return self.seq(x)
 
 
+class Flatten(nn.Module):
+    def __init__(self):
+        super(Flatten, self).__init__()
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        return x.view(batch_size, -1)
+
+
 # TODO: Make this into a nn.Module to allow more idiomatic PyTorch
 # usage. With this (and Flatten) a lot of code in `forward` methods
 # can be replaced with the use of `nn.Sequential`. If this doesn't
