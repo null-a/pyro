@@ -2,12 +2,12 @@ import functools
 import operator
 import torch
 import torch.nn as nn
-from torch.nn.functional import softplus
+from torch.nn.functional import softplus, relu
 import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, split_at
+from modules import MLP, ResNet, split_at
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -165,6 +165,21 @@ class ImgEmbedMlp(nn.Module):
         self.output_size = hids[-1]
         self.cache = Cache()
         self.net = MLP(in_size, hids, nn.ReLU, True)
+
+    @cached
+    def forward(self, img):
+        batch_size = img.size(0)
+        img_flat = img.view(batch_size, -1)
+        return self.net(img_flat)
+
+
+class ImgEmbedResNet(nn.Module):
+    def __init__(self, in_size, hids):
+        super(ImgEmbedResNet, self).__init__()
+        assert len(hids) >= 1
+        self.output_size = hids[-1]
+        self.cache = Cache()
+        self.net = ResNet(in_size, hids)
 
     @cached
     def forward(self, img):
