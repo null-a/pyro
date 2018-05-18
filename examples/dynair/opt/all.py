@@ -73,9 +73,9 @@ def build_module(cfg, use_cuda):
     # x_embed = ImgEmbedResNet(cfg.x_size, [500, 200])
     # x_embed = InputCnn(cfg)
     if cfg.guide_w == 'objrnn1':
-        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, dedicated_t0=False, rnn_cell_use_tanh=True)
+        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, rnn_cell_use_tanh=True)
     elif cfg.guide_w == 'objrnn2':
-        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, dedicated_t0=False, rnn_cell_use_tanh=True)
+        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, rnn_cell_use_tanh=True)
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
@@ -83,7 +83,7 @@ def build_module(cfg, use_cuda):
                   dict(guide_w=guide_w,
                        #guide_w=GuideW_ImageSoFar(cfg, model),
                        guide_y=guide_y,
-                       guide_z=GuideZ(cfg, dedicated_t0=False)),
+                       guide_z=GuideZ(cfg)),
                   use_cuda=use_cuda)
 
     return DynAIR(cfg, model, guide, use_cuda=use_cuda)

@@ -120,7 +120,7 @@ class Guide(nn.Module):
 # parameters from main + side input. The different been that there is
 # no recurrent part of the guide for z.)
 class GuideZ(nn.Module):
-    def __init__(self, cfg, dedicated_t0):
+    def __init__(self, cfg):
         super(GuideZ, self).__init__()
 
         x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
@@ -133,13 +133,7 @@ class GuideZ(nn.Module):
             cfg.w_size + x_att_embed_size + cfg.z_size, # input size
             cfg.z_size)
 
-        if dedicated_t0:
-            self.z0_param = ParamZ(
-                [100],
-                cfg.w_size + x_att_embed_size, # input size
-                cfg.z_size)
-        else:
-            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+        self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
         self.x_att_embed = MLP(x_att_size, [100, x_att_embed_size], nn.ReLU, True)
 
@@ -148,13 +142,10 @@ class GuideZ(nn.Module):
         batch_size = w.size(0)
         x_att_flat = x_att.view(x_att.size(0), -1)
         x_att_embed = self.x_att_embed(x_att_flat)
-        if t == 0 and hasattr(self, 'z0_param'):
-            z_mean, z_sd = self.z0_param(torch.cat((w, x_att_embed), 1))
-        else:
-            if t == 0:
-                assert z_prev_i is None
-                z_prev_i = batch_expand(self.z_init, batch_size)
-            z_mean, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
+        if t == 0:
+            assert z_prev_i is None
+            z_prev_i = batch_expand(self.z_init, batch_size)
+        z_mean, z_sd = self.z_param(torch.cat((w, x_att_embed, z_prev_i), 1))
         return z_mean, z_sd
 
 
@@ -189,10 +180,8 @@ class ImgEmbedResNet(nn.Module):
 
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, cfg, rnn_hid_sizes, x_embed, dedicated_t0, rnn_cell_use_tanh):
+    def __init__(self, cfg, rnn_hid_sizes, x_embed, rnn_cell_use_tanh):
         super(GuideW_ObjRnn, self).__init__()
-
-        self.dedicated_t0 = dedicated_t0
 
         self.x_embed = x_embed
 
@@ -204,22 +193,12 @@ class GuideW_ObjRnn(nn.Module):
         self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_t_prev_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-
-        if dedicated_t0:
-            self.w0_param = ParamW(
-                x_embed.output_size + cfg.w_size + cfg.z_size, # input size
-                rnn_hid_sizes, [], cfg.w_size,
-                rnn_cell_use_tanh=rnn_cell_use_tanh,
-                sd_bias=0.0) # TODO: This could probably stand to be increased a little.
-            self.w_t_prev_init0 = nn.Parameter(torch.zeros(cfg.w_size))
-            self.z_t_prev_init0 = nn.Parameter(torch.zeros(cfg.z_size))
-        else:
-            # TODO: Does it make sense that this is a parameter
-            # (rather than fixed) in the case where the guide
-            # computing the delta?
-            self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
-            # TODO: Small init.
-            self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
+        # TODO: Does it make sense that this is a parameter
+        # (rather than fixed) in the case where the guide
+        # computing the delta?
+        self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
+        # TODO: Small init.
+        self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
         batch_size = x.size(0)
@@ -228,25 +207,18 @@ class GuideW_ObjRnn(nn.Module):
 
         if i == 0:
             assert w_t_prev is None and z_t_prev is None
-            if t == 0 and self.dedicated_t0:
-                w_t_prev = batch_expand(self.w_t_prev_init0, batch_size)
-                z_t_prev = batch_expand(self.z_t_prev_init0, batch_size)
-            else:
-                w_t_prev = batch_expand(self.w_t_prev_init, batch_size)
-                z_t_prev = batch_expand(self.z_t_prev_init, batch_size)
+            w_t_prev = batch_expand(self.w_t_prev_init, batch_size)
+            z_t_prev = batch_expand(self.z_t_prev_init, batch_size)
 
-        if t == 0 and self.dedicated_t0:
-            rnn_input = torch.cat((x_embed, w_t_prev, z_t_prev), 1)
-            w_mean, w_sd, rnn_hid = self.w0_param(rnn_input, rnn_hid_prev)
-        else:
-            if t == 0:
-                assert w_prev_i is None and z_prev_i is None
-                w_prev_i = batch_expand(self.w_init, batch_size)
-                z_prev_i = batch_expand(self.z_init, batch_size)
-            # Could consider other ways of combining x with and the
-            # ws/zs.
-            rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
-            w_mean, w_sd, rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
+        if t == 0:
+            assert w_prev_i is None and z_prev_i is None
+            w_prev_i = batch_expand(self.w_init, batch_size)
+            z_prev_i = batch_expand(self.z_init, batch_size)
+
+        # Could consider other ways of combining x with and the
+        # ws/zs.
+        rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
+        w_mean, w_sd, rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
 
         return (w_mean, w_sd), rnn_hid
 
