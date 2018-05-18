@@ -158,19 +158,31 @@ class GuideZ(nn.Module):
         return z_mean, z_sd
 
 
+class ImgEmbedMlp(nn.Module):
+    def __init__(self, in_size, hids):
+        super(ImgEmbedMlp, self).__init__()
+        assert len(hids) >= 1
+        self.output_size = hids[-1]
+        self.cache = Cache()
+        self.net = MLP(in_size, hids, nn.ReLU, True)
+
+    @cached
+    def forward(self, img):
+        batch_size = img.size(0)
+        img_flat = img.view(batch_size, -1)
+        return self.net(img_flat)
+
+
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, cfg, rnn_hid_sizes, dedicated_t0):
+    def __init__(self, cfg, rnn_hid_sizes, x_embed, dedicated_t0):
         super(GuideW_ObjRnn, self).__init__()
 
-        x_embed_size = 200
-
         self.dedicated_t0 = dedicated_t0
-        self.cache = Cache()
 
-        self._x_embed = MLP(cfg.x_size, [500, x_embed_size], nn.ReLU, True)
+        self.x_embed = x_embed
 
         self.w_param = ParamW(
-            x_embed_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
+            x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
             rnn_hid_sizes, [], cfg.w_size,
             sd_bias=-2.25)
         self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
@@ -179,7 +191,7 @@ class GuideW_ObjRnn(nn.Module):
 
         if dedicated_t0:
             self.w0_param = ParamW(
-                x_embed_size + cfg.w_size + cfg.z_size, # input size
+                x_embed.output_size + cfg.w_size + cfg.z_size, # input size
                 rnn_hid_sizes, [], cfg.w_size,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
             self.w_t_prev_init0 = nn.Parameter(torch.zeros(cfg.w_size))
@@ -191,11 +203,6 @@ class GuideW_ObjRnn(nn.Module):
             self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
             # TODO: Small init.
             self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
-
-    @cached
-    def x_embed(self, x):
-        x_flat = x.view(x.size(0), -1)
-        return self._x_embed(x_flat)
 
     def forward(self, t, i, x, y, w_prev_i, z_prev_i, w_t_prev, z_t_prev, mask_prev, rnn_hid_prev):
         batch_size = x.size(0)

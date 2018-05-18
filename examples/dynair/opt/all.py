@@ -6,7 +6,7 @@ import torch
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp
 from opt.run_svi import run_svi
 from opt.utils import md5sum
 from vis import overlay_multiple_window_outlines
@@ -69,10 +69,11 @@ def build_module(cfg, use_cuda):
     # arise if I tried to name all of the variations of e.g. w guide
     # we might be interested in.
 
+    x_embed = ImgEmbedMlp(cfg.x_size, [500, 200])
     if cfg.guide_w == 'objrnn1':
-        guide_w = GuideW_ObjRnn(cfg, [200], dedicated_t0=False)
+        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, dedicated_t0=False)
     elif cfg.guide_w == 'objrnn2':
-        guide_w = GuideW_ObjRnn(cfg, [200, 200], dedicated_t0=False)
+        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, dedicated_t0=False)
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
