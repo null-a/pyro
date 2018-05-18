@@ -72,9 +72,9 @@ def build_module(cfg, use_cuda):
     x_embed = ImgEmbedMlp(cfg.x_size, [500, 200])
     # x_embed = ImgEmbedResNet(cfg.x_size, [500, 200])
     if cfg.guide_w == 'objrnn1':
-        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, dedicated_t0=False)
+        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, dedicated_t0=False, rnn_cell_use_tanh=True)
     elif cfg.guide_w == 'objrnn2':
-        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, dedicated_t0=False)
+        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, dedicated_t0=False, rnn_cell_use_tanh=True)
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 

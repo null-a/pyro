@@ -189,7 +189,7 @@ class ImgEmbedResNet(nn.Module):
 
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, cfg, rnn_hid_sizes, x_embed, dedicated_t0):
+    def __init__(self, cfg, rnn_hid_sizes, x_embed, dedicated_t0, rnn_cell_use_tanh):
         super(GuideW_ObjRnn, self).__init__()
 
         self.dedicated_t0 = dedicated_t0
@@ -199,6 +199,7 @@ class GuideW_ObjRnn(nn.Module):
         self.w_param = ParamW(
             x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
             rnn_hid_sizes, [], cfg.w_size,
+            rnn_cell_use_tanh=rnn_cell_use_tanh,
             sd_bias=-2.25)
         self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_t_prev_init = nn.Parameter(torch.zeros(cfg.z_size))
@@ -208,6 +209,7 @@ class GuideW_ObjRnn(nn.Module):
             self.w0_param = ParamW(
                 x_embed.output_size + cfg.w_size + cfg.z_size, # input size
                 rnn_hid_sizes, [], cfg.w_size,
+                rnn_cell_use_tanh=rnn_cell_use_tanh,
                 sd_bias=0.0) # TODO: This could probably stand to be increased a little.
             self.w_t_prev_init0 = nn.Parameter(torch.zeros(cfg.w_size))
             self.z_t_prev_init0 = nn.Parameter(torch.zeros(cfg.z_size))
@@ -395,7 +397,7 @@ class ParamW_Isf_Cnn_AM(nn.Module):
 
 
 class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, sd_bias=0.0):
+    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, rnn_cell_use_tanh, sd_bias=0.0):
         super(ParamW, self).__init__()
 
         assert len(rnn_hid_sizes) > 0
@@ -404,8 +406,9 @@ class ParamW(nn.Module):
 
         rnn_input_sizes = [input_size] + rnn_hid_sizes[0:-1]
 
+        nonlinearity = 'tanh' if rnn_cell_use_tanh else 'relu'
         self.rnns = nn.ModuleList(
-            [nn.RNNCell(i, h) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
+            [nn.RNNCell(i, h, nonlinearity=nonlinearity) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
 
         self.rnn_hid_inits = nn.ParameterList(
             [nn.Parameter(torch.zeros(h)) for h in rnn_hid_sizes])
