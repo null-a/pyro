@@ -279,6 +279,7 @@ class GuideW_ImageSoFar(nn.Module):
         return (w_mean, w_sd), image_so_far
 
 
+# TODO: Use NormalParams.
 class ParamW_Isf_Mlp(nn.Module):
     def __init__(self, cfg):
         super(ParamW_Isf_Mlp, self).__init__()
@@ -322,6 +323,7 @@ class InputCnn(nn.Module):
         return self.cnn(img)
 
 
+# TODO: Use NormalParams.
 class ParamW_Isf_Cnn_Mixin(nn.Module):
     def __init__(self, cfg):
         super(ParamW_Isf_Cnn_Mixin, self).__init__()
@@ -346,6 +348,7 @@ class ParamW_Isf_Cnn_Mixin(nn.Module):
 
 # "Activation Map" architecture.
 # https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
+# TODO: Use NormalParams.
 class ParamW_Isf_Cnn_AM(nn.Module):
     def __init__(self, cfg):
         super(ParamW_Isf_Cnn_AM, self).__init__()
@@ -424,7 +427,7 @@ class CombineMixin(nn.Module):
         main_embedding = self.embed_net(main)
         return self.output_net(torch.cat((main_embedding, side), 1))
 
-
+# TODO: Use NormalParams.
 class ParamY(nn.Module):
     def __init__(self, cfg):
         super(ParamY, self).__init__()
