@@ -68,7 +68,7 @@ class DynAIR(nn.Module):
             m.cache.clear()
 
     def cache_stats(self):
-        return dict((m._get_name(), m.cache.stats())
+        return dict((m._get_name() + '-' + str(id(m)), m.cache.stats())
                     for m in self.modules_with_cache)
 
     def infer(self, seqs, obj_counts, num_extra_frames=0):
