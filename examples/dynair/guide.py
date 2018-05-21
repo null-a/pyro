@@ -115,7 +115,6 @@ class Guide(nn.Module):
         return pyro.sample('z_{}_{}'.format(t, i), dist.Normal(z_mean, z_sd).independent(1))
 
 
-# TODO: Extend with CNN variants used for guide for w.
 class GuideZ(nn.Module):
     def __init__(self, cfg, combine_module):
         super(GuideZ, self).__init__()
@@ -272,8 +271,9 @@ class GuideW_ImageSoFar(nn.Module):
         return params, image_so_far
 
 
-# TODO: Think more carefully about this architecture. Consider
+# TODO: Think more carefully about these CNN architectures. Consider
 # switching to inputs of a more convenient size.
+
 class InputCnn(nn.Module):
     def __init__(self, in_size):
         super(InputCnn, self).__init__()
@@ -288,6 +288,26 @@ class InputCnn(nn.Module):
             nn.Conv2d(64, 128, 4, stride=2, padding=1), # => 128 x 6 x 6
             nn.ReLU(),
             nn.Conv2d(128, 256, 4, stride=2, padding=0), # => 256 x 2 x 2
+            nn.ReLU(),
+            Flatten()
+        )
+
+    def forward(self, img):
+        return self.cnn(img)
+
+
+class WindowCnn(nn.Module):
+    def __init__(self, in_size):
+        super(WindowCnn, self).__init__()
+        num_chan, w, h = in_size
+        assert w == 24 and h == 24
+        self.output_size = 128 * 3 * 3
+        self.cnn = nn.Sequential(
+            nn.Conv2d(num_chan, 32, 4, stride=2, padding=1), # => 32 x 12 x 12
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2, padding=1), # => 64 x 6 x 6
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 4, stride=2, padding=1), # => 128 x 3 x 3
             nn.ReLU(),
             Flatten()
         )

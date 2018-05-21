@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, ImgEmbedId
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, ImgEmbedId, WindowCnn
 from modules import MLP, Cached
 from opt.run_svi import run_svi
 from opt.utils import md5sum
@@ -91,10 +91,10 @@ def build_module(cfg, use_cuda):
     #                                             non_linear_layer=nn.ReLU,
     #                                             output_non_linearity=True)))
 
-    # TODO: Make a CNN for window contents.
     guide_z = GuideZ(cfg, partial(CombineMixin,
                                   partial(ImgEmbedMlp, hids=[100, 100]),
                                   #partial(ImgEmbedResNet, hids=[100, 100]),
+                                  #WindowCnn,
                                   #ImgEmbedId,
                                   partial(MLP, out_sizes=[100],
                                           non_linear_layer=nn.ReLU,
