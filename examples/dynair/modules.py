@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.functional import relu
+from torch.nn.functional import relu, softplus
 
 # A general purpose module to construct networks that look like:
 # [Linear (256 -> 1)]
@@ -70,6 +70,23 @@ class Flatten(nn.Module):
         batch_size = x.size(0)
         return x.view(batch_size, -1)
 
+# Takes a batch of vectors to a tuple containing a batch of mean and a
+# batch of sd parameters.
+class NormalParams(nn.Module):
+    def __init__(self, in_size, param_size, sd_bias=0.0):
+        super(NormalParams, self).__init__()
+        self.param_size = param_size
+        self.output_layer = nn.Linear(in_size, 2*param_size)
+        nn.init.normal_(self.output_layer.weight, std=0.01)
+        self.output_layer.bias.data *= 0.0
+        self.output_layer.bias.data[param_size:] += sd_bias
+
+    def forward(self, x):
+        out = self.output_layer(x)
+        cols = split_at(out, [self.param_size, self.param_size])
+        mean = cols[0]
+        sd = softplus(cols[1])
+        return mean, sd
 
 # TODO: Make this into a nn.Module to allow more idiomatic PyTorch
 # usage. With this (and Flatten) a lot of code in `forward` methods

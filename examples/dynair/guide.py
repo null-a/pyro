@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, ResNet, Flatten, split_at
+from modules import MLP, ResNet, Flatten, NormalParams, split_at
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -120,24 +120,12 @@ class GuideZ(nn.Module):
     def __init__(self, cfg, combine_module):
         super(GuideZ, self).__init__()
 
-        self.col_widths = [cfg.z_size, cfg.z_size]
         self.combine = combine_module((cfg.num_chan,
                                        cfg.window_size,
                                        cfg.window_size),       # main input size
                                       cfg.w_size + cfg.z_size) # side input size
 
-        # TODO: Extra a module for this output layer? Can use
-        # elsewhere, e.g. GuideW.
-
-        # Note that because we add a linear layer here, we almost
-        # certainly want the final layer of the combiner's output net
-        # includes a non-linearity.
-        self.output_layer = nn.Linear(self.combine.output_size,
-                                      sum(self.col_widths))
-
-        nn.init.normal_(self.output_layer.weight, std=0.01)
-        self.output_layer.bias.data *= 0.0
-        self.output_layer.bias.data[cfg.z_size:] -= 2.25
+        self.params = NormalParams(self.combine.output_size, cfg.z_size, sd_bias=-2.25)
 
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
@@ -147,11 +135,7 @@ class GuideZ(nn.Module):
             assert z_prev_i is None
             z_prev_i = batch_expand(self.z_init, batch_size)
 
-        out = self.output_layer(self.combine(x_att, torch.cat((w, z_prev_i), 1)))
-        cols = split_at(out, self.col_widths)
-        z_mean = cols[0]
-        z_sd = softplus(cols[1])
-        return z_mean, z_sd
+        return self.params(self.combine(x_att, torch.cat((w, z_prev_i), 1)))
 
 
 class ImgEmbedMlp(nn.Module):
