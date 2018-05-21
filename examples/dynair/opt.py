@@ -45,6 +45,9 @@ if __name__ == '__main__':
     parser.add_argument('--guide-w', default='objrnn1',
                         help='architecture of guide for w')
 
+    parser.add_argument('--show', action='store_true', default=False,
+                        help='show module information')
+
     subparsers = parser.add_subparsers(dest='target')
     all_parser = subparsers.add_parser('all')
     bkg_parser = subparsers.add_parser('bkg')

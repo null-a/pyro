@@ -10,6 +10,9 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     decode_bkg, guide_y = bkg_modules(cfg)
     vae = VAE(guide_y, decode_bkg, cfg.y_size, use_cuda=args.cuda)
 
+    if args.show:
+        print(vae)
+
     X_train, _ = X_split
     # Extract backgrounds from the input sequences.
     batches = X_train.mode(2)[0].view(X_train.size()[0:2] + (-1,))

@@ -128,6 +128,9 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     dynair = build_module(cfg, args.cuda)
 
+    if args.show:
+        print(dynair)
+
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
         log_to_cond('bkg params path: {}'.format(args.bkg_params))
