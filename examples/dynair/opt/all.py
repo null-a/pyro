@@ -81,17 +81,19 @@ def build_module(cfg, use_cuda):
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
+    guide_z = GuideZ(cfg, partial(CombineMixin,
+                                  #Identity,
+                                  partial(ImgEmbedMlp, hids=[100, 100]),
+                                  #partial(ImgEmbedResNet, hids=[100, 100]),
+                                  partial(MLP, out_sizes=[100],
+                                          non_linear_layer=nn.ReLU,
+                                          output_non_linearity=True)))
+
     guide = Guide(cfg,
                   dict(guide_w=guide_w,
                        #guide_w=GuideW_ImageSoFar(cfg, model),
                        guide_y=guide_y,
-                       guide_z=GuideZ(cfg, partial(CombineMixin,
-                                                   #Identity,
-                                                   partial(ImgEmbedMlp, hids=[100, 100]),
-                                                   #partial(ImgEmbedResNet, hids=[100, 100]),
-                                                   partial(MLP, out_sizes=[100],
-                                                           non_linear_layer=nn.ReLU,
-                                                           output_non_linearity=True)))
+                       guide_z=guide_z
                   ),
                   use_cuda=use_cuda)
 
