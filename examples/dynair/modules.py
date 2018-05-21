@@ -101,10 +101,8 @@ class NormalParams(nn.Module):
 
     def forward(self, x):
         out = self.output_layer(x)
-        cols = split_at(out, [self.param_size, self.param_size])
-        mean = cols[0]
-        sd = softplus(cols[1])
-        return mean, sd
+        mean, pre_sd = split_at(out, (self.param_size, self.param_size))
+        return mean, softplus(pre_sd)
 
 
 # Split a matrix in a bunch of columns with specified widths.
