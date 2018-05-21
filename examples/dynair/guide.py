@@ -190,10 +190,10 @@ class GuideW_ObjRnn(nn.Module):
 
         self.x_embed = x_embed_module((cfg.num_chan, cfg.image_size, cfg.image_size))
 
-        self.w_param = ParamW(
+        self.rnn_stack = RnnStack(
             self.x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
             rnn_hid_sizes,
-            rnn_cell_use_tanh=rnn_cell_use_tanh)
+            use_tanh=rnn_cell_use_tanh)
 
         self.params = NormalParams(rnn_hid_sizes[-1], cfg.w_size, sd_bias=-2.25)
 
@@ -226,7 +226,7 @@ class GuideW_ObjRnn(nn.Module):
         # then parameterize combine network to allow other ways of
         # combining the input with w and z.
         rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
-        rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
+        rnn_hid = self.rnn_stack(rnn_input, rnn_hid_prev)
         return self.params(rnn_hid[-1]), rnn_hid
 
 
@@ -374,41 +374,35 @@ class ParamW_Isf_Cnn_AM(nn.Module):
         return w_mean, w_sd
 
 
-# TODO: Rename to RnnCellStack or similar.
-class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_sizes, rnn_cell_use_tanh):
-        super(ParamW, self).__init__()
+class RnnStack(nn.Module):
+    def __init__(self, input_size, hid_sizes, use_tanh):
+        super(RnnStack, self).__init__()
 
-        assert len(rnn_hid_sizes) > 0
+        assert len(hid_sizes) > 0
         self.input_size = input_size
-        rnn_input_sizes = [input_size] + rnn_hid_sizes[0:-1]
+        input_sizes = [input_size] + hid_sizes[0:-1]
 
-        nonlinearity = 'tanh' if rnn_cell_use_tanh else 'relu'
+        nonlinearity = 'tanh' if use_tanh else 'relu'
         self.rnns = nn.ModuleList(
-            [nn.RNNCell(i, h, nonlinearity=nonlinearity) for i, h in zip(rnn_input_sizes, rnn_hid_sizes)])
+            [nn.RNNCell(i, h, nonlinearity=nonlinearity) for i, h in zip(input_sizes, hid_sizes)])
 
-        self.rnn_hid_inits = nn.ParameterList(
-            [nn.Parameter(torch.zeros(h)) for h in rnn_hid_sizes])
+        self.hid_inits = nn.ParameterList(
+            [nn.Parameter(torch.zeros(h)) for h in hid_sizes])
 
-        for rnn_hid_init in self.rnn_hid_inits:
-            nn.init.normal_(rnn_hid_init, std=0.01)
+        for hid_init in self.hid_inits:
+            nn.init.normal_(hid_init, std=0.01)
 
-        assert len(self.rnns) == len(self.rnn_hid_inits)
+        assert len(self.rnns) == len(self.hid_inits)
 
-    def forward(self, inp, rnn_hids_prev):
+    def forward(self, inp, hids_prev):
         batch_size = inp.size(0)
         assert inp.size(1) == self.input_size
 
-        if rnn_hids_prev is None:
-            hids_prev = [rnn_hid_init.expand(batch_size, -1)
-                         for rnn_hid_init in self.rnn_hid_inits]
-        else:
-            hids_prev = rnn_hids_prev
-
-        return self.apply_rnn_stack(hids_prev, inp)
-
-    def apply_rnn_stack(self, hids_prev, inp):
+        if hids_prev is None:
+            hids_prev = [hid_init.expand(batch_size, -1)
+                         for hid_init in self.hid_inits]
         assert len(hids_prev) == len(self.rnns)
+
         cur_inp = inp
         hids = []
         for rnn, hid_prev in zip(self.rnns, hids_prev):
