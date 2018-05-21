@@ -350,6 +350,9 @@ class CombineMixin(nn.Module):
 # https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
 
 
+# TODO: Rename to GuideY for consistency. The code that loads
+# pre-trained bkg model parameters will need updating to reflect the
+# new name.
 class ParamY(nn.Module):
     def __init__(self, cfg):
         super(ParamY, self).__init__()
