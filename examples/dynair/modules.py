@@ -10,15 +10,12 @@ from cache import Cache, cached
 # [Linear (256 -> 256), ReLU (), Linear (256 -> 1), ReLU ()]
 # etc.
 class MLP(nn.Module):
-
-    # TODO: Rename out_sizes -> hids for consistency with ResNet.
-
-    def __init__(self, in_size, out_sizes, non_linear_layer, output_non_linearity=False):
+    def __init__(self, in_size, hids, non_linear_layer, output_non_linearity=False):
         super(MLP, self).__init__()
-        assert len(out_sizes) >= 1
+        assert len(hids) >= 1
         layers = []
-        in_sizes = [in_size] + out_sizes[0:-1]
-        sizes = list(zip(in_sizes, out_sizes))
+        in_sizes = [in_size] + hids[0:-1]
+        sizes = list(zip(in_sizes, hids))
         for (i, o) in sizes[0:-1]:
             layers.append(nn.Linear(i, o))
             layers.append(non_linear_layer())
@@ -26,7 +23,7 @@ class MLP(nn.Module):
         if output_non_linearity:
             layers.append(non_linear_layer())
         self.seq = nn.Sequential(*layers)
-        self.output_size = out_sizes[-1]
+        self.output_size = hids[-1]
 
     def forward(self, x):
         return self.seq(x)

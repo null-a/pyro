@@ -88,7 +88,7 @@ def build_module(cfg, use_cuda):
     #                             partial(CombineMixin,
     #                                     InputCnn,
     #                                     #partial(ImgEmbedMlp, hids=[100]),
-    #                                     partial(MLP, out_sizes=[100],
+    #                                     partial(MLP, hids=[100],
     #                                             non_linear_layer=nn.ReLU,
     #                                             output_non_linearity=True)))
 
@@ -97,7 +97,7 @@ def build_module(cfg, use_cuda):
                                   #partial(ImgEmbedResNet, hids=[100, 100]),
                                   #WindowCnn,
                                   #ImgEmbedId,
-                                  partial(MLP, out_sizes=[100],
+                                  partial(MLP, hids=[100],
                                           non_linear_layer=nn.ReLU,
                                           output_non_linearity=True)))
 
