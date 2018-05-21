@@ -198,9 +198,6 @@ class ImgEmbedId(nn.Module):
         return self.flatten(x)
 
 
-# TODO: Should this use combiner net internally? (For consistency.
-# Ensures that all embed nets have same interface, for example.)
-
 class GuideW_ObjRnn(nn.Module):
     def __init__(self, cfg, rnn_hid_sizes, x_embed_module, rnn_cell_use_tanh):
         super(GuideW_ObjRnn, self).__init__()
@@ -237,8 +234,9 @@ class GuideW_ObjRnn(nn.Module):
             w_prev_i = batch_expand(self.w_init, batch_size)
             z_prev_i = batch_expand(self.z_init, batch_size)
 
-        # Could consider other ways of combining x with and the
-        # ws/zs.
+        # Could use CombineMixin here (with Identity as output), and
+        # then parameterize combine network to allow other ways of
+        # combining the input with w and z.
         rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
         w_mean, w_sd, rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
 
