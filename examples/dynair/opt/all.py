@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, Identity
+from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, ImgEmbedId
 from modules import MLP
 from opt.run_svi import run_svi
 from opt.utils import md5sum
@@ -71,9 +71,10 @@ def build_module(cfg, use_cuda):
     # arise if I tried to name all of the variations of e.g. w guide
     # we might be interested in.
 
-    x_embed = ImgEmbedMlp(cfg.x_size, [500, 200])
-    # x_embed = ImgEmbedResNet(cfg.x_size, [500, 200])
-    # x_embed = InputCnn(cfg)
+    x_embed = partial(ImgEmbedMlp, hids=[500, 200])
+    #x_embed = partial(ImgEmbedResNet, hids=[500, 200])
+    #x_embed = InputCnn
+    #x_embed = ImgEmbedId
     if cfg.guide_w == 'objrnn1':
         guide_w = GuideW_ObjRnn(cfg, [200], x_embed, rnn_cell_use_tanh=True)
     elif cfg.guide_w == 'objrnn2':
@@ -83,9 +84,9 @@ def build_module(cfg, use_cuda):
 
     # TODO: Make a CNN for window contents.
     guide_z = GuideZ(cfg, partial(CombineMixin,
-                                  #Identity,
                                   partial(ImgEmbedMlp, hids=[100, 100]),
                                   #partial(ImgEmbedResNet, hids=[100, 100]),
+                                  #ImgEmbedId,
                                   partial(MLP, out_sizes=[100],
                                           non_linear_layer=nn.ReLU,
                                           output_non_linearity=True)))

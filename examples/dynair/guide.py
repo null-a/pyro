@@ -120,10 +120,10 @@ class GuideZ(nn.Module):
     def __init__(self, cfg, combine_module):
         super(GuideZ, self).__init__()
 
-        x_att_size = cfg.num_chan * cfg.window_size**2 # patches cropped from the input
-
         self.col_widths = [cfg.z_size, cfg.z_size]
-        self.combine = combine_module(x_att_size,              # main input size
+        self.combine = combine_module((cfg.num_chan,
+                                       cfg.window_size,
+                                       cfg.window_size),       # main input size
                                       cfg.w_size + cfg.z_size) # side input size
 
         # TODO: Extra a module for this output layer? Can use
@@ -157,10 +157,11 @@ class GuideZ(nn.Module):
 class ImgEmbedMlp(nn.Module):
     def __init__(self, in_size, hids):
         super(ImgEmbedMlp, self).__init__()
+        assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
         self.cache = Cache()
-        self.net = MLP(in_size, hids, nn.ReLU, True)
+        self.net = MLP(product(in_size), hids, nn.ReLU, True)
 
     @cached
     def forward(self, img):
@@ -172,10 +173,11 @@ class ImgEmbedMlp(nn.Module):
 class ImgEmbedResNet(nn.Module):
     def __init__(self, in_size, hids):
         super(ImgEmbedResNet, self).__init__()
+        assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
         self.cache = Cache()
-        self.net = ResNet(in_size, hids)
+        self.net = ResNet(product(in_size), hids)
 
     @cached
     def forward(self, img):
@@ -184,31 +186,29 @@ class ImgEmbedResNet(nn.Module):
         return self.net(img_flat)
 
 
-# Identity embed net.
-class Identity(nn.Module):
+# Identity image embed net.
+class ImgEmbedId(nn.Module):
     def __init__(self, in_size):
-        super(Identity, self).__init__()
-        self.output_size = in_size
+        super(ImgEmbedId, self).__init__()
+        assert len(in_size) == 3
+        self.output_size = product(in_size)
+        self.flatten = Flatten()
 
     def forward(self, x):
-        return x
+        return self.flatten(x)
 
-
-# TODO: Adjust interface to be more like GuideZ. i.e. Take
-# (potentially partially applied) x_embed module as arg and call
-# internally passing x_size as arg.
 
 # TODO: Should this use combiner net internally? (For consistency.
 # Ensures that all embed nets have same interface, for example.)
 
 class GuideW_ObjRnn(nn.Module):
-    def __init__(self, cfg, rnn_hid_sizes, x_embed, rnn_cell_use_tanh):
+    def __init__(self, cfg, rnn_hid_sizes, x_embed_module, rnn_cell_use_tanh):
         super(GuideW_ObjRnn, self).__init__()
 
-        self.x_embed = x_embed
+        self.x_embed = x_embed_module((cfg.num_chan, cfg.image_size, cfg.image_size))
 
         self.w_param = ParamW(
-            x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
+            self.x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
             rnn_hid_sizes, [], cfg.w_size,
             rnn_cell_use_tanh=rnn_cell_use_tanh,
             sd_bias=-2.25)
@@ -316,12 +316,13 @@ class ParamW_Isf_Mlp(nn.Module):
 # TODO: Think more carefully about this architecture. Consider
 # switching to inputs of a more convenient size.
 class InputCnn(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, in_size):
         super(InputCnn, self).__init__()
-        assert cfg.image_size == 50
+        num_chan, w, h = in_size
+        assert w == 50 and h == 50
         self.output_size = 256 * 2 * 2
         self.cnn = nn.Sequential(
-            nn.Conv2d(cfg.num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
+            nn.Conv2d(num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
             nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2, padding=1), # => 64 x 12 x 12
             nn.ReLU(),
