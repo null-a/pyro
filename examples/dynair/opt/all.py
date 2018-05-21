@@ -7,7 +7,8 @@ import torch.nn as nn
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, ImgEmbedMlp, ImgEmbedResNet, InputCnn, CombineMixin, ImgEmbedId, WindowCnn
+from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, CombineMixin,
+                   ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
 from modules import MLP, Cached
 from opt.run_svi import run_svi
 from opt.utils import md5sum
