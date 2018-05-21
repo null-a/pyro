@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, ResNet, Flatten, NormalParams, split_at
+from modules import MLP, ResNet, Flatten, NormalParams
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -354,18 +354,13 @@ class CombineMixin(nn.Module):
 # https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
 
 
-# TODO: Use NormalParams.
 class ParamY(nn.Module):
     def __init__(self, cfg):
         super(ParamY, self).__init__()
-        self.col_widths = [cfg.y_size, cfg.y_size]
-        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)], nn.ReLU)
+        self.mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
+        self.params = NormalParams(self.mlp.output_size, cfg.y_size)
 
     def forward(self, x):
         batch_size = x.size(0)
         x_flat = x.view(batch_size, -1)
-        out = self.mlp(x_flat)
-        cols = split_at(out, self.col_widths)
-        y_mean = cols[0]
-        y_sd = softplus(cols[1])
-        return y_mean, y_sd
+        return self.params(self.mlp(x_flat))
