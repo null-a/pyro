@@ -71,8 +71,8 @@ def build_module(cfg, use_cuda):
     # arise if I tried to name all of the variations of e.g. w guide
     # we might be interested in.
 
-    x_embed = partial(ImgEmbedMlp, hids=[500, 200])
-    #x_embed = partial(ImgEmbedResNet, hids=[500, 200])
+    x_embed = partial(Cached, partial(ImgEmbedMlp, hids=[500, 200]))
+    #x_embed = partial(Cached, partial(ImgEmbedResNet, hids=[500, 200]))
     #x_embed = partial(Cached, InputCnn)
     #x_embed = ImgEmbedId
     if cfg.guide_w == 'objrnn1':

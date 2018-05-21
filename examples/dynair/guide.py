@@ -144,10 +144,8 @@ class ImgEmbedMlp(nn.Module):
         assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
-        self.cache = Cache()
         self.net = MLP(product(in_size), hids, nn.ReLU, True)
 
-    @cached
     def forward(self, img):
         batch_size = img.size(0)
         img_flat = img.view(batch_size, -1)
@@ -160,10 +158,8 @@ class ImgEmbedResNet(nn.Module):
         assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
-        self.cache = Cache()
         self.net = ResNet(product(in_size), hids)
 
-    @cached
     def forward(self, img):
         batch_size = img.size(0)
         img_flat = img.view(batch_size, -1)
