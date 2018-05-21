@@ -186,13 +186,17 @@ class GuideW_ObjRnn(nn.Module):
     def __init__(self, cfg, rnn_hid_sizes, x_embed_module, rnn_cell_use_tanh):
         super(GuideW_ObjRnn, self).__init__()
 
+        assert len(rnn_hid_sizes) >= 1
+
         self.x_embed = x_embed_module((cfg.num_chan, cfg.image_size, cfg.image_size))
 
         self.w_param = ParamW(
             self.x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size
-            rnn_hid_sizes, [], cfg.w_size,
-            rnn_cell_use_tanh=rnn_cell_use_tanh,
-            sd_bias=-2.25)
+            rnn_hid_sizes,
+            rnn_cell_use_tanh=rnn_cell_use_tanh)
+
+        self.params = NormalParams(rnn_hid_sizes[-1], cfg.w_size, sd_bias=-2.25)
+
         self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_t_prev_init = nn.Parameter(torch.zeros(cfg.z_size))
 
@@ -222,9 +226,8 @@ class GuideW_ObjRnn(nn.Module):
         # then parameterize combine network to allow other ways of
         # combining the input with w and z.
         rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
-        w_mean, w_sd, rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
-
-        return (w_mean, w_sd), rnn_hid
+        rnn_hid = self.w_param(rnn_input, rnn_hid_prev)
+        return self.params(rnn_hid[-1]), rnn_hid
 
 
 class GuideW_ImageSoFar(nn.Module):
@@ -371,17 +374,13 @@ class ParamW_Isf_Cnn_AM(nn.Module):
         return w_mean, w_sd
 
 
-# TODO: This would look like a (mostly?) generic multi-layer RNNCell
-# if the final layer that compute the parameters of the distribution
-# was move into its parent module.
+# TODO: Rename to RnnCellStack or similar.
 class ParamW(nn.Module):
-    def __init__(self, input_size, rnn_hid_sizes, hids, w_size, rnn_cell_use_tanh, sd_bias=0.0):
+    def __init__(self, input_size, rnn_hid_sizes, rnn_cell_use_tanh):
         super(ParamW, self).__init__()
 
         assert len(rnn_hid_sizes) > 0
-
         self.input_size = input_size
-
         rnn_input_sizes = [input_size] + rnn_hid_sizes[0:-1]
 
         nonlinearity = 'tanh' if rnn_cell_use_tanh else 'relu'
@@ -396,25 +395,6 @@ class ParamW(nn.Module):
 
         assert len(self.rnns) == len(self.rnn_hid_inits)
 
-        self.col_widths = [w_size, w_size]
-        self.mlp = MLP(rnn_hid_sizes[-1], hids + [sum(self.col_widths)], nn.ReLU)
-
-        # Adjust the init. of the parameter MLP in an attempt to:
-
-        # 1) Have the w delta output by the network be close to zero
-        # at the start of optimisation. The motivation is that we want
-        # minimise drift, in the hope that this helps prevent the
-        # guide moving all of the windows out of frame during the
-        # first few steps. (Because I assume this hurts optimisation.)
-
-        # 2) Have the sd start out at around 0.1 for much the same
-        # reason. Here we match the sd the initial sd used in the
-        # model. (Is the latter sensible/helpful?)
-
-        nn.init.normal_(self.mlp.seq[-1].weight, std=0.01)
-        self.mlp.seq[-1].bias.data *= 0.0
-        self.mlp.seq[-1].bias.data[w_size:] += sd_bias
-
     def forward(self, inp, rnn_hids_prev):
         batch_size = inp.size(0)
         assert inp.size(1) == self.input_size
@@ -425,13 +405,7 @@ class ParamW(nn.Module):
         else:
             hids_prev = rnn_hids_prev
 
-        hids = self.apply_rnn_stack(hids_prev, inp)
-        out = self.mlp(hids[-1])
-        cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-
-        return w_mean, w_sd, hids
+        return self.apply_rnn_stack(hids_prev, inp)
 
     def apply_rnn_stack(self, hids_prev, inp):
         assert len(hids_prev) == len(self.rnns)

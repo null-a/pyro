@@ -77,6 +77,22 @@ class NormalParams(nn.Module):
         super(NormalParams, self).__init__()
         self.param_size = param_size
         self.output_layer = nn.Linear(in_size, 2*param_size)
+
+        # These notes below described the motivation for this init
+        # when originally added to the guide for w. The same thing was
+        # also subsequently used in the guide for z. I don't know
+        # whether this is necessary with bkg model pre-training.
+
+        # 1) Have the w delta output by the network be close to zero
+        # at the start of optimisation. The motivation is that we want
+        # minimise drift, in the hope that this helps prevent the
+        # guide moving all of the windows out of frame during the
+        # first few steps. (Because I assume this hurts optimisation.)
+
+        # 2) Have the sd start out at around 0.1 for much the same
+        # reason. Here we match the sd the initial sd used in the
+        # model. (Is the latter sensible/helpful?)
+
         nn.init.normal_(self.output_layer.weight, std=0.01)
         self.output_layer.bias.data *= 0.0
         self.output_layer.bias.data[param_size:] += sd_bias
@@ -88,10 +104,6 @@ class NormalParams(nn.Module):
         sd = softplus(cols[1])
         return mean, sd
 
-# TODO: Make this into a nn.Module to allow more idiomatic PyTorch
-# usage. With this (and Flatten) a lot of code in `forward` methods
-# can be replaced with the use of `nn.Sequential`. If this doesn't
-# work out, have this return a tuple for more concise usage.
 
 # Split a matrix in a bunch of columns with specified widths.
 def split_at(t, widths):
