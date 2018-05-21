@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import relu, softplus
 
+from cache import Cache, cached
+
 # A general purpose module to construct networks that look like:
 # [Linear (256 -> 1)]
 # [Linear (256 -> 256), ReLU (), Linear (256 -> 1)]
@@ -111,3 +113,18 @@ def split_at(t, widths):
     assert t.size(1) == sum(widths)
     csum = torch.LongTensor(widths).cumsum(0).tolist()
     return [t[:,start:stop] for (start, stop) in zip([0] + csum, csum)]
+
+
+# This is awkward to use, could consider improving with
+# inheritance/decorators.
+class Cached(nn.Module):
+    def __init__(self, module, *args, **kwargs):
+        super(Cached, self).__init__()
+        self.net = module(*args, **kwargs)
+        if hasattr(self.net, 'output_size'):
+            self.output_size = self.net.output_size
+        self.cache = Cache()
+
+    @cached
+    def forward(self, x):
+        return self.net(x)

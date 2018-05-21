@@ -297,7 +297,6 @@ class ParamW_Isf_Mlp(nn.Module):
         w_sd = softplus(cols[1])
         return w_mean, w_sd
 
-# TODO: Add caching. (Will be useful if used with object RNN.)
 
 # TODO: Think more carefully about this architecture. Consider
 # switching to inputs of a more convenient size.
