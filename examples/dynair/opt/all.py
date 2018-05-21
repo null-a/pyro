@@ -81,6 +81,7 @@ def build_module(cfg, use_cuda):
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
+    # TODO: Make a CNN for window contents.
     guide_z = GuideZ(cfg, partial(CombineMixin,
                                   #Identity,
                                   partial(ImgEmbedMlp, hids=[100, 100]),

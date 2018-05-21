@@ -126,6 +126,9 @@ class GuideZ(nn.Module):
         self.combine = combine_module(x_att_size,              # main input size
                                       cfg.w_size + cfg.z_size) # side input size
 
+        # TODO: Extra a module for this output layer? Can use
+        # elsewhere, e.g. GuideW.
+
         # Note that because we add a linear layer here, we almost
         # certainly want the final layer of the combiner's output net
         # includes a non-linearity.
@@ -190,6 +193,13 @@ class Identity(nn.Module):
     def forward(self, x):
         return x
 
+
+# TODO: Adjust interface to be more like GuideZ. i.e. Take
+# (potentially partially applied) x_embed module as arg and call
+# internally passing x_size as arg.
+
+# TODO: Should this use combiner net internally? (For consistency.
+# Ensures that all embed nets have same interface, for example.)
 
 class GuideW_ObjRnn(nn.Module):
     def __init__(self, cfg, rnn_hid_sizes, x_embed, rnn_cell_use_tanh):
@@ -301,6 +311,7 @@ class ParamW_Isf_Mlp(nn.Module):
         w_sd = softplus(cols[1])
         return w_mean, w_sd
 
+# TODO: Add caching. (Will be useful if used with object RNN.)
 
 # TODO: Think more carefully about this architecture. Consider
 # switching to inputs of a more convenient size.
@@ -377,6 +388,9 @@ class ParamW_Isf_Cnn_AM(nn.Module):
         return w_mean, w_sd
 
 
+# TODO: This would look like a (mostly?) generic multi-layer RNNCell
+# if the final layer that compute the parameters of the distribution
+# was move into its parent module.
 class ParamW(nn.Module):
     def __init__(self, input_size, rnn_hid_sizes, hids, w_size, rnn_cell_use_tanh, sd_bias=0.0):
         super(ParamW, self).__init__()
