@@ -144,12 +144,10 @@ class ImgEmbedMlp(nn.Module):
         assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
-        self.net = MLP(product(in_size), hids, nn.ReLU, True)
+        self.net = nn.Sequential(Flatten(), MLP(product(in_size), hids, nn.ReLU, True))
 
     def forward(self, img):
-        batch_size = img.size(0)
-        img_flat = img.view(batch_size, -1)
-        return self.net(img_flat)
+        return self.net(img)
 
 
 class ImgEmbedResNet(nn.Module):
@@ -158,12 +156,10 @@ class ImgEmbedResNet(nn.Module):
         assert len(in_size) == 3
         assert len(hids) >= 1
         self.output_size = hids[-1]
-        self.net = ResNet(product(in_size), hids)
+        self.net = nn.Sequential(Flatten(), ResNet(product(in_size), hids))
 
     def forward(self, img):
-        batch_size = img.size(0)
-        img_flat = img.view(batch_size, -1)
-        return self.net(img_flat)
+        return self.net(img)
 
 
 # Identity image embed net.
@@ -357,10 +353,9 @@ class CombineMixin(nn.Module):
 class ParamY(nn.Module):
     def __init__(self, cfg):
         super(ParamY, self).__init__()
-        self.mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
-        self.params = NormalParams(self.mlp.output_size, cfg.y_size)
+        mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
+        params = NormalParams(mlp.output_size, cfg.y_size)
+        self.net = nn.Sequential(Flatten(), mlp, params)
 
     def forward(self, x):
-        batch_size = x.size(0)
-        x_flat = x.view(batch_size, -1)
-        return self.params(self.mlp(x_flat))
+        return self.net(x)
