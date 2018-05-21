@@ -11,7 +11,7 @@ def image_to_window(cfg, w, images):
     grid = affine_grid(theta_inv, torch.Size((n, cfg.num_chan, cfg.window_size, cfg.window_size)))
     # TODO: Consider using padding_mode='border' with grid_sample,
     # seems pretty sensible, though may not make much difference.
-    return grid_sample(images, grid).view(n, -1)
+    return grid_sample(images, grid)
 
 def window_to_image(cfg, w, windows):
     n = w.size(0)
