@@ -82,6 +82,15 @@ def build_module(cfg, use_cuda):
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
+    # guide_w = GuideW_ImageSoFar(cfg,
+    #                             model,
+    #                             partial(CombineMixin,
+    #                                     InputCnn,
+    #                                     #partial(ImgEmbedMlp, hids=[100]),
+    #                                     partial(MLP, out_sizes=[100],
+    #                                             non_linear_layer=nn.ReLU,
+    #                                             output_non_linearity=True)))
+
     # TODO: Make a CNN for window contents.
     guide_z = GuideZ(cfg, partial(CombineMixin,
                                   partial(ImgEmbedMlp, hids=[100, 100]),
@@ -93,7 +102,6 @@ def build_module(cfg, use_cuda):
 
     guide = Guide(cfg,
                   dict(guide_w=guide_w,
-                       #guide_w=GuideW_ImageSoFar(cfg, model),
                        guide_y=guide_y,
                        guide_z=guide_z
                   ),

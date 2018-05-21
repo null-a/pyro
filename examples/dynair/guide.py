@@ -227,12 +227,13 @@ class GuideW_ObjRnn(nn.Module):
 
 
 class GuideW_ImageSoFar(nn.Module):
-    def __init__(self, cfg, model):
+    def __init__(self, cfg, model, combine_module):
         super(GuideW_ImageSoFar, self).__init__()
 
-        self.w_param = ParamW_Isf_Mlp(cfg)
-        #self.w_param = ParamW_Isf_Cnn_Mixin(cfg)
-        #self.w_param = ParamW_Isf_Cnn_AM(cfg)
+        self.combine = combine_module((cfg.num_chan, cfg.image_size, cfg.image_size), # image so far diff
+                                      cfg.w_size + cfg.z_size)                        # side input
+
+        self.params = NormalParams(self.combine.output_size, cfg.w_size, sd_bias=-2.25)
 
         # TODO: Does it make sense that this is a parameter (rather
         # than fixed) in the case where the guide computing the delta?
@@ -271,27 +272,8 @@ class GuideW_ImageSoFar(nn.Module):
         # For simplicity, feed `x - image_so_far` into the net, though
         # note that alternatives exist.
         diff = x - image_so_far
-        w_mean, w_sd = self.w_param(diff, w_prev_i, z_prev_i)
-        return (w_mean, w_sd), image_so_far
-
-
-# TODO: Use NormalParams.
-class ParamW_Isf_Mlp(nn.Module):
-    def __init__(self, cfg):
-        super(ParamW_Isf_Mlp, self).__init__()
-        self.col_widths = [cfg.w_size, cfg.w_size]
-        self.mlp = MLP(cfg.x_size + cfg.w_size + cfg.z_size,
-                       [500, 200, 200, sum(self.col_widths)], nn.ReLU)
-
-    def forward(self, img, w_prev, z_prev):
-        batch_size = img.size(0)
-        # TODO: Make a "Flatten" nn.Module.
-        flat_img = img.view(batch_size, -1)
-        out = self.mlp(torch.cat((flat_img, w_prev, z_prev), 1))
-        cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
+        params = self.params(self.combine(diff, torch.cat((w_prev_i, z_prev_i), 1)))
+        return params, image_so_far
 
 
 # TODO: Think more carefully about this architecture. Consider
@@ -316,60 +298,6 @@ class InputCnn(nn.Module):
 
     def forward(self, img):
         return self.cnn(img)
-
-
-# TODO: Use NormalParams.
-class ParamW_Isf_Cnn_Mixin(nn.Module):
-    def __init__(self, cfg):
-        super(ParamW_Isf_Cnn_Mixin, self).__init__()
-
-        self.col_widths = [cfg.w_size, cfg.w_size]
-
-        self.cnn = InputCnn(cfg)
-
-        self.mlp = MLP(self.cnn.output_size + cfg.w_size + cfg.z_size,
-                       [200, 200, sum(self.col_widths)],
-                       nn.ReLU)
-
-
-    def forward(self, img, w_prev, z_prev):
-        cnn_out = self.cnn(img)
-        out = self.mlp(torch.cat((cnn_out, w_prev, z_prev), 1))
-        cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
-
-
-# "Activation Map" architecture.
-# https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
-# TODO: Use NormalParams.
-class ParamW_Isf_Cnn_AM(nn.Module):
-    def __init__(self, cfg):
-        super(ParamW_Isf_Cnn_AM, self).__init__()
-
-        self.num_chan = cfg.num_chan
-        self.image_size = cfg.image_size
-
-        self.col_widths = [cfg.w_size, cfg.w_size]
-
-        # TODO: Could use transposed convolution here?
-        # TODO: Check appropriateness of hidden sizes here.
-        self.am_mlp = MLP(cfg.w_size + cfg.z_size, [200, 200, cfg.x_size], nn.ReLU)
-        self.cnn = InputCnn(cfg)
-        self.output_mlp = MLP(self.cnn.output_size, [sum(self.col_widths)], nn.ReLU)
-
-
-    def forward(self, img, w_prev, z_prev):
-        batch_size = img.size(0)
-        am_flat = self.am_mlp(torch.cat((w_prev, z_prev), 1))
-        am = am_flat.view(batch_size, self.num_chan, self.image_size, self.image_size)
-        cnn_out = self.cnn(img * am)
-        out = self.output_mlp(cnn_out)
-        cols = split_at(out, self.col_widths)
-        w_mean = cols[0]
-        w_sd = softplus(cols[1])
-        return w_mean, w_sd
 
 
 class RnnStack(nn.Module):
@@ -421,6 +349,10 @@ class CombineMixin(nn.Module):
     def forward(self, main, side):
         main_embedding = self.embed_net(main)
         return self.output_net(torch.cat((main_embedding, side), 1))
+
+# TODO: Add combine net for the "Activation Map" architecture.
+# https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
+
 
 # TODO: Use NormalParams.
 class ParamY(nn.Module):
