@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
-from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, ParamY, CombineMixin,
+from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, GuideY, CombineMixin,
                    ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
 from modules import MLP, Cached
 from opt.run_svi import run_svi
@@ -111,7 +111,7 @@ def build_module(cfg, use_cuda):
     return DynAIR(cfg, model, guide, use_cuda=use_cuda)
 
 def bkg_modules(cfg):
-    return DecodeBkg(cfg), ParamY(cfg)
+    return DecodeBkg(cfg), GuideY(cfg)
 
 def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 

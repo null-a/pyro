@@ -370,12 +370,9 @@ class CombineMixin(nn.Module):
 # https://users.cs.duke.edu/~yilun/pdf/icra2017incorporating.pdf
 
 
-# TODO: Rename to GuideY for consistency. The code that loads
-# pre-trained bkg model parameters will need updating to reflect the
-# new name.
-class ParamY(nn.Module):
+class GuideY(nn.Module):
     def __init__(self, cfg):
-        super(ParamY, self).__init__()
+        super(GuideY, self).__init__()
         mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
         params = NormalParams(mlp.output_size, cfg.y_size)
         self.net = nn.Sequential(Flatten(), mlp, params)
