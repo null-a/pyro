@@ -15,7 +15,10 @@ Config = namedtuple('Config',
                      'window_size',
                      'model_delta_w',
                      'model_delta_z',
-                     'guide_w'
+                     'guide_w',
+                     'guide_z',
+                     'guide_input_embed',
+                     'guide_window_embed',
                     ])
 
 def config(module_config, data_config):

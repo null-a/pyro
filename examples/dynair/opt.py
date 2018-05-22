@@ -42,8 +42,14 @@ if __name__ == '__main__':
     parser.add_argument('--model-delta-z', action='store_true', default=False,
                         help='use z transition output as delta from previous value to next mean')
 
-    parser.add_argument('--guide-w', default='objrnn1',
+    parser.add_argument('--guide-w', default='rnn-tanh-200-200',
                         help='architecture of guide for w')
+    parser.add_argument('--guide-z', default='mlp-100',
+                        help='architecture of guide for z')
+    parser.add_argument('--guide-input-embed', default='mlp-500-200',
+                        help='architecture of input embedding network')
+    parser.add_argument('--guide-window-embed', default='mlp-100-100',
+                        help='architecture of window embedding network')
 
     parser.add_argument('--show', action='store_true', default=False,
                         help='show module information')
@@ -72,7 +78,10 @@ if __name__ == '__main__':
                          window_size=args.window_size,
                          model_delta_w=args.model_delta_w,
                          model_delta_z=args.model_delta_z,
-                         guide_w=args.guide_w)
+                         guide_w=args.guide_w,
+                         guide_z=args.guide_z,
+                         guide_input_embed=args.guide_input_embed,
+                         guide_window_embed=args.guide_window_embed)
     cfg = config(module_config, data_params(data))
 
     output_path = make_output_dir(args.o)

@@ -50,3 +50,23 @@ def md5sum(fn):
         for chunk in iter(lambda: f.read(128 * hash.block_size), b""):
             hash.update(chunk)
     return hash.hexdigest()
+
+# Crude parser for (parts of the) guide architecture CLA.
+# 'foo-bar|baz', 'foo-bar' => ['foo', 'bar']
+# 'foo-bar|baz', 'foo-baz' => ['foo', 'baz']
+# 'foo-bar|baz', 'foo-baz-10-20' => ['foo', 'baz', 10, 20]
+# 'foo-bar|baz', 'blah' => error
+# 'foo-bar|baz', 'foo-blah' => error
+def parse_cla(fmt, input_string):
+    fmts = fmt.split('-')
+    toks = input_string.split('-')
+    assert len(toks) >= len(fmts), 'input is too short'
+    out = []
+    for f, t in zip(fmts, toks):
+        vals = f.split('|')
+        assert t in vals, 'input "{}" is not of the expected format "{}"'.format(input_string, fmt)
+        out.append(t)
+
+    # Trailing tokens are assumed to be ints.
+    out = out + [int(i) for i in toks[len(fmts):]]
+    return out

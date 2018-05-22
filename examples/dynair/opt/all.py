@@ -11,7 +11,7 @@ from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, GuideY, Comb
                    ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
 from modules import MLP, Cached
 from opt.run_svi import run_svi
-from opt.utils import md5sum
+from opt.utils import md5sum, parse_cla
 from vis import overlay_multiple_window_outlines
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
@@ -65,41 +65,64 @@ def build_module(cfg, use_cuda):
                   delta_z=cfg.model_delta_z,
                   use_cuda=use_cuda)
 
-    # TODO: Figure out how best to specify the desired model/guide
-    # architecture. I'd rather not have to add(/maintain) a
-    # complicated set of hierarchical options to argparse, but I also
-    # need to avoid the combinatorial explosion that would likely
-    # arise if I tried to name all of the variations of e.g. w guide
-    # we might be interested in.
+    if cfg.guide_input_embed.startswith('mlp'):
+        _, *hids = parse_cla('mlp', cfg.guide_input_embed)
+        x_embed = partial(ImgEmbedMlp, hids=hids)
+    elif cfg.guide_input_embed.startswith('resnet'):
+        _, *hids = parse_cla('resnet', cfg.guide_input_embed)
+        x_embed = partial(ImgEmbedResNet, hids=hids)
+    elif cfg.guide_input_embed == 'cnn':
+        x_embed = InputCnn
+    elif cfg.guide_input_embed == 'id':
+        x_embed = ImgEmbedId
+    else:
+        raise Exception('unknown guide_input_embed: {}'.format(cfg.guide_input_embed))
 
-    x_embed = partial(Cached, partial(ImgEmbedMlp, hids=[500, 200]))
-    #x_embed = partial(Cached, partial(ImgEmbedResNet, hids=[500, 200]))
-    #x_embed = partial(Cached, InputCnn)
-    #x_embed = ImgEmbedId
-    if cfg.guide_w == 'objrnn1':
-        guide_w = GuideW_ObjRnn(cfg, [200], x_embed, rnn_cell_use_tanh=True)
-    elif cfg.guide_w == 'objrnn2':
-        guide_w = GuideW_ObjRnn(cfg, [200, 200], x_embed, rnn_cell_use_tanh=True)
+    if cfg.guide_w.startswith('rnn'):
+        _, nl, *hids = parse_cla('rnn-tanh|relu', cfg.guide_w)
+        # TODO: Push this caching into GuideW_ObjRnn.
+        # Cache the output of the embed net to avoid computing the
+        # same embedding at each object step.
+        use_tanh = nl == 'tanh'
+        guide_w = GuideW_ObjRnn(cfg, hids, partial(Cached, x_embed), rnn_cell_use_tanh=use_tanh)
+    elif cfg.guide_w.startswith('isf'):
+        # TODO: Add ResNet option.
+        _, *hids = parse_cla('isf', cfg.guide_w)
+        guide_w = GuideW_ImageSoFar(cfg,
+                                    model,
+                                    partial(CombineMixin,
+                                            x_embed,
+                                            partial(MLP, hids=hids,
+                                                    non_linear_layer=nn.ReLU,
+                                                    output_non_linearity=True)))
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
-    # guide_w = GuideW_ImageSoFar(cfg,
-    #                             model,
-    #                             partial(CombineMixin,
-    #                                     InputCnn,
-    #                                     #partial(ImgEmbedMlp, hids=[100]),
-    #                                     partial(MLP, hids=[100],
-    #                                             non_linear_layer=nn.ReLU,
-    #                                             output_non_linearity=True)))
+    if cfg.guide_window_embed.startswith('mlp'):
+        _, *hids = parse_cla('mlp', cfg.guide_window_embed)
+        x_att_embed = partial(ImgEmbedMlp, hids=hids)
+    elif cfg.guide_window_embed.startswith('resnet'):
+        _, *hids = parse_cla('resnet', cfg.guide_window_embed)
+        x_att_embed = partial(ImgEmbedResNet, hids=hids)
+    elif cfg.guide_window_embed == 'cnn':
+        x_att_embed = WindowCnn
+    elif cfg.guide_window_embed == 'id':
+        x_att_embed = ImgEmbedId
+    else:
+        raise Exception('unknown guide_window_embed: {}'.format(cfg.guide_window_embed))
 
-    guide_z = GuideZ(cfg, partial(CombineMixin,
-                                  partial(ImgEmbedMlp, hids=[100, 100]),
-                                  #partial(ImgEmbedResNet, hids=[100, 100]),
-                                  #WindowCnn,
-                                  #ImgEmbedId,
-                                  partial(MLP, hids=[100],
-                                          non_linear_layer=nn.ReLU,
-                                          output_non_linearity=True)))
+
+    if cfg.guide_z.startswith('mlp'):
+        # TODO: Add ResNet option.
+        _, *hids = parse_cla('mlp', cfg.guide_z)
+        guide_z = GuideZ(cfg,
+                         partial(CombineMixin,
+                                 x_att_embed,
+                                 partial(MLP, hids=hids,
+                                         non_linear_layer=nn.ReLU,
+                                         output_non_linearity=True)))
+    else:
+        raise Exception('unknown guide_z: {}'.format(cfg.guide_z))
 
     guide = Guide(cfg,
                   dict(guide_w=guide_w,
