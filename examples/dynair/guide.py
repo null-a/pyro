@@ -141,9 +141,9 @@ class ImgEmbedMlp(nn.Module):
     def __init__(self, in_size, hids):
         super(ImgEmbedMlp, self).__init__()
         assert len(in_size) == 3
-        assert len(hids) >= 1
-        self.output_size = hids[-1]
-        self.net = nn.Sequential(Flatten(), MLP(product(in_size), hids, nn.ReLU, True))
+        mlp = MLP(product(in_size), hids, nn.ReLU, True)
+        self.net = nn.Sequential(Flatten(), mlp)
+        self.output_size = mlp.output_size
 
     def forward(self, img):
         return self.net(img)
@@ -153,9 +153,9 @@ class ImgEmbedResNet(nn.Module):
     def __init__(self, in_size, hids):
         super(ImgEmbedResNet, self).__init__()
         assert len(in_size) == 3
-        assert len(hids) >= 1
-        self.output_size = hids[-1]
-        self.net = nn.Sequential(Flatten(), ResNet(product(in_size), hids))
+        resnet = ResNet(product(in_size), hids)
+        self.net = nn.Sequential(Flatten(), resnet)
+        self.output_size = resnet.output_size
 
     def forward(self, img):
         return self.net(img)
