@@ -50,12 +50,14 @@ class ResidualBlockFC(nn.Module):
 class ResNet(nn.Module):
     def __init__(self, in_size, hids, block=ResidualBlockFC):
         super(ResNet, self).__init__()
+        assert len(hids) > 0
         assert len(hids) % 2 == 0, 'number of hidden layers must be even'
         num_blocks = len(hids) // 2
         all_sizes = [in_size] + hids
         block_sizes = [tuple(all_sizes[(i*2):(i*2)+3]) for i in range(num_blocks)]
         blocks = [block(size) for size in block_sizes]
         self.seq = nn.Sequential(*blocks)
+        self.output_size = hids[-1]
 
     def forward(self, x):
         return self.seq(x)
