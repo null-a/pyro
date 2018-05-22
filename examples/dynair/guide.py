@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, ResNet, Flatten, NormalParams, Cached
+from modules import MLP, ResNet, Flatten, NormalParams, Cached, split_at
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -375,9 +375,29 @@ class CombineMixin(nn.Module):
 class GuideY(nn.Module):
     def __init__(self, cfg):
         super(GuideY, self).__init__()
-        mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
-        params = NormalParams(mlp.output_size, cfg.y_size)
-        self.net = nn.Sequential(Flatten(), mlp, params)
+        self.col_widths = [cfg.y_size, cfg.y_size]
+        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)], nn.ReLU)
 
     def forward(self, x):
-        return self.net(x)
+        batch_size = x.size(0)
+        x_flat = x.view(batch_size, -1)
+        out = self.mlp(x_flat)
+        cols = split_at(out, self.col_widths)
+        y_mean = cols[0]
+        y_sd = softplus(cols[1])
+        return y_mean, y_sd
+
+
+# TODO: Reinstate this simpler implementation. (Also drop split_at import.)
+# Requires reoptimizing bkg model params or modifying the existing
+# params so that the names align.
+
+# class GuideY(nn.Module):
+#     def __init__(self, cfg):
+#         super(GuideY, self).__init__()
+#         mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
+#         params = NormalParams(mlp.output_size, cfg.y_size)
+#         self.net = nn.Sequential(Flatten(), mlp, params)
+
+#     def forward(self, x):
+#         return self.net(x)
