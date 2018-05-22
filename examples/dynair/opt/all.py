@@ -38,17 +38,14 @@ def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
 
 def load_bkg_params(dynair, path):
     print('loading {}'.format(path))
-    state_dict = dict((bkg_to_dynair_name_map(k),v) for k, v in
-                      torch.load(path, map_location=lambda storage, loc: storage).items())
-    dynair.load_state_dict(state_dict, strict=False)
+    state_dict = torch.load(path, map_location=lambda storage, loc: storage)
+    dynair.guide.guide_y.load_state_dict(get_params_by_prefix(state_dict, 'encode'))
+    dynair.model._decode_bkg.load_state_dict(get_params_by_prefix(state_dict, 'decode'))
 
-def bkg_to_dynair_name_map(name):
-    if name.startswith('encode'):
-        return name.replace('encode', 'guide.guide_y', 1)
-    elif name.startswith('decode'):
-        return name.replace('decode', 'model._decode_bkg', 1)
-    else:
-        raise 'unexpected parameter name encountered'
+def get_params_by_prefix(state_dict, prefix):
+    return dict((k.replace(prefix + '.', '', 1), v)
+                for k, v in state_dict.items()
+                if k.startswith(prefix))
 
 def is_bkg_param(module_name, param_name):
     return ((module_name == 'guide' and param_name.startswith('guide_y')) or
