@@ -280,7 +280,7 @@ class InputCnn(nn.Module):
     def __init__(self, in_size):
         super(InputCnn, self).__init__()
         num_chan, w, h = in_size
-        assert w == 50 and h == 50
+        assert w == 50 and h == 50, 'input cnn requires an input size of 50'
         self.output_size = 256 * 2 * 2
         self.cnn = nn.Sequential(
             nn.Conv2d(num_chan, 32, 4, stride=2, padding=0), # => 32 x 24 x 24
@@ -302,7 +302,7 @@ class WindowCnn(nn.Module):
     def __init__(self, in_size):
         super(WindowCnn, self).__init__()
         num_chan, w, h = in_size
-        assert w == 24 and h == 24
+        assert w == 24 and h == 24, 'window cnn requires a window size of 24'
         self.output_size = 128 * 3 * 3
         self.cnn = nn.Sequential(
             nn.Conv2d(num_chan, 32, 4, stride=2, padding=1), # => 32 x 12 x 12
