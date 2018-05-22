@@ -12,7 +12,7 @@ from cache import Cache, cached
 class MLP(nn.Module):
     def __init__(self, in_size, hids, non_linear_layer, output_non_linearity=False):
         super(MLP, self).__init__()
-        assert len(hids) >= 1
+        assert len(hids) > 0
         layers = []
         in_sizes = [in_size] + hids[0:-1]
         sizes = list(zip(in_sizes, hids))
