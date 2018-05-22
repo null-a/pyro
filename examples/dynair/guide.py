@@ -224,8 +224,10 @@ class GuideW_ObjRnn(nn.Module):
 
 
 class GuideW_ImageSoFar(nn.Module):
-    def __init__(self, cfg, model, combine_module):
+    def __init__(self, cfg, model, combine_module, block_grad):
         super(GuideW_ImageSoFar, self).__init__()
+
+        self.block_grad = block_grad
 
         self.combine = combine_module((cfg.num_chan, cfg.image_size, cfg.image_size), # image so far diff
                                       cfg.w_size + cfg.z_size)                        # side input
@@ -259,7 +261,9 @@ class GuideW_ImageSoFar(nn.Module):
                                                  image_so_far_prev)
 
         # TODO: Should we be preventing gradients from flowing back
-        # from the guide through image_so_far?
+        # from the guide to the model, through image_so_far?
+        if self.block_grad:
+            image_so_far = image_so_far.detach()
 
         if t == 0:
             assert w_prev_i is None and z_prev_i is None

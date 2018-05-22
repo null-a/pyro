@@ -12,8 +12,9 @@ run "--guide-input-embed id"
 
 run "--guide-w rnn-tanh-10-10"
 run "--guide-w rnn-relu-10-10"
-run "--guide-w isf-mlp-10-10"
-run "--guide-w isf-resnet-10-10"
+run "--guide-w isf-block-mlp-10-10"
+run "--guide-w isf-noblock-mlp-10-10"
+run "--guide-w isf-noblock-resnet-10-10"
 
 run "--guide-window-embed mlp-10-10"
 run "--guide-window-embed resnet-10-10"
