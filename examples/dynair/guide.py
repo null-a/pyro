@@ -7,7 +7,7 @@ import pyro
 import pyro.poutine as poutine
 import pyro.distributions as dist
 from cache import Cache, cached
-from modules import MLP, ResNet, Flatten, NormalParams
+from modules import MLP, ResNet, Flatten, NormalParams, Cached
 from utils import assert_size, batch_expand, delta_mean
 from transform import image_to_window
 
@@ -179,7 +179,9 @@ class GuideW_ObjRnn(nn.Module):
 
         assert len(rnn_hid_sizes) >= 1
 
-        self.x_embed = x_embed_module((cfg.num_chan, cfg.image_size, cfg.image_size))
+        # Cache the output of the embed net to avoid computing the
+        # same embedding at each object step.
+        self.x_embed = Cached(x_embed_module((cfg.num_chan, cfg.image_size, cfg.image_size)))
 
         self.rnn_stack = RnnStack(
             self.x_embed.output_size + 2 * cfg.w_size + 2 * cfg.z_size, # input size

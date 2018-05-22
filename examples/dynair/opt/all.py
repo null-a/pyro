@@ -9,7 +9,7 @@ from dynair import DynAIR
 from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
 from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, GuideY, CombineMixin,
                    ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
-from modules import MLP, ResNet, Cached
+from modules import MLP, ResNet
 from opt.run_svi import run_svi
 from opt.utils import md5sum, parse_cla
 from vis import overlay_multiple_window_outlines
@@ -80,11 +80,8 @@ def build_module(cfg, use_cuda):
 
     if cfg.guide_w.startswith('rnn'):
         _, nl, *hids = parse_cla('rnn-tanh|relu', cfg.guide_w)
-        # TODO: Push this caching into GuideW_ObjRnn.
-        # Cache the output of the embed net to avoid computing the
-        # same embedding at each object step.
         use_tanh = nl == 'tanh'
-        guide_w = GuideW_ObjRnn(cfg, hids, partial(Cached, x_embed), rnn_cell_use_tanh=use_tanh)
+        guide_w = GuideW_ObjRnn(cfg, hids, x_embed, rnn_cell_use_tanh=use_tanh)
     elif cfg.guide_w.startswith('isf'):
         _, arch, *hids = parse_cla('isf-mlp|resnet', cfg.guide_w)
         if arch == 'mlp':

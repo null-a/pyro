@@ -112,12 +112,10 @@ def split_at(t, widths):
     return [t[:,start:stop] for (start, stop) in zip([0] + csum, csum)]
 
 
-# This is awkward to use, could consider improving with
-# inheritance/decorators.
 class Cached(nn.Module):
-    def __init__(self, module, *args, **kwargs):
+    def __init__(self, net):
         super(Cached, self).__init__()
-        self.net = module(*args, **kwargs)
+        self.net = net
         if hasattr(self.net, 'output_size'):
             self.output_size = self.net.output_size
         self.cache = Cache()
