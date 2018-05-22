@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
 function run {
-    # TODO: specify when to save, number of epochs, cuda in final script
-    python3 opt.py data/multi_obj.npz -b 50 --hold-out 19 -e 1 --model-delta-w -g $1 all --bkg-params data/bkg_params.pytorch
+    python3 opt.py data/multi_obj.npz -b 50 --hold-out 19 -e 1 -s 1 --model-delta-w -g $1 all --bkg-params data/bkg_params.pytorch
     echo
 }
 
