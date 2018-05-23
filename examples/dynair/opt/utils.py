@@ -14,8 +14,8 @@ def git_wd_is_clean():
     return len(out) == 0
 
 def make_output_dir(base_path):
-    ts = int(time.time())
-    name = str(ts)
+    ts = time.time()
+    name = str(ts).replace('.', '_')
     path = os.path.join(base_path, name)
     if os.path.exists(path):
         raise 'failed to create output directory'
@@ -26,7 +26,7 @@ def make_output_dir(base_path):
             os.remove(symlink_path)
         os.symlink(name, symlink_path)
         with open(os.path.join(path, 'timestamp.txt'), 'w') as f:
-            f.write(name)
+            f.write(str(int(ts)))
         return path
 
 def describe_env():
