@@ -54,6 +54,12 @@ def is_bkg_param(module_name, param_name):
 def build_module(cfg, use_cuda):
     decode_bkg, guide_y = bkg_modules(cfg)
 
+    _, *hids = parse_cla('mlp', cfg.decode_obj)
+    decode_obj = DecodeObj(cfg, partial(MLP,
+                                        hids=hids,
+                                        non_linear_layer=nn.ReLU,
+                                        output_non_linearity=True))
+
     sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.w_transition)
     w_transition = WTransition(cfg,
                                partial(MLP,
@@ -71,7 +77,7 @@ def build_module(cfg, use_cuda):
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
     model = Model(cfg,
-                  dict(decode_obj=DecodeObj(cfg, [100, 100]),
+                  dict(decode_obj=decode_obj,
                        decode_bkg=decode_bkg,
                        w_transition=w_transition,
                        z_transition=z_transition),

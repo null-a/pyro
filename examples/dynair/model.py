@@ -236,14 +236,16 @@ class ZGatedTransition(nn.Module):
 
 
 class DecodeObj(nn.Module):
-    def __init__(self, cfg, hids, alpha_bias=0.):
+    def __init__(self, cfg, netfn, alpha_bias=0.):
         super(DecodeObj, self).__init__()
-        self.mlp = MLP(cfg.z_size, hids + [(cfg.num_chan+1) * cfg.window_size**2], nn.ReLU)
+        net = netfn(cfg.z_size)
+        output_layer = nn.Linear(net.output_size, (cfg.num_chan+1) * cfg.window_size**2)
         # Adjust bias of the alpha channel.
-        self.mlp.seq[-1].bias.data[(cfg.num_chan * cfg.window_size ** 2):] += alpha_bias
+        output_layer.bias.data[(cfg.num_chan * cfg.window_size ** 2):] += alpha_bias
+        self.net = nn.Sequential(net, output_layer, nn.Sigmoid())
 
     def forward(self, z):
-        return sigmoid(self.mlp(z))
+        return self.net(z)
 
 
 class DecodeBkg(nn.Module):

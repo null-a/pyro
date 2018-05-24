@@ -43,6 +43,9 @@ if __name__ == '__main__':
     parser.add_argument('--z-transition', default='sdparam-mlp-50',
                         help='architecture of z transition')
 
+    parser.add_argument('--decode-obj', default='mlp-100-100',
+                        help='architecture of decode object network')
+
     parser.add_argument('--model-delta-w', action='store_true', default=False,
                         help='use w transition output as delta from previous value to next mean')
     parser.add_argument('--model-delta-z', action='store_true', default=False,
@@ -87,6 +90,7 @@ if __name__ == '__main__':
                          window_size=args.window_size,
                          w_transition=args.w_transition,
                          z_transition=args.z_transition,
+                         decode_obj=args.decode_obj,
                          model_delta_w=args.model_delta_w,
                          model_delta_z=args.model_delta_z,
                          guide_w=args.guide_w,

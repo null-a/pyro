@@ -31,3 +31,5 @@ run "--w-transition sdstate-mlp-10-10"
 
 run "--z-transition sdparam-mlp-10-10"
 run "--z-transition sdstate-mlp-10-10"
+
+run "--decode-obj mlp-10-10"
