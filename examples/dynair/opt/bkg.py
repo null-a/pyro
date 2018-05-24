@@ -35,3 +35,4 @@ def opt_bkg(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
     run_svi(vae, batches, args.epochs, optim_args, hook,
             output_path, args.s, args.t, args.g, args.c,
             elbo_scale=1.0/batch_size)
+    print()

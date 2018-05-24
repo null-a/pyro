@@ -181,3 +181,4 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
             partial(hook, args.v, visdom.Visdom(), dynair, X_vis, Y_vis),
             output_path, args.s, args.t, args.g, args.c,
             elbo_scale=1.0/(cfg.seq_length*batch_size))
+    print()

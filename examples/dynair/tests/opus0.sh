@@ -2,7 +2,6 @@
 
 function run {
     python3 opt.py data/multi_obj.npz -b 50 --hold-out 19 -e 1 -s 1 --model-delta-w -g $1 all --bkg-params data/bkg_params.pytorch
-    echo
 }
 
 # current best
