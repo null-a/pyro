@@ -89,7 +89,6 @@ if __name__ == '__main__':
     log_to_cond = partial(append_line, os.path.join(output_path, 'condition.txt'))
     log_to_cond(describe_env())
     log_to_cond('target: {}'.format(args.target))
-    log_to_cond('data path: {}'.format(args.data_path))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))

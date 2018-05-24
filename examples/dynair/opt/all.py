@@ -167,7 +167,6 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
 
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
-        log_to_cond('bkg params path: {}'.format(args.bkg_params))
         log_to_cond('bkg params md5: {}'.format(md5sum(args.bkg_params)))
 
     log_to_cond('fixed bkg params: {}'.format(args.fix_bkg_params))
