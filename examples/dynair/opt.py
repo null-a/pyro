@@ -3,6 +3,7 @@ import sys
 import argparse
 from functools import partial
 import json
+import torch.cuda
 
 from dynair import config
 from data import split, load_data, data_params
@@ -30,7 +31,7 @@ if __name__ == '__main__':
                         help='throttle progress updates')
     parser.add_argument('-c', type=float, default=float('inf'),
                         help='threshold at which to clip the l2 norm of the gradient')
-    parser.add_argument('--cuda', action='store_true', default=False, help='use CUDA')
+    parser.add_argument('--cpu', action='store_true', default=False, help='always use cpu')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
     parser.add_argument('--z-size', type=int, default=50, help='size of z')
@@ -72,6 +73,9 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
+    use_cuda = torch.cuda.is_available() and not args.cpu
+    print('using cuda: {}'.format(use_cuda))
+
     module_config = dict(w_size=3,
                          y_size=args.y_size,
                          z_size=args.z_size,
@@ -98,4 +102,4 @@ if __name__ == '__main__':
     with open(os.path.join(output_path, 'module_config.json'), 'w') as f:
         json.dump(module_config, f)
 
-    args.main(X_split, Y_split, cfg, args, output_path, log_to_cond)
+    args.main(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond)

@@ -5,10 +5,10 @@ from vae import VAE
 from opt.all import bkg_modules
 from opt.run_svi import run_svi
 
-def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
+def opt_bkg(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
     vis = visdom.Visdom()
     decode_bkg, guide_y = bkg_modules(cfg)
-    vae = VAE(guide_y, decode_bkg, cfg.y_size, use_cuda=args.cuda)
+    vae = VAE(guide_y, decode_bkg, cfg.y_size, use_cuda)
 
     if args.show:
         print(vae)
@@ -16,7 +16,7 @@ def opt_bkg(X_split, Y_split, cfg, args, output_path, log_to_cond):
     X_train, _ = X_split
     # Extract backgrounds from the input sequences.
     batches = X_train.mode(2)[0].view(X_train.size()[0:2] + (-1,))
-    if args.cuda:
+    if use_cuda:
         batches = batches.cuda()
 
     vis_batch = batches[0, 0:10]

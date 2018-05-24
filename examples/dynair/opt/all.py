@@ -138,12 +138,12 @@ def build_module(cfg, use_cuda):
 def bkg_modules(cfg):
     return DecodeBkg(cfg), GuideY(cfg)
 
-def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
+def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
 
     X_train, X_test = X_split
     Y_train, Y_test = Y_split
 
-    if args.cuda:
+    if use_cuda:
         X_train = X_train.cuda()
         Y_train = Y_train.cuda()
         X_test = X_test.cuda()
@@ -160,7 +160,7 @@ def opt_all(X_split, Y_split, cfg, args, output_path, log_to_cond):
         X_vis = X_train[0][0:1]
         Y_vis = Y_train[0][0:1]
 
-    dynair = build_module(cfg, args.cuda)
+    dynair = build_module(cfg, use_cuda)
 
     if args.show:
         print(dynair)
