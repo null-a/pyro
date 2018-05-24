@@ -50,17 +50,17 @@ run "-c 2e6 --guide-window-embed cnn --window-size 24 --guide-z noaux-mlp-500-25
 
 # mlp embed
 # this is vaguely similar to rnn with mlp embed
-run "-c 5e6 --guide-w isf-noblock-mlp-200-200"
+run "-c 5e6 --guide-w isf-noblock-bkg-mlp-200-200"
 
 # this is vaguely similar to rnn with cnn embed
-run "-c 1e7 --guide-input-embed cnn --guide-w isf-noblock-mlp-200-200"
+run "-c 1e7 --guide-input-embed cnn --guide-w isf-noblock-bkg-mlp-200-200"
 # try blocking grads
-run "-c 1e7 --guide-input-embed cnn --guide-w isf-block-mlp-200-200"
+run "-c 1e7 --guide-input-embed cnn --guide-w isf-block-bkg-mlp-200-200"
 
 # side input to first layer
 # this looks odd, but gives similar layer sizes to mlp embed.
 # this way we isolate the choice of where to feed in side info
-run "-c 4e6 --guide-input-embed id --guide-w isf-noblock-mlp-500-200-200-200"
+run "-c 4e6 --guide-input-embed id --guide-w isf-noblock-bkg-mlp-500-200-200-200"
 
 # also try something more sensible seeming?
-run "-c 4e6 --guide-input-embed id --guide-w isf-noblock-mlp-1000-400-400"
+run "-c 4e6 --guide-input-embed id --guide-w isf-noblock-bkg-mlp-1000-400-400"

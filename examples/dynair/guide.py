@@ -256,10 +256,11 @@ class GuideW_ObjRnn(nn.Module):
 
 
 class GuideW_ImageSoFar(nn.Module):
-    def __init__(self, cfg, model, combine_module, block_grad):
+    def __init__(self, cfg, model, combine_module, block_grad, include_bkg):
         super(GuideW_ImageSoFar, self).__init__()
 
         self.block_grad = block_grad
+        self.include_bkg = include_bkg
 
         self.combine = combine_module((cfg.num_chan, cfg.image_size, cfg.image_size), # image so far diff
                                       cfg.w_size + cfg.z_size)                        # side input
@@ -285,7 +286,7 @@ class GuideW_ImageSoFar(nn.Module):
         if i == 0:
             assert image_so_far_prev is None
             assert mask_prev is None
-            image_so_far = self.decode_bkg(y)
+            image_so_far = self.decode_bkg(y) if self.include_bkg else torch.zeros_like(x)
         else:
             assert image_so_far_prev is not None
             assert w_t_prev is not None

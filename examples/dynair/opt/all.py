@@ -97,7 +97,7 @@ def build_module(cfg, use_cuda):
         use_tanh = nl == 'tanh'
         guide_w = GuideW_ObjRnn(cfg, hids, x_embed, rnn_cell_use_tanh=use_tanh)
     elif cfg.guide_w.startswith('isf'):
-        _, block, arch, *hids = parse_cla('isf-block|noblock-mlp|resnet', cfg.guide_w)
+        _, block, bkg, arch, *hids = parse_cla('isf-block|noblock-bkg|nobkg-mlp|resnet', cfg.guide_w)
         if arch == 'mlp':
             output_net = partial(MLP,
                                  hids=hids,
@@ -110,7 +110,8 @@ def build_module(cfg, use_cuda):
 
         guide_w = GuideW_ImageSoFar(cfg, model,
                                     partial(CombineMixin, x_embed, output_net),
-                                    block=='block')
+                                    block=='block',
+                                    include_bkg=dict(bkg=True, nobkg=False)[bkg])
     else:
         raise Exception('unknown guide_w: {}'.format(cfg.guide_w))
 
