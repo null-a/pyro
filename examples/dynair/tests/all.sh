@@ -25,3 +25,9 @@ run "--guide-z noaux-resnet-10-10"
 
 run "--guide-z aux-mlp-10-10"
 run "--guide-z aux-mlp-10-10 --guide-w isf-noblock-mlp-10-10"
+
+run "--w-transition sdparam-mlp-10-10"
+run "--w-transition sdstate-mlp-10-10"
+
+run "--z-transition sdparam-mlp-10-10"
+run "--z-transition sdstate-mlp-10-10"

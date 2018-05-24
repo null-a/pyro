@@ -104,6 +104,18 @@ class NormalParams(nn.Module):
         return mean, softplus(pre_sd)
 
 
+class NormalMeanWithSdParam(nn.Module):
+    def __init__(self, in_size, param_size, sd_bias=0.0):
+        super(NormalMeanWithSdParam, self).__init__()
+        self.output_layer = nn.Linear(in_size, param_size)
+        self.pre_sd = nn.Parameter(torch.ones(param_size) * sd_bias)
+
+    def forward(self, x):
+        mean = self.output_layer(x)
+        sd = softplus(self.pre_sd).expand_as(mean)
+        return mean, sd
+
+
 # Split a matrix in a bunch of columns with specified widths.
 def split_at(t, widths):
     assert t.dim() == 2

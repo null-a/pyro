@@ -6,7 +6,7 @@ import pyro.poutine as poutine
 import pyro.distributions as dist
 
 from cache import Cache, cached
-from modules import MLP
+from modules import MLP, NormalParams, NormalMeanWithSdParam
 from utils import assert_size, delta_mean
 from transform import window_to_image, over
 
@@ -191,33 +191,29 @@ class Model(nn.Module):
         return over(window_to_image(self.cfg, w, x_att), image_so_far)
 
 
-# A simple non-linear transition. With learnable (constant) sd.
 class WTransition(nn.Module):
-    def __init__(self, cfg, hid_size):
+    def __init__(self, cfg, netfn, state_dependent_sd):
         super(WTransition, self).__init__()
-        self.w_mean_net = MLP(cfg.z_size + cfg.w_size, [hid_size, cfg.w_size], nn.ReLU)
-        # Initialize to ~0.1 (after softplus).
-        self._w_sd = nn.Parameter(torch.ones(cfg.w_size) * -2.25)
+        net = netfn(cfg.z_size + cfg.w_size)
+        params_module = NormalParams if state_dependent_sd else NormalMeanWithSdParam
+        params = params_module(net.output_size, cfg.w_size, sd_bias=-2.25)
+        self.net = nn.Sequential(net, params)
 
     def forward(self, z_prev, w_prev):
         assert z_prev.size(0) == w_prev.size(0)
-        wz_prev = torch.cat((w_prev, z_prev), 1)
-        w_mean = self.w_mean_net(wz_prev)
-        w_sd = softplus(self._w_sd).expand_as(w_mean)
-        return w_mean, w_sd
+        return self.net(torch.cat((w_prev, z_prev), 1))
 
 
 class ZTransition(nn.Module):
-    def __init__(self, cfg, hid_size):
+    def __init__(self, cfg, netfn, state_dependent_sd):
         super(ZTransition, self).__init__()
-        self.z_mean_net = MLP(cfg.z_size, [hid_size, cfg.z_size], nn.ReLU)
-        # Initialize to ~0.1 (after softplus).
-        self._z_sd = nn.Parameter(torch.ones(cfg.z_size) * -2.25)
+        net = netfn(cfg.z_size)
+        params_module = NormalParams if state_dependent_sd else NormalMeanWithSdParam
+        params = params_module(net.output_size, cfg.z_size, sd_bias=-2.25)
+        self.net = nn.Sequential(net, params)
 
     def forward(self, z_prev):
-        z_mean = self.z_mean_net(z_prev)
-        z_sd = softplus(self._z_sd).expand_as(z_mean)
-        return z_mean, z_sd
+        return self.net(z_prev)
 
 
 class ZGatedTransition(nn.Module):

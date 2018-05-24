@@ -38,6 +38,11 @@ if __name__ == '__main__':
     parser.add_argument('--window-size', type=int, default=22,
                         help='size of the object window')
 
+    parser.add_argument('--w-transition', default='sdparam-mlp-50',
+                        help='architecture of w transition')
+    parser.add_argument('--z-transition', default='sdparam-mlp-50',
+                        help='architecture of z transition')
+
     parser.add_argument('--model-delta-w', action='store_true', default=False,
                         help='use w transition output as delta from previous value to next mean')
     parser.add_argument('--model-delta-z', action='store_true', default=False,
@@ -80,6 +85,8 @@ if __name__ == '__main__':
                          y_size=args.y_size,
                          z_size=args.z_size,
                          window_size=args.window_size,
+                         w_transition=args.w_transition,
+                         z_transition=args.z_transition,
                          model_delta_w=args.model_delta_w,
                          model_delta_z=args.model_delta_z,
                          guide_w=args.guide_w,
