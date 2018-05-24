@@ -1,5 +1,6 @@
 import os
 import subprocess
+import uuid
 import time
 import torch
 from hashlib import md5
@@ -14,19 +15,20 @@ def git_wd_is_clean():
     return len(out) == 0
 
 def make_output_dir(base_path):
-    ts = time.time()
-    name = str(ts).replace('.', '_')
+    name = str(uuid.uuid1())
     path = os.path.join(base_path, name)
     if os.path.exists(path):
-        raise 'failed to create output directory'
+        raise Exception('output directory already exists')
     else:
         os.makedirs(path)
         symlink_path = os.path.join(base_path, 'latest')
         if os.path.exists(symlink_path):
             os.remove(symlink_path)
         os.symlink(name, symlink_path)
+        with open(os.path.join(path, 'uuid.txt'), 'w') as f:
+            f.write(name)
         with open(os.path.join(path, 'timestamp.txt'), 'w') as f:
-            f.write(str(int(ts)))
+            f.write(str(int(time.time())))
         return path
 
 def describe_env():
