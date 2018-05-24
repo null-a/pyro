@@ -20,5 +20,8 @@ run "--guide-window-embed resnet-10-10"
 run "--guide-window-embed cnn --window-size 24"
 run "--guide-window-embed id"
 
-run "--guide-z mlp-10-10"
-run "--guide-z resnet-10-10"
+run "--guide-z noaux-mlp-10-10"
+run "--guide-z noaux-resnet-10-10"
+
+run "--guide-z aux-mlp-10-10"
+run "--guide-z aux-mlp-10-10 --guide-w isf-noblock-mlp-10-10"

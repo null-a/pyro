@@ -30,20 +30,20 @@ run "-c 2e6 --guide-input-embed mlp-1000-400 --guide-w rnn-tanh-400-400"
 
 # extra hidden layer in output
 # (comparable to current best, isolates extra layer change)
-run "-c 2e6 --guide-z mlp-100-100"
+run "-c 2e6 --guide-z noaux-mlp-100-100"
 
 # side input to first layer
 # same layer sizes as current best (isolates choice of where to feed in side info)
-run "-c 2e6 --guide-window-embed id --guide-z mlp-100-100-100"
+run "-c 2e6 --guide-window-embed id --guide-z noaux-mlp-100-100-100"
 # something more sensible seeming. (still tiny compared to cnn though.)
-run "-c 2e6 --guide-window-embed id --guide-z mlp-500-250"
+run "-c 2e6 --guide-window-embed id --guide-z noaux-mlp-500-250"
 
 # cnn embed
 # (compare mlp with cnn. though may not realise full potential with
 # only single hidden layer)
 run "-c 2e6 --guide-window-embed cnn --window-size 24"
 # something more sensible seeming
-run "-c 2e6 --guide-window-embed cnn --window-size 24 --guide-z mlp-500-250"
+run "-c 2e6 --guide-window-embed cnn --window-size 24 --guide-z noaux-mlp-500-250"
 
 # image so far variations
 # ------------------------------

@@ -110,8 +110,9 @@ def build_module(cfg, use_cuda):
     else:
         raise Exception('unknown guide_window_embed: {}'.format(cfg.guide_window_embed))
 
-    if cfg.guide_z.startswith('mlp') or cfg.guide_z.startswith('resnet'):
-        arch, *hids = parse_cla('mlp|resnet', cfg.guide_z)
+    # TODO: Drop this if?
+    if True:
+        aux, arch, *hids = parse_cla('aux|noaux-mlp|resnet', cfg.guide_z)
         if arch == 'mlp':
             output_net = partial(MLP,
                                  hids=hids,
@@ -122,7 +123,9 @@ def build_module(cfg, use_cuda):
         else:
             raise Exception('impossible')
 
-        guide_z = GuideZ(cfg, partial(CombineMixin, x_att_embed, output_net))
+        guide_z = GuideZ(cfg,
+                         partial(CombineMixin, x_att_embed, output_net),
+                         aux_size=guide_w.aux_size, use_aux=(aux=='aux'))
     else:
         raise Exception('unknown guide_z: {}'.format(cfg.guide_z))
 

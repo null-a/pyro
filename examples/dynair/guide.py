@@ -81,13 +81,13 @@ class Guide(nn.Module):
                     mask = (obj_counts > i).float()
 
                     with poutine.scale(None, mask):
-                        w_params, w_guide_state = self.guide_w(t, i, x, y,
-                                                               w_prev_i, z_prev_i,
-                                                               w_t_prev, z_t_prev,
-                                                               mask_prev, w_guide_state_prev)
+                        w_params, w_guide_state, aux = self.guide_w(t, i, x, y,
+                                                                    w_prev_i, z_prev_i,
+                                                                    w_t_prev, z_t_prev,
+                                                                    mask_prev, w_guide_state_prev)
                         w = self.sample_w(t, i, w_prev_i, *w_params)
                         x_att = image_to_window(self.cfg, w, x)
-                        z = self.sample_z(t, i, z_prev_i, *self.guide_z(t, i, w, x_att, z_prev_i))
+                        z = self.sample_z(t, i, z_prev_i, *self.guide_z(t, i, w, x_att, z_prev_i, aux))
 
                     ws[t][i] = w
                     zs[t][i] = z
@@ -116,25 +116,54 @@ class Guide(nn.Module):
 
 
 class GuideZ(nn.Module):
-    def __init__(self, cfg, combine_module):
+    def __init__(self, cfg, combine_module, aux_size, use_aux):
         super(GuideZ, self).__init__()
 
-        self.combine = combine_module((cfg.num_chan,
-                                       cfg.window_size,
-                                       cfg.window_size),       # main input size
-                                      cfg.w_size + cfg.z_size) # side input size
+        assert type(aux_size) == tuple
+
+        if not use_aux:
+            self.aux_method = 'ignore'
+        elif len(aux_size) == 3:
+            self.aux_method = 'main'
+        elif len(aux_size) == 1:
+            self.aux_method = 'side'
+        else:
+            raise Exception('impossible')
+
+        main_input_size = (cfg.num_chan,
+                           cfg.window_size,
+                           cfg.window_size)
+
+        if self.aux_method == 'main':
+            assert main_input_size == aux_size
+
+        side_input_size = (cfg.w_size + cfg.z_size +
+                           (aux_size[0] if self.aux_method == 'side' else 0))
+
+        self.combine = combine_module(main_input_size, side_input_size)
 
         self.params = NormalParams(self.combine.output_size, cfg.z_size, sd_bias=-2.25)
 
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
-    def forward(self, t, i, w, x_att, z_prev_i):
+    def precombine(self, x_att, w, z_prev_i, aux):
+        if self.aux_method == 'ignore':
+            return x_att, torch.cat((w, z_prev_i), 1)
+        elif self.aux_method == 'main':
+            return x_att - aux(w), torch.cat((w, z_prev_i), 1)
+        elif self.aux_method == 'side':
+            return x_att, torch.cat((w, z_prev_i, aux(w)), 1)
+        else:
+            raise Exception('impossible')
+
+    def forward(self, t, i, w, x_att, z_prev_i, aux):
         batch_size = w.size(0)
         if t == 0:
             assert z_prev_i is None
             z_prev_i = batch_expand(self.z_init, batch_size)
 
-        return self.params(self.combine(x_att, torch.cat((w, z_prev_i), 1)))
+        main, side = self.precombine(x_att, w, z_prev_i, aux)
+        return self.params(self.combine(main, side))
 
 
 class ImgEmbedMlp(nn.Module):
@@ -190,6 +219,8 @@ class GuideW_ObjRnn(nn.Module):
 
         self.params = NormalParams(rnn_hid_sizes[-1], cfg.w_size, sd_bias=-2.25)
 
+        self.aux_size = (rnn_hid_sizes[-1],)
+
         self.w_t_prev_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_t_prev_init = nn.Parameter(torch.zeros(cfg.z_size))
 
@@ -220,7 +251,8 @@ class GuideW_ObjRnn(nn.Module):
         # combining the input with w and z.
         rnn_input = torch.cat((x_embed, w_prev_i, z_prev_i, w_t_prev, z_t_prev), 1)
         rnn_hid = self.rnn_stack(rnn_input, rnn_hid_prev)
-        return self.params(rnn_hid[-1]), rnn_hid
+
+        return self.params(rnn_hid[-1]), rnn_hid, lambda _: rnn_hid[-1]
 
 
 class GuideW_ImageSoFar(nn.Module):
@@ -234,6 +266,8 @@ class GuideW_ImageSoFar(nn.Module):
 
         self.params = NormalParams(self.combine.output_size, cfg.w_size, sd_bias=-2.25)
 
+        self.aux_size = (cfg.num_chan, cfg.window_size, cfg.window_size)
+
         # TODO: Does it make sense that this is a parameter (rather
         # than fixed) in the case where the guide computing the delta?
         # (Though this guide perhaps lends itself to computing
@@ -241,6 +275,7 @@ class GuideW_ImageSoFar(nn.Module):
         self.w_init = nn.Parameter(torch.zeros(cfg.w_size))
         self.z_init = nn.Parameter(torch.zeros(cfg.z_size))
 
+        self.cfg = cfg
         self.decode_bkg = model.decode_bkg
         self.composite_object = model.composite_object
 
@@ -274,7 +309,12 @@ class GuideW_ImageSoFar(nn.Module):
         # note that alternatives exist.
         diff = x - image_so_far
         params = self.params(self.combine(diff, torch.cat((w_prev_i, z_prev_i), 1)))
-        return params, image_so_far
+
+        # Return (a function that computes) the window-so-far for use
+        # as auxiliary input to z guide.
+        aux = lambda w: image_to_window(self.cfg, w, image_so_far)
+
+        return params, image_so_far, aux
 
 
 # TODO: Think more carefully about these CNN architectures. Consider
