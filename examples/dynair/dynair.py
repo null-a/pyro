@@ -77,7 +77,7 @@ class DynAIR(nn.Module):
         return dict((m._get_name() + '-' + str(id(m)), m.cache.stats())
                     for m in self.modules_with_cache)
 
-    def infer(self, seqs, obj_counts, num_extra_frames=0):
+    def infer(self, seqs, obj_counts, num_extra_frames=0, sample_extra=True):
         trace = poutine.trace(self.guide).get_trace((seqs, obj_counts))
         frames, _, _ = poutine.replay(self.model, trace)((seqs, obj_counts))
         wss, zss, y = trace.nodes['_RETURN']['value']
@@ -93,7 +93,13 @@ class DynAIR(nn.Module):
 
         for t in range(num_extra_frames):
             zs_params, ws_params = self.model.transition_params(zs, ws)
-            zs, ws = self.model.sample_zs_and_ws(self.cfg.seq_length + t, obj_counts, zs_params, ws_params)
+            if sample_extra:
+                zs, ws = self.model.sample_zs_and_ws(self.cfg.seq_length + t,
+                                                     obj_counts,
+                                                     zs_params, ws_params)
+            else:
+                zs = [z_mean for (z_mean, _) in zs_params]
+                ws = [w_mean for (w_mean, _) in ws_params]
             frame_mean = self.model.emission(zs, ws, bkg, obj_counts)
             extra_frames.append(frame_mean)
             extra_wss.append(ws)

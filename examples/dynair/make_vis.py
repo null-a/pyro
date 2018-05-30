@@ -30,16 +30,16 @@ def movie_main(dynair, X, Y, args):
         os.mkdir(tmp_dir)
 
     for ix in args.indices:
-        make_movie(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f))
+        make_movie(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f), not args.d)
 
-def make_movie(dynair, x, y, tmp_dir, out_fn):
+def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra):
     # x is an input sequence
     # y is the object count
     size = dynair.cfg.image_size
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
-    frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20)
+    frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra)
 
     input_seq = x
     recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
@@ -65,7 +65,7 @@ def frames_main(dynair, X, Y, args):
     for ix in args.indices:
         x = X[ix]
         y = Y[ix]
-        frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20)
+        frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
         frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
         extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
         save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
@@ -79,6 +79,8 @@ def main():
     parser.add_argument('params_path')
     parser.add_argument('indices', type=int, nargs='+',
                         help='indices of data points for which to create visualisations')
+    parser.add_argument('-d', action='store_true', default=False,
+                        help='do not sample latent variables when generating extra frames')
 
     subparsers = parser.add_subparsers(dest='target')
     movie_parser = subparsers.add_parser('movie')
