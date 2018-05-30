@@ -92,7 +92,8 @@ class DynAIR(nn.Module):
         zs = zss[-1]
 
         for t in range(num_extra_frames):
-            zs, ws = self.model.transition(self.cfg.seq_length + t, obj_counts, zs, ws)
+            zs_params, ws_params = self.model.transition_params(zs, ws)
+            zs, ws = self.model.sample_zs_and_ws(self.cfg.seq_length + t, obj_counts, zs_params, ws_params)
             frame_mean = self.model.emission(zs, ws, bkg, obj_counts)
             extra_frames.append(frame_mean)
             extra_wss.append(ws)

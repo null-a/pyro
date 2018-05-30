@@ -77,11 +77,11 @@ class Model(nn.Module):
 
             for t in range(self.cfg.seq_length):
                 if t>0:
-                    zs_prev, ws_prev = zss[-1], wss[-1]
+                    zs_params, ws_params = self.transition_params(zss[-1], wss[-1])
                 else:
-                    zs_prev, ws_prev = None, None
+                    zs_params, ws_params = self.initial_params(batch_size)
 
-                zs, ws = self.transition(t, obj_counts, zs_prev, ws_prev)
+                zs, ws = self.sample_zs_and_ws(t, obj_counts, zs_params, ws_params)
                 frame_mean = self.emission(zs, ws, bkg, obj_counts)
 
                 zss.append(zs)
@@ -106,7 +106,7 @@ class Model(nn.Module):
                                             self.y_prior_sd.expand(batch_size, -1))
                                 .independent(1))
 
-    def transition_one(self, z_prev, w_prev):
+    def transition_params_one(self, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.cfg.z_size))
         assert_size(w_prev, (batch_size, self.cfg.w_size))
@@ -116,44 +116,42 @@ class Model(nn.Module):
         w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
         return z_mean, z_sd, w_mean, w_sd
 
-    def transition(self, t, obj_counts, zs_prev, ws_prev):
-        batch_size = obj_counts.size(0)
-        assert_size(obj_counts, (batch_size,))
-
-        if t==0:
-            assert zs_prev is None and ws_prev is None
-        else:
-            assert t>0
-            assert len(zs_prev) == self.cfg.max_obj_count # was zs[t-1]
-            assert len(ws_prev) == self.cfg.max_obj_count # was ws[t-1]
+    def transition_params(self, zs_prev, ws_prev):
+        assert len(zs_prev) == self.cfg.max_obj_count # was zs[t-1]
+        assert len(ws_prev) == self.cfg.max_obj_count # was ws[t-1]
 
         zs = []
         ws = []
+        for i in range(self.cfg.max_obj_count):
+            z_mean, z_sd, w_mean, w_sd = self.transition_params_one(zs_prev[i], ws_prev[i])
+            zs.append((z_mean, z_sd))
+            ws.append((w_mean, w_sd))
 
+        return zs, ws
+
+    def initial_params(self, batch_size):
+        z_mean = self.z_0_prior_mean.expand(batch_size, -1)
+        z_sd = self.z_0_prior_sd.expand(batch_size, -1)
+        w_mean = self.w_0_prior_mean.expand(batch_size, -1)
+        w_sd = self.w_0_prior_sd.expand(batch_size, -1)
+        zs_params = [(z_mean, z_sd)] * self.cfg.max_obj_count
+        ws_params = [(w_mean, w_sd)] * self.cfg.max_obj_count
+        return zs_params, ws_params
+
+    def sample_zs_and_ws(self, t, obj_counts, zs_params, ws_params):
         # To begin with, we'll sample max_obj_count objects for all
         # sequences, and throw out the extra objects. We can consider
         # refining this to avoid this unnecessary sampling later.
-
-        for i in range(self.cfg.max_obj_count):
-
-            if t > 0:
-                z_mean, z_sd, w_mean, w_sd = self.transition_one(zs_prev[i], ws_prev[i])
-            else:
-                z_mean = self.z_0_prior_mean.expand(batch_size, -1)
-                z_sd = self.z_0_prior_sd.expand(batch_size, -1)
-                w_mean = self.w_0_prior_mean.expand(batch_size, -1)
-                w_sd = self.w_0_prior_sd.expand(batch_size, -1)
-
+        zs, ws = [], []
+        for i, ((z_mean, z_sd), (w_mean, w_sd)) in enumerate(zip(zs_params, ws_params)):
             mask = (obj_counts > i).float()
             with poutine.scale(None, mask):
                 w = pyro.sample('w_{}_{}'.format(t, i),
                                 dist.Normal(w_mean, w_sd).independent(1))
                 z = pyro.sample('z_{}_{}'.format(t, i),
                                 dist.Normal(z_mean, z_sd).independent(1))
-
             zs.append(z)
             ws.append(w)
-
         return zs, ws
 
     def emission(self, zs, ws, bkg, obj_counts):
