@@ -106,39 +106,15 @@ class Model(nn.Module):
                                             self.y_prior_sd.expand(batch_size, -1))
                                 .independent(1))
 
-    def sample_w_0(self, i, batch_size):
-        return pyro.sample('w_0_{}'.format(i),
-                           dist.Normal(
-                               self.w_0_prior_mean.expand(batch_size, -1),
-                               self.w_0_prior_sd.expand(batch_size, -1))
-                           .independent(1))
-
-    def sample_w(self, t, i, w_prev, w_mean_or_delta, w_sd):
-        w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
-        return pyro.sample('w_{}_{}'.format(t, i),
-                           dist.Normal(w_mean, w_sd).independent(1))
-
-    def sample_z_0(self, i, batch_size):
-        return pyro.sample('z_0_{}'.format(i),
-                           dist.Normal(
-                               self.z_0_prior_mean.expand(batch_size, -1),
-                               self.z_0_prior_sd.expand(batch_size, -1))
-                           .independent(1))
-
-    def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
-        z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
-        return pyro.sample('z_{}_{}'.format(t, i),
-                           dist.Normal(z_mean, z_sd).independent(1))
-
-    def transition_one(self, t, i, z_prev, w_prev):
+    def transition_one(self, z_prev, w_prev):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.cfg.z_size))
         assert_size(w_prev, (batch_size, self.cfg.w_size))
         z_mean_or_delta, z_sd = self.z_transition(z_prev)
         w_mean_or_delta, w_sd = self.w_transition(z_prev, w_prev)
-        z = self.sample_z(t, i, z_prev, z_mean_or_delta, z_sd)
-        w = self.sample_w(t, i, w_prev, w_mean_or_delta, w_sd)
-        return z, w
+        z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
+        w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
+        return z_mean, z_sd, w_mean, w_sd
 
     def transition(self, t, obj_counts, zs_prev, ws_prev):
         batch_size = obj_counts.size(0)
@@ -160,14 +136,20 @@ class Model(nn.Module):
 
         for i in range(self.cfg.max_obj_count):
 
-            mask = (obj_counts > i).float()
+            if t > 0:
+                z_mean, z_sd, w_mean, w_sd = self.transition_one(zs_prev[i], ws_prev[i])
+            else:
+                z_mean = self.z_0_prior_mean.expand(batch_size, -1)
+                z_sd = self.z_0_prior_sd.expand(batch_size, -1)
+                w_mean = self.w_0_prior_mean.expand(batch_size, -1)
+                w_sd = self.w_0_prior_sd.expand(batch_size, -1)
 
+            mask = (obj_counts > i).float()
             with poutine.scale(None, mask):
-                if t > 0:
-                    z, w = self.transition_one(t, i, zs_prev[i], ws_prev[i])
-                else:
-                    z = self.sample_z_0(i, batch_size)
-                    w = self.sample_w_0(i, batch_size)
+                w = pyro.sample('w_{}_{}'.format(t, i),
+                                dist.Normal(w_mean, w_sd).independent(1))
+                z = pyro.sample('z_{}_{}'.format(t, i),
+                                dist.Normal(z_mean, z_sd).independent(1))
 
             zs.append(z)
             ws.append(w)
