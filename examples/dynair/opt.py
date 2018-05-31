@@ -51,6 +51,9 @@ if __name__ == '__main__':
     parser.add_argument('--model-delta-z', action='store_true', default=False,
                         help='use z transition output as delta from previous value to next mean')
 
+    parser.add_argument('--use-depth', action='store_true', default=False,
+                        help='render scene using explicit object depths')
+
     parser.add_argument('--guide-w', default='rnn-tanh-200-200',
                         help='architecture of guide for w')
     parser.add_argument('--guide-z', default='noaux-mlp-100',
@@ -88,7 +91,7 @@ if __name__ == '__main__':
                          y_size=args.y_size,
                          z_size=args.z_size,
                          window_size=args.window_size,
-                         use_depth=True,
+                         use_depth=args.use_depth,
                          w_transition=args.w_transition,
                          z_transition=args.z_transition,
                          decode_obj=args.decode_obj,
