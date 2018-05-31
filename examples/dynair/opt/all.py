@@ -19,13 +19,13 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
     frames, ws, extra_frames, extra_ws = dynair.infer(X, Y, 15)
 
     for k in range(n):
-        out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k,:,:,0:3], Y[k])
         vis.images(X[k].cpu(), nrow=10,
                    opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
         vis.images(out.cpu(), nrow=10,
                    opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-        out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k], Y[k])
+        out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k,:,:,0:3], Y[k])
         vis.images(out.cpu(), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 

@@ -42,8 +42,8 @@ def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra):
     frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra)
 
     input_seq = x
-    recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
-    extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
+    recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
+    extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
 
     for i, (input_frame, recon_frame) in enumerate(zip(input_seq, recon_seq)):
         input_img = frame_to_img(input_frame.numpy())
@@ -66,8 +66,8 @@ def frames_main(dynair, X, Y, args):
         x = X[ix]
         y = Y[ix]
         frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
-        frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0], y)
-        extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0], y)
+        frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
+        extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
         save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
         save_image(make_grid(frames_with_windows, nrow=10), 'frames_{}_recon.png'.format(ix))
         save_image(make_grid(extra_frames_with_windows, nrow=10), 'frames_{}_extra.png'.format(ix))

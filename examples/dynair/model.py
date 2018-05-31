@@ -8,7 +8,7 @@ import pyro.distributions as dist
 from cache import Cache, cached
 from modules import MLP, NormalParams, NormalMeanWithSdParam
 from utils import assert_size, delta_mean
-from transform import window_to_image, over
+from transform import window_to_image, over, insert, append_channel
 
 class Model(nn.Module):
     def __init__(self, cfg, arch, delta_w=False, delta_z=False, use_cuda=False):
@@ -27,8 +27,12 @@ class Model(nn.Module):
         self.y_prior_mean = self.prototype.new_zeros(cfg.y_size)
         self.y_prior_sd = self.prototype.new_ones(cfg.y_size)
 
-        self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
-        self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
+        if self.cfg.use_depth:
+            self.w_0_prior_mean = torch.Tensor([3, 0, 0, 1.85]).type_as(self.prototype)
+            self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7, 1.0]).type_as(self.prototype)
+        else:
+            self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
+            self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
         self.z_0_prior_mean = self.prototype.new_zeros(cfg.z_size)
         self.z_0_prior_sd = self.prototype.new_ones(cfg.z_size)
@@ -156,19 +160,34 @@ class Model(nn.Module):
 
     def emission(self, zs, ws, bkg, obj_counts):
         #batch_size = z.size(0)
+
         acc = bkg
+        if self.cfg.use_depth:
+            # Add depth channel.
+            acc = append_channel(acc)
+
         for i, (z, w) in enumerate(zip(zs, ws)):
             mask = tuple((obj_counts > i).tolist())
             acc = self.composite_object(z, w, mask, acc)
-        return acc
+
+        # Drop the depth channel, if present.
+        return acc[:,0:3]
 
     @cached
     def composite_object(self, z, w, mask, image_so_far):
         assert type(mask) == tuple # to facilitate caching on the mask
         assert z.size(0) == w.size(0) == image_so_far.size(0)
         mask = torch.Tensor(mask).type_as(z) # move to gpu
+
+        w_pos_and_scale = w[:,0:3]
         x_att = self.decode_obj(z) * mask.view(-1, 1)
-        return over(window_to_image(self.cfg, w, x_att), image_so_far)
+        x_att_img = window_to_image(self.cfg, w_pos_and_scale, x_att)
+
+        if self.cfg.use_depth:
+            depth = softplus(w[:,3])
+            return insert(x_att_img, depth, image_so_far)
+        else:
+            return over(x_att_img, image_so_far)
 
 
 class WTransition(nn.Module):

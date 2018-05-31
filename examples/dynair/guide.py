@@ -9,7 +9,7 @@ import pyro.distributions as dist
 from cache import Cache, cached
 from modules import MLP, ResNet, Flatten, NormalParams, Cached, split_at
 from utils import assert_size, batch_expand, delta_mean
-from transform import image_to_window
+from transform import image_to_window, append_channel
 
 product = functools.partial(functools.reduce, operator.mul)
 
@@ -86,7 +86,7 @@ class Guide(nn.Module):
                                                                     w_t_prev, z_t_prev,
                                                                     mask_prev, w_guide_state_prev)
                         w = self.sample_w(t, i, w_prev_i, *w_params)
-                        x_att = image_to_window(self.cfg, w, x)
+                        x_att = image_to_window(self.cfg, w[:,0:3], x)
                         z = self.sample_z(t, i, z_prev_i, *self.guide_z(t, i, w, x_att, z_prev_i, aux))
 
                     ws[t][i] = w
@@ -107,7 +107,8 @@ class Guide(nn.Module):
         # following the prior?), while also supporting optional delta
         # style.
         assert not self.delta_w
-        w_mean = w_mean_or_delta + torch.tensor([3.0, 0, 0]).type_as(w_mean_or_delta)
+        offset = [3.0, 0, 0, 1.85] if self.cfg.use_depth else [3.0, 0, 0]
+        w_mean = w_mean_or_delta + torch.tensor(offset).type_as(w_mean_or_delta)
         return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
     def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
@@ -121,24 +122,25 @@ class GuideZ(nn.Module):
 
         assert type(aux_size) == tuple
 
-        if not use_aux:
-            self.aux_method = 'ignore'
-        elif len(aux_size) == 3:
-            self.aux_method = 'main'
-        elif len(aux_size) == 1:
-            self.aux_method = 'side'
-        else:
-            raise Exception('impossible')
-
         main_input_size = (cfg.num_chan,
                            cfg.window_size,
                            cfg.window_size)
 
-        if self.aux_method == 'main':
-            assert main_input_size == aux_size
+        # If the aux input has the same shape as the main input (e.g.
+        # window-so-far rgb) then it is combined with the main input.
+        # Currently this is done by taking the point-wise difference
+        # between the two. When the shapes do not match the aux input
+        # is treat as an additional side input.
+
+        if not use_aux:
+            self.aux_method = 'ignore'
+        elif aux_size == main_input_size:
+            self.aux_method = 'main'
+        else:
+            self.aux_method = 'side'
 
         side_input_size = (cfg.w_size + cfg.z_size +
-                           (aux_size[0] if self.aux_method == 'side' else 0))
+                           (product(aux_size) if self.aux_method == 'side' else 0))
 
         self.combine = combine_module(main_input_size, side_input_size)
 
@@ -152,7 +154,9 @@ class GuideZ(nn.Module):
         elif self.aux_method == 'main':
             return x_att - aux(w), torch.cat((w, z_prev_i), 1)
         elif self.aux_method == 'side':
-            return x_att, torch.cat((w, z_prev_i, aux(w)), 1)
+            batch_size = x_att.size(0)
+            aux_flat = aux(w).view(batch_size, -1)
+            return x_att, torch.cat((w, z_prev_i, aux_flat), 1)
         else:
             raise Exception('impossible')
 
@@ -262,11 +266,13 @@ class GuideW_ImageSoFar(nn.Module):
         self.block_grad = block_grad
         self.include_bkg = include_bkg
 
-        self.combine = combine_module((cfg.num_chan, cfg.image_size, cfg.image_size), # image so far diff
-                                      cfg.w_size + cfg.z_size)                        # side input
+        num_chan = cfg.num_chan + (1 if cfg.use_depth else 0) # use of depth adds an additional channel
+        self.combine = combine_module((num_chan, cfg.image_size, cfg.image_size), # image so far diff
+                                      cfg.w_size + cfg.z_size)                    # side input
 
         self.params = NormalParams(self.combine.output_size, cfg.w_size, sd_bias=-2.25)
 
+        # Size of the window-so-far.
         self.aux_size = (cfg.num_chan, cfg.window_size, cfg.window_size)
 
         # TODO: Does it make sense that this is a parameter (rather
@@ -287,6 +293,10 @@ class GuideW_ImageSoFar(nn.Module):
             assert image_so_far_prev is None
             assert mask_prev is None
             image_so_far = self.decode_bkg(y) if self.include_bkg else torch.zeros_like(x)
+            if self.cfg.use_depth:
+                # Add depth channel.
+                image_so_far = append_channel(image_so_far)
+
         else:
             assert image_so_far_prev is not None
             assert w_t_prev is not None
@@ -308,12 +318,18 @@ class GuideW_ImageSoFar(nn.Module):
 
         # For simplicity, feed `x - image_so_far` into the net, though
         # note that alternatives exist.
-        diff = x - image_so_far
-        params = self.params(self.combine(diff, torch.cat((w_prev_i, z_prev_i), 1)))
+        rgb_diff = x - image_so_far[:,0:3]
+        if self.cfg.use_depth:
+            depth_channel = image_so_far[:,3:4]
+            main_input = torch.cat((rgb_diff, depth_channel), 1)
+        else:
+            main_input = rgb_diff
+
+        params = self.params(self.combine(main_input, torch.cat((w_prev_i, z_prev_i), 1)))
 
         # Return (a function that computes) the window-so-far for use
         # as auxiliary input to z guide.
-        aux = lambda w: image_to_window(self.cfg, w, image_so_far)
+        aux = lambda w: image_to_window(self.cfg, w[:,0:3], image_so_far[:,0:3]) # drop depth channel
 
         return params, image_so_far, aux
 

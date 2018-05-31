@@ -5,17 +5,15 @@ from utils import assert_size
 
 def image_to_window(cfg, w, images):
     n = w.size(0)
-    assert_size(w, (n, cfg.w_size))
-    assert_size(images, (n, cfg.num_chan, cfg.image_size, cfg.image_size))
+    num_chan = images.size(1)
     theta_inv = expand_theta(theta_inverse(w_to_theta(w)))
-    grid = affine_grid(theta_inv, torch.Size((n, cfg.num_chan, cfg.window_size, cfg.window_size)))
+    grid = affine_grid(theta_inv, torch.Size((n, num_chan, cfg.window_size, cfg.window_size)))
     # TODO: Consider using padding_mode='border' with grid_sample,
     # seems pretty sensible, though may not make much difference.
     return grid_sample(images, grid)
 
 def window_to_image(cfg, w, windows):
     n = w.size(0)
-    assert_size(w, (n, cfg.w_size))
     x_obj_size = (cfg.num_chan+1) * cfg.window_size**2 # contents of the object window
     assert_size(windows, (n, x_obj_size))
     theta = expand_theta(w_to_theta(w))
@@ -72,3 +70,26 @@ def over(a, b):
     rgb_a = a[:, 0:3] # .size() == (n, 3, image_size, image_size)
     alpha_a = a[:, 3:4] # .size() == (n, 1, image_size, image_size)
     return rgb_a * alpha_a + b * (1 - alpha_a)
+
+def insert(a, a_depth, b):
+    assert a.size(1) == 4 # rgb + alpha
+    assert b.size(1) == 4 # rgb + depth (b is opaque, alpha is implicit)
+    # a_depth is a batch of scalars indicating the depth of all opaque pixels in a.
+    stretch = 5.0 # controls the epsilon within which blending occurs
+    a_alpha = a[:,3:4] # maintain the singleton second dim so the depth and rgb have same number of dims.
+    a_depth_mask = a_alpha * a_depth.view(-1, 1, 1, 1)
+    b_rgb = b[:,0:3]
+    b_depth_mask = b[:,3:4]
+    sigmoid_diff = sigmoid(stretch * (a_depth_mask - b_depth_mask))
+    # TODO: Note that using convex_comb duplicates comp. of 1-sigmoid_diff.
+    rgb = convex_comb(over(a, b_rgb), b_rgb, sigmoid_diff)
+    depth = convex_comb(a_depth_mask, b_depth_mask, sigmoid_diff)
+    return torch.cat((rgb, depth), 1)
+
+def convex_comb(x, y, s):
+    return x * s + y * (1 - s)
+
+def append_channel(batch):
+    # batch.size() == (batch_size, num_channels, ...)
+    new_channel = torch.zeros_like(batch[:,0:1])
+    return torch.cat((batch, new_channel), 1)

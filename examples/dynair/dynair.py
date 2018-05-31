@@ -13,6 +13,7 @@ Config = namedtuple('Config',
                      'y_size',
                      'z_size',
                      'window_size',
+                     'use_depth',
                      'w_transition',
                      'z_transition',
                      'decode_obj',
@@ -106,6 +107,9 @@ class DynAIR(nn.Module):
             extra_zss.append(zs)
 
         self.clear_cache()
+
+        # TODO: Consider splitting out depth from w here to make
+        # things easier for consumers.
 
         return (frames_to_tensor(frames),
                 latents_to_tensor(wss),
