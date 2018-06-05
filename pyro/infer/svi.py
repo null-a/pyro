@@ -80,12 +80,15 @@ class SVI(object):
         params = set(site["value"].unconstrained()
                      for site in param_capture.trace.nodes.values())
 
+        do_step = True
         if not self.param_hook is None:
-            self.param_hook(params)
+            skip_step = self.param_hook(params)
+            do_step = not skip_step
 
         # actually perform gradient steps
         # torch.optim objects gets instantiated for any params that haven't been seen yet
-        self.optim(params)
+        if do_step:
+            self.optim(params)
 
         # zero gradients
         pyro.infer.util.zero_grads(params)

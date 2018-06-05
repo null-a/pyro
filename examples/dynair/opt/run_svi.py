@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import torch
 from torch.nn.utils import clip_grad_norm_
+import pyro
 from pyro.infer import SVI, Trace_ELBO
 import pyro.optim as optim
 
@@ -19,15 +20,18 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
 
     throttled_report_progress = throttle(progress_period)(report_progress)
 
-    grad_norm_dict = dict(value=0.0)
+    grad_norm_dict = dict()
 
     svi = SVI(mod.model, mod.guide,
               optim.Adam(optim_args),
               loss=Trace_ELBO(),
-              param_hook=partial(param_hook, grad_norm_dict, record_grad_norm, clip_threshold))
+              param_hook=partial(param_hook, grad_norm_dict, record_grad_norm, clip_threshold, output_path))
 
     for i in range(num_epochs):
         for j, batch in enumerate(batches):
+            # set every step to ensure that zero is recorded if hook
+            # signals no step.
+            grad_norm_dict['value'] = 0.0
             step = num_batches*i+j
             loss = svi.step(batch)
             elbo = -loss * elbo_scale
@@ -39,7 +43,24 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
 
-def param_hook(grad_norm_dict, record_grad_norm, clip_threshold, params):
+def hasnan(t):
+    return torch.isnan(t).any()
+
+def hasinf(t):
+    return (t == float('inf')).any()
+
+def param_hook(grad_norm_dict, record_grad_norm, clip_threshold, output_path, params):
+    # check for nan/inf in grads
+    infected = [p for p in params if hasnan(p.grad) or hasinf(p.grad)]
+    if len(infected) > 0:
+        param_name = pyro.get_param_store().param_name
+        def append_line_to_params(line):
+            append_line(os.path.join(output_path, 'params.txt'), line)
+        for p in infected:
+            append_line_to_params('nan={}, inf={}, {}'.format(hasnan(p.grad), hasinf(p.grad), param_name(p)))
+        append_line_to_params('')
+        return True # signal that a step should not be taken
+
     if record_grad_norm or clip_threshold < float('inf'):
         grad_norm = clip_grad_norm_(params, clip_threshold)
         if record_grad_norm:
