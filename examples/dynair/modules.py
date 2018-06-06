@@ -10,7 +10,7 @@ from cache import Cache, cached
 # [Linear (256 -> 256), ReLU (), Linear (256 -> 1), ReLU ()]
 # etc.
 class MLP(nn.Module):
-    def __init__(self, in_size, hids, non_linear_layer, output_non_linearity=False):
+    def __init__(self, in_size, hids, non_linear_layer=nn.ReLU, output_non_linearity=False):
         super(MLP, self).__init__()
         assert len(hids) > 0
         layers = []

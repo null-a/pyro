@@ -218,9 +218,9 @@ class ZTransition(nn.Module):
 class ZGatedTransition(nn.Module):
     def __init__(self, z_size, g_hid, h_hid):
         super(ZGatedTransition, self).__init__()
-        self.g_mlp = nn.Sequential(MLP(z_size, [g_hid, z_size], nn.ReLU),
+        self.g_mlp = nn.Sequential(MLP(z_size, [g_hid, z_size]),
                                    nn.Sigmoid())
-        self.h_mlp = MLP(z_size, [h_hid, z_size], nn.ReLU)
+        self.h_mlp = MLP(z_size, [h_hid, z_size])
         self.mean_lm = nn.Linear(z_size, z_size)
         self.sd_lm = nn.Linear(z_size, z_size)
         nn.init.eye(self.mean_lm.weight)
@@ -252,7 +252,7 @@ class DecodeBkg(nn.Module):
         super(DecodeBkg, self).__init__()
         self.num_chan = cfg.num_chan
         self.image_size = cfg.image_size
-        self.mlp = MLP(cfg.y_size, [200, 200, cfg.num_chan * cfg.image_size**2], nn.ReLU)
+        self.mlp = MLP(cfg.y_size, [200, 200, cfg.num_chan * cfg.image_size**2])
 
     def forward(self, y):
         batch_size = y.size(0)

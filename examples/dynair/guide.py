@@ -174,7 +174,7 @@ class ImgEmbedMlp(nn.Module):
     def __init__(self, in_size, hids):
         super(ImgEmbedMlp, self).__init__()
         assert len(in_size) == 3
-        mlp = MLP(product(in_size), hids, nn.ReLU, True)
+        mlp = MLP(product(in_size), hids, output_non_linearity=True)
         self.net = nn.Sequential(Flatten(), mlp)
         self.output_size = mlp.output_size
 
@@ -437,7 +437,7 @@ class GuideY(nn.Module):
     def __init__(self, cfg):
         super(GuideY, self).__init__()
         self.col_widths = [cfg.y_size, cfg.y_size]
-        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)], nn.ReLU)
+        self.mlp = MLP(cfg.x_size, [200, 200, sum(self.col_widths)])
 
     def forward(self, x):
         batch_size = x.size(0)
@@ -456,7 +456,7 @@ class GuideY(nn.Module):
 # class GuideY(nn.Module):
 #     def __init__(self, cfg):
 #         super(GuideY, self).__init__()
-#         mlp = MLP(cfg.x_size, [200, 200], nn.ReLU, output_non_linearity=True)
+#         mlp = MLP(cfg.x_size, [200, 200], output_non_linearity=True)
 #         params = NormalParams(mlp.output_size, cfg.y_size)
 #         self.net = nn.Sequential(Flatten(), mlp, params)
 

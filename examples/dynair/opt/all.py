@@ -57,14 +57,12 @@ def build_module(cfg, use_cuda):
     _, *hids = parse_cla('mlp', cfg.decode_obj)
     decode_obj = DecodeObj(cfg, partial(MLP,
                                         hids=hids,
-                                        non_linear_layer=nn.ReLU,
                                         output_non_linearity=True))
 
     sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.w_transition)
     w_transition = WTransition(cfg,
                                partial(MLP,
                                        hids=hids,
-                                       non_linear_layer=nn.ReLU,
                                        output_non_linearity=True),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
@@ -72,7 +70,6 @@ def build_module(cfg, use_cuda):
     z_transition = ZTransition(cfg,
                                partial(MLP,
                                        hids=hids,
-                                       non_linear_layer=nn.ReLU,
                                        output_non_linearity=True),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
@@ -106,7 +103,6 @@ def build_module(cfg, use_cuda):
         if arch == 'mlp':
             output_net = partial(MLP,
                                  hids=hids,
-                                 non_linear_layer=nn.ReLU,
                                  output_non_linearity=True)
         elif arch == 'resnet':
             output_net = partial(ResNet, hids=hids)
@@ -139,7 +135,6 @@ def build_module(cfg, use_cuda):
         if arch == 'mlp':
             output_net = partial(MLP,
                                  hids=hids,
-                                 non_linear_layer=nn.ReLU,
                                  output_non_linearity=True)
         elif arch == 'resnet':
             output_net = partial(ResNet, hids=hids)
