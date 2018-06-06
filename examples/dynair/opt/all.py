@@ -51,6 +51,8 @@ def is_bkg_param(module_name, param_name):
     return ((module_name == 'guide' and param_name.startswith('guide_y')) or
             (module_name == 'model' and param_name.startswith('_decode_bkg')))
 
+arch_lookup = dict(mlp=MLP, resnet=ResNet)
+
 def build_module(cfg, use_cuda):
     decode_bkg, guide_y = bkg_modules(cfg)
 
@@ -94,13 +96,7 @@ def build_module(cfg, use_cuda):
         guide_w = GuideW_ObjRnn(cfg, hids, x_embed, rnn_cell_use_tanh=dict(tanh=True, relu=False)[nl])
     elif cfg.guide_w.startswith('isf'):
         _, block, bkg, arch, *hids = parse_cla('isf-block|noblock-bkg|nobkg-mlp|resnet', cfg.guide_w)
-        if arch == 'mlp':
-            output_net = partial(MLP, hids=hids)
-        elif arch == 'resnet':
-            output_net = partial(ResNet, hids=hids)
-        else:
-            raise Exception('impossible')
-
+        output_net = partial(arch_lookup[arch], hids=hids)
         guide_w = GuideW_ImageSoFar(cfg, model,
                                     partial(CombineMixin, x_embed, output_net),
                                     dict(block=True, noblock=False)[block],
@@ -124,13 +120,7 @@ def build_module(cfg, use_cuda):
     # TODO: Drop this if?
     if True:
         aux, arch, *hids = parse_cla('aux|noaux-mlp|resnet', cfg.guide_z)
-        if arch == 'mlp':
-            output_net = partial(MLP, hids=hids)
-        elif arch == 'resnet':
-            output_net = partial(ResNet, hids=hids)
-        else:
-            raise Exception('impossible')
-
+        output_net = partial(arch_lookup[arch], hids=hids)
         guide_z = GuideZ(cfg,
                          partial(CombineMixin, x_att_embed, output_net),
                          aux_size=guide_w.aux_size, use_aux=dict(aux=True, noaux=False)[aux])
