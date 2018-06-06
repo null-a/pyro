@@ -119,11 +119,12 @@ def build_module(cfg, use_cuda):
 
     # TODO: Drop this if?
     if True:
-        aux, arch, *hids = parse_cla('aux|noaux-mlp|resnet', cfg.guide_z)
+        aux, arch, *hids = parse_cla('auxignore|auxmain|auxside-mlp|resnet', cfg.guide_z)
         output_net = partial(arch_lookup[arch], hids=hids)
         guide_z = GuideZ(cfg,
                          partial(CombineMixin, x_att_embed, output_net),
-                         aux_size=guide_w.aux_size, use_aux=dict(aux=True, noaux=False)[aux])
+                         aux_size=guide_w.aux_size,
+                         aux_method=aux[3:])
     else:
         raise Exception('unknown guide_z: {}'.format(cfg.guide_z))
 

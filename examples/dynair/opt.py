@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--guide-w', default='rnn-tanh-200-200',
                         help='architecture of guide for w')
-    parser.add_argument('--guide-z', default='noaux-mlp-100',
+    parser.add_argument('--guide-z', default='auxignore-mlp-100',
                         help='architecture of guide for z')
     parser.add_argument('--guide-input-embed', default='mlp-500-200',
                         help='architecture of input embedding network')

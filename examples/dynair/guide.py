@@ -117,30 +117,21 @@ class Guide(nn.Module):
 
 
 class GuideZ(nn.Module):
-    def __init__(self, cfg, combine_module, aux_size, use_aux):
+    def __init__(self, cfg, combine_module, aux_size, aux_method):
         super(GuideZ, self).__init__()
 
+        self.aux_method = aux_method
         assert type(aux_size) == tuple
+        assert aux_method in ['ignore', 'main', 'side']
 
         main_input_size = (cfg.num_chan,
                            cfg.window_size,
                            cfg.window_size)
-
-        # If the aux input has the same shape as the main input (e.g.
-        # window-so-far rgb) then it is combined with the main input.
-        # Currently this is done by taking the point-wise difference
-        # between the two. When the shapes do not match the aux input
-        # is treat as an additional side input.
-
-        if not use_aux:
-            self.aux_method = 'ignore'
-        elif aux_size == main_input_size:
-            self.aux_method = 'main'
-        else:
-            self.aux_method = 'side'
-
         side_input_size = (cfg.w_size + cfg.z_size +
-                           (product(aux_size) if self.aux_method == 'side' else 0))
+                           (product(aux_size) if aux_method == 'side' else 0))
+
+        if aux_method == 'main':
+            assert aux_size == main_input_size, 'aux/main input size mismatch'
 
         self.combine = combine_module(main_input_size, side_input_size)
 
