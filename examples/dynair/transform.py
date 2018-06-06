@@ -81,10 +81,7 @@ def insert(a, a_depth, b):
     b_rgb = b[:,0:3]
     b_depth_mask = b[:,3:4]
     sigmoid_diff = sigmoid(stretch * (a_depth_mask - b_depth_mask))
-    # TODO: Note that using convex_comb duplicates comp. of 1-sigmoid_diff.
-    rgb = convex_comb(over(a, b_rgb), b_rgb, sigmoid_diff)
-    depth = convex_comb(a_depth_mask, b_depth_mask, sigmoid_diff)
-    return torch.cat((rgb, depth), 1)
+    return convex_comb(torch.cat((over(a, b_rgb), a_depth_mask), 1), b, sigmoid_diff)
 
 def convex_comb(x, y, s):
     return x * s + y * (1 - s)
