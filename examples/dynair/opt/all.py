@@ -55,22 +55,16 @@ def build_module(cfg, use_cuda):
     decode_bkg, guide_y = bkg_modules(cfg)
 
     _, *hids = parse_cla('mlp', cfg.decode_obj)
-    decode_obj = DecodeObj(cfg, partial(MLP,
-                                        hids=hids,
-                                        output_non_linearity=True))
+    decode_obj = DecodeObj(cfg, partial(MLP, hids=hids))
 
     sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.w_transition)
     w_transition = WTransition(cfg,
-                               partial(MLP,
-                                       hids=hids,
-                                       output_non_linearity=True),
+                               partial(MLP, hids=hids),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
     sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.z_transition)
     z_transition = ZTransition(cfg,
-                               partial(MLP,
-                                       hids=hids,
-                                       output_non_linearity=True),
+                               partial(MLP, hids=hids),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
     model = Model(cfg,
@@ -101,9 +95,7 @@ def build_module(cfg, use_cuda):
     elif cfg.guide_w.startswith('isf'):
         _, block, bkg, arch, *hids = parse_cla('isf-block|noblock-bkg|nobkg-mlp|resnet', cfg.guide_w)
         if arch == 'mlp':
-            output_net = partial(MLP,
-                                 hids=hids,
-                                 output_non_linearity=True)
+            output_net = partial(MLP, hids=hids)
         elif arch == 'resnet':
             output_net = partial(ResNet, hids=hids)
         else:
@@ -133,9 +125,7 @@ def build_module(cfg, use_cuda):
     if True:
         aux, arch, *hids = parse_cla('aux|noaux-mlp|resnet', cfg.guide_z)
         if arch == 'mlp':
-            output_net = partial(MLP,
-                                 hids=hids,
-                                 output_non_linearity=True)
+            output_net = partial(MLP, hids=hids)
         elif arch == 'resnet':
             output_net = partial(ResNet, hids=hids)
         else:
