@@ -14,7 +14,7 @@ from opt.utils import append_line
 
 def run_svi(mod, batches, num_epochs, optim_args, hook,
             output_path, save_period, progress_period,
-            record_grad_norm, clip_threshold, elbo_scale=1.0):
+            check_grad, record_grad_norm, clip_threshold, elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
@@ -25,7 +25,7 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
     svi = SVI(mod.model, mod.guide,
               optim.Adam(optim_args),
               loss=Trace_ELBO(),
-              param_hook=partial(param_hook, grad_norm_dict, record_grad_norm, clip_threshold, output_path))
+              param_hook=partial(param_hook, check_grad, grad_norm_dict, record_grad_norm, clip_threshold, output_path))
 
     for i in range(num_epochs):
         for j, batch in enumerate(batches):
@@ -49,17 +49,17 @@ def hasnan(t):
 def hasinf(t):
     return (t == float('inf')).any()
 
-def param_hook(grad_norm_dict, record_grad_norm, clip_threshold, output_path, params):
-    # check for nan/inf in grads
-    infected = [p for p in params if hasnan(p.grad) or hasinf(p.grad)]
-    if len(infected) > 0:
-        param_name = pyro.get_param_store().param_name
-        def append_line_to_params(line):
-            append_line(os.path.join(output_path, 'params.txt'), line)
-        for p in infected:
-            append_line_to_params('nan={}, inf={}, {}'.format(hasnan(p.grad), hasinf(p.grad), param_name(p)))
-        append_line_to_params('')
-        return True # signal that a step should not be taken
+def param_hook(check_grad, grad_norm_dict, record_grad_norm, clip_threshold, output_path, params):
+    if check_grad:
+        infected = [p for p in params if hasnan(p.grad) or hasinf(p.grad)]
+        if len(infected) > 0:
+            param_name = pyro.get_param_store().param_name
+            def append_line_to_params(line):
+                append_line(os.path.join(output_path, 'params.txt'), line)
+            for p in infected:
+                append_line_to_params('nan={}, inf={}, {}'.format(hasnan(p.grad), hasinf(p.grad), param_name(p)))
+            append_line_to_params('')
+            return True # signal that a step should not be taken
 
     if record_grad_norm or clip_threshold < float('inf'):
         grad_norm = clip_grad_norm_(params, clip_threshold)

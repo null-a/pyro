@@ -25,6 +25,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', default='./runs', help='base output path')
     parser.add_argument('-s', type=int, default=0,
                         help='save parameters (zero disables, otherwise specifies period in epochs')
+    parser.add_argument('-g', action='store_true', default=False,
+                        help='perform inf/nan checks on grad before taking a step')
     parser.add_argument('-n', action='store_true', default=False,
                         help='record norm of gradient during optimisation')
     parser.add_argument('-t', type=float, default=0.0,
