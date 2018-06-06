@@ -159,8 +159,6 @@ class Model(nn.Module):
         return zs, ws
 
     def emission(self, zs, ws, bkg, obj_counts):
-        #batch_size = z.size(0)
-
         acc = bkg
         if self.cfg.use_depth:
             # Add depth channel.
