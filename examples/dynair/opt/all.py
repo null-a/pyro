@@ -56,17 +56,17 @@ arch_lookup = dict(mlp=MLP, resnet=ResNet)
 def build_module(cfg, use_cuda):
     decode_bkg, guide_y = bkg_modules(cfg)
 
-    _, *hids = parse_cla('mlp', cfg.decode_obj)
-    decode_obj = DecodeObj(cfg, partial(MLP, hids=hids))
+    arch, *hids = parse_cla('mlp|resnet', cfg.decode_obj)
+    decode_obj = DecodeObj(cfg, partial(arch_lookup[arch], hids=hids))
 
-    sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.w_transition)
+    sd_opt, arch, *hids = parse_cla('sdparam|sdstate-mlp|resnet', cfg.w_transition)
     w_transition = WTransition(cfg,
-                               partial(MLP, hids=hids),
+                               partial(arch_lookup[arch], hids=hids),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
-    sd_opt, _, *hids = parse_cla('sdparam|sdstate-mlp', cfg.z_transition)
+    sd_opt, arch, *hids = parse_cla('sdparam|sdstate-mlp|resnet', cfg.z_transition)
     z_transition = ZTransition(cfg,
-                               partial(MLP, hids=hids),
+                               partial(arch_lookup[arch], hids=hids),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
     model = Model(cfg,

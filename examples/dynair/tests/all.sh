@@ -32,8 +32,13 @@ run "--guide-z aux-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10 --use-depth"
 
 run "--w-transition sdparam-mlp-10-10"
 run "--w-transition sdstate-mlp-10-10"
+run "--w-transition sdparam-resnet-10-10"
+run "--w-transition sdstate-resnet-10-10"
 
 run "--z-transition sdparam-mlp-10-10"
 run "--z-transition sdstate-mlp-10-10"
+run "--z-transition sdparam-resnet-10-10"
+run "--z-transition sdstate-resnet-10-10"
 
 run "--decode-obj mlp-10-10"
+run "--decode-obj resnet-10-10"
