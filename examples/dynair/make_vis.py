@@ -79,6 +79,8 @@ def main():
     parser.add_argument('params_path')
     parser.add_argument('indices', type=int, nargs='+',
                         help='indices of data points for which to create visualisations')
+
+    parser.add_argument('-l', type=int, help='sequence length')
     parser.add_argument('-d', action='store_true', default=False,
                         help='do not sample latent variables when generating extra frames')
 
@@ -94,7 +96,7 @@ def main():
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path)
+    data = load_data(args.data_path, args.l)
     X, Y = data
 
     with open(args.module_config_path) as f:

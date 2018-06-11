@@ -27,6 +27,7 @@ def main():
     parser.add_argument('end', type=int, help='end index of test set')
 
     parser.add_argument('-b', '--batch-size', type=int, required=True, help='batch size')
+    parser.add_argument('-l', type=int, help='sequence length')
 
     subparsers = parser.add_subparsers(dest='target')
     elbo_parser = subparsers.add_parser('elbo')
@@ -36,7 +37,7 @@ def main():
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path)
+    data = load_data(args.data_path, args.l)
     X, Y = data
 
     with open(args.module_config_path) as f:

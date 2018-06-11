@@ -16,6 +16,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
     parser.add_argument('-b', '--batch-size', type=int, required=True, help='batch size')
+    parser.add_argument('-l', type=int, help='sequence length')
     parser.add_argument('-e', '--epochs', type=int, default=10**6,
                         help='number of optimisation epochs to perform')
     parser.add_argument('--hold-out', type=int, default=0,
@@ -81,7 +82,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path)
+    data = load_data(args.data_path, args.l)
     X, Y = data # (sequences, counts)
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)

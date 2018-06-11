@@ -13,7 +13,7 @@ def split(t, batch_size, num_test_batches):
     test = batches[num_train_batches:(num_train_batches+num_test_batches)]
     return train, test
 
-def load_data(data_path):
+def load_data(data_path, seq_len):
     print('loading {}'.format(data_path))
     data = np.load(data_path)
     X_np = data['X']
@@ -25,6 +25,10 @@ def load_data(data_path):
     X = X[:,:,0:3]
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
     assert X.size(0) == Y.size(0)
+    if not seq_len is None:
+        # Truncate data to desired length.
+        assert 0 < seq_len <= X.size(1)
+        X = X[:, 0:seq_len]
     return X, Y
 
 def data_params(data):
