@@ -1,18 +1,168 @@
 import argparse
 import json
 import torch
+from torch.nn.functional import softplus
+from torchvision.utils import make_grid, save_image
 from pyro.infer import Trace_ELBO
+
+import numpy as np
+
+from PIL import Image, ImageDraw, ImageFilter
+from PIL.ImageTransform import AffineTransform
+
+import motmetrics as mm
 
 from dynair import config
 from data import load_data, data_params, split
 from opt.all import build_module
 from opt.run_svi import elbo_from_batches
+from transform import over
+from vis import overlay_multiple_window_outlines
 
 def elbo_main(dynair, X, Y, args):
     X_batches, _ = split(X[args.start:args.end], args.batch_size, 0)
     Y_batches, _ = split(Y[args.start:args.end], args.batch_size, 0)
     elbo = elbo_from_batches(dynair, list(zip(X_batches, Y_batches)), args.n)
     print(elbo / float(dynair.cfg.seq_length * args.batch_size))
+
+# Somewhat improved implementation (compated to mot_main2)
+
+# TODO: Switch to using Euclidean distance.
+
+# TODO: Make it so this can be used to compute metrics on extrapolated frames.
+
+
+# Normally -l limits what is loaded.
+
+# Here, we want to load everything, but only perform inference on the first l.
+
+# For any extra frames beyond that, we compute extrapolatiosn, adn compute metrics using those.
+
+
+# TODO: Clean up duplication of calls to split between this and ELBO.
+
+# TODO: Check that all callers of load_data expect the extra returned value T.
+
+# TODO: rename mot arg to tracking
+
+def mot_main(dynair, X, Y, T, args):
+    X_batches, _ = split(X[args.start:args.end], args.batch_size, 0)
+    Y_batches, _ = split(Y[args.start:args.end], args.batch_size, 0)
+    T_batches, _ = split(T[args.start:args.end], args.batch_size, 0)
+
+    # For each data point we build an 'accumulator' (defined by in
+    # motmetrics library) which stores inferences and ground truth
+    # positions. These are then used to compute the metrics.
+    accs = []
+
+    for i, (X_batch, Y_batch, T_batch) in enumerate(zip(X_batches, Y_batches, T_batches)):
+        # TODO: Make it possible to use 0 as the number of extra frames.
+        _, wss, _, _ = dynair.infer(X_batch, Y_batch, 10)
+
+        #print(wss.size()) # (batch_size, max_num_objs, seq_len, |w|)
+
+        # Iterate over each data point in batch.
+        for j, (ws, x, obj_count, ground_truth) in enumerate(zip(wss, X_batch, Y_batch, T_batch)):
+            obj_count = obj_count.item()
+
+            # Drop the padding added for non-existent objects.
+            ws = ws[0:obj_count].contiguous()
+            ground_truth = ground_truth[:,0:obj_count]
+
+            # Here we:
+            # 1) flatten ws
+            # 2) map from ws to (x,y,w,h)
+            # 3) undo flatten
+            # 4) transpose so that layout matches ground_truth
+            bbs = ws_to_bounding_box(ws.view(-1, 3), dynair.cfg.image_size).view(obj_count, -1, 4).transpose(0,1)
+            #print(bbs.size()) # (seq_len, obj_count, |(x,y,w,h)|)
+
+            # Sanity check (x,y,w,h) is computed correctly by visualising bounding boxes.
+            #overlay = torch.from_numpy(draw_bounding_box(bbs) / 255.).float()
+            #overlay = torch.from_numpy(draw_bounding_box(ground_truth) / 255.).float()
+            #save_image(make_grid(over(overlay, x), nrow=10), 'bb_{}_{}.png'.format(i,j))
+
+            # Here we also remove the padding from ground_truth.
+            acc = mot_populate_acc(bbs, ground_truth)
+            accs.append(acc)
+
+    mh = mm.metrics.create()
+    summary = mh.compute_many(accs,
+                              metrics=['num_frames', 'mota', 'motp'],
+                              names=list(range(len(accs))),
+                              generate_overall=True)
+    print(summary)
+
+
+def mot_populate_acc(preds, truth):
+    # preds (seq_len, obj_count, 4)
+    # truth (seq_len, obj_count, 4)
+    preds = preds.numpy()
+    truth = truth.numpy()
+    assert preds.shape == truth.shape
+    assert preds.shape[0] == 20
+    assert truth.shape[2] == 4
+
+    obj_count = preds.shape[1]
+    assert obj_count <= 10
+
+    acc = mm.MOTAccumulator(auto_id=True)
+
+    # Iterate over frames.
+    for preds_i, truth_i in zip(preds, truth):
+        distances = mm.distances.iou_matrix(
+            preds_i,
+            truth_i,
+            max_iou=0.5)
+        #print(distances)
+        acc.update(
+            list("abcdefghij")[0:obj_count], # ground truth object
+            list("0123456789")[0:obj_count], # inferred objects
+            distances)
+
+    return acc
+
+
+
+
+# Map (a batch of) w (as used by the spatial transformer) to (x,y,w,h)
+def ws_to_bounding_box(ws, x_size):
+    ws_scale = softplus(ws[:,0])
+    ws_x = ws[:,1]
+    ws_y = ws[:,2]
+    w = x_size / ws_scale
+    h = x_size / ws_scale
+    xtrans = -ws_x * x_size / 2.
+    ytrans = -ws_y * x_size / 2.
+    x = (x_size - w) / 2 + xtrans  # origin is top left
+    y = (x_size - h) / 2 + ytrans
+    return torch.cat((x.unsqueeze(1), y.unsqueeze(1), w.unsqueeze(1), h.unsqueeze(1)), 1)
+
+
+# TODO: Drop this size const.
+SIZE = 50
+def draw_bounding_box(tracks):
+    # tracks. np tensor (seq_len, num_obj, len([x,y,w,h]))
+    # returns np tensor of size (seq_len, num_chan=3, w, h), with pixel intensities in 0..255
+    out = []
+    for obj_positions in tracks:
+        img = Image.new('RGBA', (SIZE,SIZE), 0)
+        draw = ImageDraw.Draw(img)
+        for ix, obj_pos in enumerate(obj_positions):
+            x, y, w, h = obj_pos
+            draw.rectangle([x, y, x+w, y+h], outline=['red','green','blue'][ix])
+        out.append(img_to_arr(img))
+    return np.array(out)
+
+
+def img_to_arr(img):
+    #assert img.mode == 'RGBA'
+    channels = 4 if img.mode == 'RGBA' else 3
+    w, h = img.size
+    arr = np.fromstring(img.tobytes(), dtype=np.uint8)
+    return arr.reshape(w * h, channels).T.reshape(channels, h, w)
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -30,12 +180,15 @@ def main():
     elbo_parser = subparsers.add_parser('elbo')
     elbo_parser.set_defaults(main=elbo_main)
 
+    mot_parser = subparsers.add_parser('mot')
+    mot_parser.set_defaults(main=mot_main)
+
     elbo_parser.add_argument('-n', type=int, default=1, help='number of particles')
 
     args = parser.parse_args()
 
     data = load_data(args.data_path, args.l)
-    X, Y = data
+    X, Y, T = data
 
     with open(args.module_config_path) as f:
         module_config = json.load(f)
@@ -44,7 +197,7 @@ def main():
     dynair = build_module(cfg, use_cuda=False)
     dynair.load_state_dict(torch.load(args.params_path, map_location=lambda storage, loc: storage))
 
-    args.main(dynair, X, Y, args)
+    args.main(dynair, X, Y, T, args)
 
 if __name__ == '__main__':
     main()

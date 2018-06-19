@@ -25,14 +25,20 @@ def load_data(data_path, seq_len):
     X = X[:,:,0:3]
     Y = torch.from_numpy(data['Y'].astype(np.uint8))
     assert X.size(0) == Y.size(0)
+    T = torch.from_numpy(data['T']) if 'T' in data else None
+    if not T is None:
+        assert T.size(0) == X.size(0) # data points
+        assert T.size(1) == X.size(1) # frames
     if not seq_len is None:
         # Truncate data to desired length.
         assert 0 < seq_len <= X.size(1)
         X = X[:, 0:seq_len]
-    return X, Y
+        if not T is None:
+            T = T[:, 0:seq_len]
+    return X, Y, T
 
 def data_params(data):
-    X, Y = data
+    X, Y, _ = data
     seq_length, num_chan, image_size = X.size()[1:4]
     x_size = num_chan * image_size**2
     max_obj_count = Y.max().item()

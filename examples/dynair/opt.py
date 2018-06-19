@@ -89,7 +89,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     data = load_data(args.data_path, args.l)
-    X, Y = data # (sequences, counts)
+    X, Y, _ = data # (sequences, counts)
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
