@@ -31,7 +31,9 @@ run "--guide-z auxside-mlp-10-10"
 run "--guide-z auxmain-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10"
 run "--guide-z auxside-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10"
 
-run "--guide-z auxmain-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10 --use-depth"
+# Can't do this at present, as the aux input includes depth channel,
+# which means the aux and main don't have the same dimension.
+# run "--guide-z auxmain-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10 --use-depth"
 run "--guide-z auxside-mlp-10-10 --guide-w isf-noblock-bkg-mlp-10-10 --use-depth"
 
 run "--w-transition sdparam-mlp-10-10"
