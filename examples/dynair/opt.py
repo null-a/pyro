@@ -73,6 +73,8 @@ if __name__ == '__main__':
                         help='record the elbo of the full training set (and test set when present) during optimisation ' +
                              '(zero disables, otherwise specifies period in epochs)')
 
+    parser.add_argument('--desc', help='argument value is written to desc.txt in output directory to aid identification')
+
     subparsers = parser.add_subparsers(dest='target')
     all_parser = subparsers.add_parser('all')
     bkg_parser = subparsers.add_parser('bkg')
@@ -121,6 +123,8 @@ if __name__ == '__main__':
     log_to_cond(cfg)
 
     append_line(os.path.join(output_path, 'argv.txt'), ' '.join(sys.argv))
+    if not args.desc is None:
+        append_line(os.path.join(output_path, 'desc.txt'), args.desc)
     with open(os.path.join(output_path, 'module_config.json'), 'w') as f:
         json.dump(module_config, f)
 
