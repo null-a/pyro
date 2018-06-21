@@ -53,7 +53,6 @@ def log_elbo(dynair, elbo_scale, batches, output_path, filename, epoch):
     elbo = elbo_scale * elbo_from_batches(dynair, batches)
     append_line(os.path.join(output_path, filename), '{},{:.2f}'.format(epoch, elbo))
 
-# TODO: Reuse this in metrics.py?
 def elbo_from_batches(dynair, batches, num_particles=1):
     elbo = Trace_ELBO(num_particles=num_particles)
     loss = 0.0

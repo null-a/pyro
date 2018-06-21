@@ -6,16 +6,13 @@ from pyro.infer import Trace_ELBO
 from dynair import config
 from data import load_data, data_params, split
 from opt.all import build_module
+from opt.run_svi import elbo_from_batches
 
 def elbo_main(dynair, X, Y, args):
     X_batches, _ = split(X[args.start:args.end], args.batch_size, 0)
     Y_batches, _ = split(Y[args.start:args.end], args.batch_size, 0)
-    elbo = Trace_ELBO(num_particles=args.n)
-    loss = 0.0
-    with torch.no_grad():
-        for batch in zip(X_batches, Y_batches):
-            loss += elbo.loss(dynair.model, dynair.guide, batch)
-    print(loss / float(dynair.cfg.seq_length * (args.end - args.start)))
+    elbo = elbo_from_batches(dynair, list(zip(X_batches, Y_batches)), args.n)
+    print(elbo / float(dynair.cfg.seq_length * args.batch_size))
 
 def main():
     parser = argparse.ArgumentParser()
