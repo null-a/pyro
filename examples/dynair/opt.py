@@ -89,7 +89,7 @@ if __name__ == '__main__':
     use_cuda = torch.cuda.is_available() and not args.cpu
     print('using cuda: {}'.format(use_cuda))
 
-    module_config = dict(w_size=3 + (1 if args.use_depth else 0),
+    module_config = dict(w_size=3,
                          y_size=args.y_size,
                          z_size=args.z_size,
                          window_size=args.window_size,

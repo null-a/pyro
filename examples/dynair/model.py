@@ -27,12 +27,8 @@ class Model(nn.Module):
         self.y_prior_mean = self.prototype.new_zeros(cfg.y_size)
         self.y_prior_sd = self.prototype.new_ones(cfg.y_size)
 
-        if self.cfg.use_depth:
-            self.w_0_prior_mean = torch.Tensor([3, 0, 0, 1.85]).type_as(self.prototype)
-            self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7, 1.0]).type_as(self.prototype)
-        else:
-            self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
-            self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
+        self.w_0_prior_mean = torch.Tensor([3, 0, 0]).type_as(self.prototype)
+        self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
         self.z_0_prior_mean = self.prototype.new_zeros(cfg.z_size)
         self.z_0_prior_sd = self.prototype.new_ones(cfg.z_size)
@@ -43,6 +39,9 @@ class Model(nn.Module):
         self._decode_bkg = arch['decode_bkg']
         self.w_transition = arch['w_transition']
         self.z_transition = arch['z_transition']
+
+        # TODO: Ought to be part of the arch arg.
+        self.decode_obj_depth = DecodeObjDepth(cfg) if cfg.use_depth else None
 
 
     # We wrap `_decode_bkg` here to enable caching without
@@ -177,12 +176,11 @@ class Model(nn.Module):
         assert z.size(0) == w.size(0) == image_so_far.size(0)
         mask = torch.Tensor(mask).type_as(z) # move to gpu
 
-        w_pos_and_scale = w[:,0:3]
         x_att = self.decode_obj(z) * mask.view(-1, 1)
-        x_att_img = window_to_image(self.cfg, w_pos_and_scale, x_att)
+        x_att_img = window_to_image(self.cfg, w, x_att)
 
         if self.cfg.use_depth:
-            depth = softplus(w[:,3])
+            depth = self.decode_obj_depth(z)
             return insert(x_att_img, depth, image_so_far)
         else:
             return over(x_att_img, image_so_far)
@@ -240,6 +238,19 @@ class DecodeObj(nn.Module):
         # Adjust bias of the alpha channel.
         output_layer.bias.data[(cfg.num_chan * cfg.window_size ** 2):] += alpha_bias
         self.net = nn.Sequential(net, output_layer, nn.Sigmoid())
+
+    def forward(self, z):
+        return self.net(z)
+
+
+# TODO: Add hidden layer?
+class DecodeObjDepth(nn.Module):
+    def __init__(self, cfg):
+        super(DecodeObjDepth, self).__init__()
+        # Depths are expected to be >= 0.
+        self.net = nn.Sequential(nn.Linear(cfg.z_size, 1), nn.Softplus())
+        # Adjust init. such depths of ~2 are output initially.
+        self.net[0].bias.data += 1.9
 
     def forward(self, z):
         return self.net(z)

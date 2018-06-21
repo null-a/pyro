@@ -107,8 +107,7 @@ class Guide(nn.Module):
         # following the prior?), while also supporting optional delta
         # style.
         assert not self.delta_w
-        offset = [3.0, 0, 0, 1.85] if self.cfg.use_depth else [3.0, 0, 0]
-        w_mean = w_mean_or_delta + torch.tensor(offset).type_as(w_mean_or_delta)
+        w_mean = w_mean_or_delta + torch.tensor([3.0, 0, 0]).type_as(w_mean_or_delta)
         return pyro.sample('w_{}_{}'.format(t, i), dist.Normal(w_mean, w_sd).independent(1))
 
     def sample_z(self, t, i, z_prev, z_mean_or_delta, z_sd):
@@ -257,14 +256,14 @@ class GuideW_ImageSoFar(nn.Module):
         self.block_grad = block_grad
         self.include_bkg = include_bkg
 
-        num_chan = cfg.num_chan + (1 if cfg.use_depth else 0) # use of depth adds an additional channel
-        self.combine = combine_module((num_chan, cfg.image_size, cfg.image_size), # image so far diff
-                                      cfg.w_size + cfg.z_size)                    # side input
+        self.combine = combine_module((cfg.num_chan, cfg.image_size, cfg.image_size), # image so far diff
+                                      cfg.w_size + cfg.z_size)                        # side input
 
         self.params = NormalParams(self.combine.output_size, cfg.w_size, sd_bias=-2.25)
 
         # Size of the window-so-far.
-        self.aux_size = (cfg.num_chan, cfg.window_size, cfg.window_size)
+        self.aux_size = (cfg.num_chan + (1 if cfg.use_depth else 0),
+                         cfg.window_size, cfg.window_size)
 
         # TODO: Does it make sense that this is a parameter (rather
         # than fixed) in the case where the guide computing the delta?
@@ -309,18 +308,13 @@ class GuideW_ImageSoFar(nn.Module):
 
         # For simplicity, feed `x - image_so_far` into the net, though
         # note that alternatives exist.
-        rgb_diff = x - image_so_far[:,0:3]
-        if self.cfg.use_depth:
-            depth_channel = image_so_far[:,3:4]
-            main_input = torch.cat((rgb_diff, depth_channel), 1)
-        else:
-            main_input = rgb_diff
+        diff = x - image_so_far[:,0:3]
 
-        params = self.params(self.combine(main_input, torch.cat((w_prev_i, z_prev_i), 1)))
+        params = self.params(self.combine(diff, torch.cat((w_prev_i, z_prev_i), 1)))
 
         # Return (a function that computes) the window-so-far for use
         # as auxiliary input to z guide.
-        aux = lambda w: image_to_window(self.cfg, w[:,0:3], image_so_far[:,0:3]) # drop depth channel
+        aux = lambda w: image_to_window(self.cfg, w, image_so_far)
 
         return params, image_so_far, aux
 
