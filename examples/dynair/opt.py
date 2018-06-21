@@ -69,6 +69,10 @@ if __name__ == '__main__':
     parser.add_argument('--show', action='store_true', default=False,
                         help='show module information')
 
+    parser.add_argument('--log-elbo', type=int, default=0,
+                        help='record the elbo of the full training set (and test set when present) during optimisation ' +
+                             '(zero disables, otherwise specifies period in epochs)')
+
     subparsers = parser.add_subparsers(dest='target')
     all_parser = subparsers.add_parser('all')
     bkg_parser = subparsers.add_parser('bkg')

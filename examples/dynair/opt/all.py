@@ -29,9 +29,17 @@ def run_vis(vis, dynair, X, Y, epoch, batch):
         vis.images(out.cpu(), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-def hook(vis_period, vis, dynair, X, Y, epoch, batch, step):
+def hook(vis_period, vis, dynair, X_train, Y_train, X_test, Y_test, epoch, batch, step):
     if vis_period > 0 and (step+1) % vis_period == 0:
-        run_vis(vis, dynair, X, Y, epoch, batch)
+        # Produce visualisations for the first train & test data points
+        # where possible.
+        if len(X_test) > 0:
+            X_vis = torch.cat((X_train[0][0:1], X_test[0][0:1]))
+            Y_vis = torch.cat((Y_train[0][0:1], Y_test[0][0:1]))
+        else:
+            X_vis = X_train[0][0:1]
+            Y_vis = Y_train[0][0:1]
+        run_vis(vis, dynair, X_vis, Y_vis, epoch, batch)
     dynair.clear_cache()
     # print()
     # pp(dynair.cache_stats())
@@ -152,15 +160,7 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
         Y_test = Y_test.cuda()
 
     batch_size = X_train[0].size(0)
-
-    # Produce visualisations for the first train & test data points
-    # where possible.
-    if len(X_test) > 0:
-        X_vis = torch.cat((X_train[0][0:1], X_test[0][0:1]))
-        Y_vis = torch.cat((Y_train[0][0:1], Y_test[0][0:1]))
-    else:
-        X_vis = X_train[0][0:1]
-        Y_vis = Y_train[0][0:1]
+    elbo_scale = 1.0/(cfg.seq_length*batch_size)
 
     dynair = build_module(cfg, use_cuda)
 
@@ -180,7 +180,9 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
             return {'lr': 1e-4}
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
-            partial(hook, args.v, visdom.Visdom(), dynair, X_vis, Y_vis),
-            output_path, args.s, args.t, args.g, args.n, args.c,
-            elbo_scale=1.0/(cfg.seq_length*batch_size))
+            partial(hook, args.v, visdom.Visdom(), dynair,
+                    X_train, Y_train, X_test, Y_test),
+            output_path,
+            args.s, args.t, args.log_elbo, args.g, args.n, args.c,
+            test_batches=list(zip(X_test, Y_test)), elbo_scale=elbo_scale)
     print()

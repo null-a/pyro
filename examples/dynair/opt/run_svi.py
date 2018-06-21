@@ -12,9 +12,10 @@ import pyro.optim as optim
 
 from opt.utils import append_line
 
-def run_svi(mod, batches, num_epochs, optim_args, hook,
-            output_path, save_period, progress_period,
-            check_grad, record_grad_norm, clip_threshold, elbo_scale=1.0):
+def run_svi(mod, batches, num_epochs, optim_args, hook, output_path,
+            save_period, progress_period, log_elbo_period,
+            check_grad, record_grad_norm, clip_threshold,
+            test_batches=[], elbo_scale=1.0):
     t0 = time.time()
     num_batches = len(batches)
 
@@ -42,6 +43,24 @@ def run_svi(mod, batches, num_epochs, optim_args, hook,
         if save_period > 0 and (i+1) % save_period == 0:
             torch.save(mod.state_dict(),
                        os.path.join(output_path, 'params-{}.pytorch'.format(i+1)))
+
+        if log_elbo_period > 0 and (i+1) % log_elbo_period == 0:
+            log_elbo(mod, elbo_scale, batches, output_path, 'train.csv', i)
+            if len(test_batches) > 0:
+                log_elbo(mod, elbo_scale, test_batches, output_path, 'test.csv', i)
+
+def log_elbo(dynair, elbo_scale, batches, output_path, filename, epoch):
+    elbo = elbo_scale * elbo_from_batches(dynair, batches)
+    append_line(os.path.join(output_path, filename), '{},{:.2f}'.format(epoch, elbo))
+
+# TODO: Reuse this in metrics.py?
+def elbo_from_batches(dynair, batches, num_particles=1):
+    elbo = Trace_ELBO(num_particles=num_particles)
+    loss = 0.0
+    with torch.no_grad():
+        for batch in batches:
+            loss += elbo.loss(dynair.model, dynair.guide, batch)
+    return -loss / len(batches)
 
 def hasnan(t):
     return torch.isnan(t).any()
