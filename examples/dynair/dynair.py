@@ -108,9 +108,6 @@ class DynAIR(nn.Module):
 
         self.clear_cache()
 
-        # TODO: Consider splitting out depth from w here to make
-        # things easier for consumers.
-
         return (frames_to_tensor(frames),
                 latents_to_tensor(wss),
                 frames_to_tensor(extra_frames) if len(extra_frames) > 0 else torch.zeros(0),
