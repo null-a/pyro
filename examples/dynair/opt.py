@@ -6,7 +6,7 @@ import json
 import torch.cuda
 
 from dynair import config
-from data import split, load_data, data_params
+from data import split, load_data, data_params, trunc_seqs
 from opt.utils import make_output_dir, append_line, describe_env, md5sum
 from opt.all import opt_all
 from opt.bkg import opt_bkg
@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path, args.l)
+    data = trunc_seqs(load_data(args.data_path), args.l)
     X, Y, _ = data # (sequences, counts)
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)

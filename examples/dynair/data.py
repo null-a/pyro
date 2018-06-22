@@ -13,7 +13,7 @@ def split(t, batch_size, num_test_batches):
     test = batches[num_train_batches:(num_train_batches+num_test_batches)]
     return train, test
 
-def load_data(data_path, seq_len):
+def load_data(data_path):
     print('loading {}'.format(data_path))
     data = np.load(data_path)
     X_np = data['X']
@@ -29,13 +29,16 @@ def load_data(data_path, seq_len):
     if not T is None:
         assert T.size(0) == X.size(0) # data points
         assert T.size(1) == X.size(1) # frames
-    if not seq_len is None:
-        # Truncate data to desired length.
-        assert 0 < seq_len <= X.size(1)
-        X = X[:, 0:seq_len]
-        if not T is None:
-            T = T[:, 0:seq_len]
     return X, Y, T
+
+def trunc_seqs(data, seq_len):
+    if seq_len is None:
+        return data
+    X, Y, T = data
+    assert 0 < seq_len <= X.size(1)
+    return (X[:, 0:seq_len],
+            Y,
+            T[:, 0:seq_len if not T is None else None])
 
 def data_params(data):
     X, Y, _ = data

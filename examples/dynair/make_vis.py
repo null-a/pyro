@@ -10,7 +10,7 @@ import pyro
 from PIL import Image, ImageDraw
 
 from dynair import config
-from data import load_data, data_params
+from data import load_data, data_params, trunc_seqs
 from opt.all import build_module
 from vis import overlay_multiple_window_outlines
 
@@ -96,8 +96,8 @@ def main():
 
     args = parser.parse_args()
 
-    data = load_data(args.data_path, args.l)
-    X, Y = data
+    data = trunc_seqs(load_data(args.data_path), args.l)
+    X, Y, _ = data
 
     with open(args.module_config_path) as f:
         module_config = json.load(f)
