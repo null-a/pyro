@@ -23,7 +23,8 @@ def elbo_main(dynair, X, Y, args):
     X_batches, _ = split(X[args.start:args.end], args.batch_size, 0)
     Y_batches, _ = split(Y[args.start:args.end], args.batch_size, 0)
     elbo = elbo_from_batches(dynair, list(zip(X_batches, Y_batches)), args.n)
-    print(elbo / float(dynair.cfg.seq_length * args.batch_size))
+    seq_length = X_batches[0].size(1)
+    print(elbo / float(seq_length * args.batch_size))
 
 # Somewhat improved implementation (compated to mot_main2)
 

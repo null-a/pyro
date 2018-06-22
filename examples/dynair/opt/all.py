@@ -160,7 +160,8 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
         Y_test = Y_test.cuda()
 
     batch_size = X_train[0].size(0)
-    elbo_scale = 1.0/(cfg.seq_length*batch_size)
+    seq_length = X_train[0].size(1)
+    elbo_scale = 1.0/(seq_length*batch_size)
 
     dynair = build_module(cfg, use_cuda)
 

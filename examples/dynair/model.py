@@ -58,13 +58,12 @@ class Model(nn.Module):
         #     print(name)
 
         seqs, obj_counts = batch
-        batch_size = obj_counts.size(0)
+        batch_size = seqs.size(0)
+        seq_length = seqs.size(1)
 
-        if not seqs is None:
-            assert_size(seqs, (batch_size,
-                               self.cfg.seq_length, self.cfg.num_chan,
-                               self.cfg.image_size, self.cfg.image_size))
-            assert_size(obj_counts, (batch_size,))
+        assert_size(seqs, (batch_size, seq_length, self.cfg.num_chan,
+                           self.cfg.image_size, self.cfg.image_size))
+        assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
         zss = []
@@ -78,7 +77,7 @@ class Model(nn.Module):
             y = self.sample_y(batch_size)
             bkg = self.decode_bkg(y)
 
-            for t in range(self.cfg.seq_length):
+            for t in range(seq_length):
                 if t>0:
                     zs_params, ws_params = self.transition_params(zss[-1], wss[-1])
                 else:

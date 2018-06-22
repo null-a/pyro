@@ -119,6 +119,7 @@ if __name__ == '__main__':
     log_to_cond('target: {}'.format(args.target))
     log_to_cond('data md5: {}'.format(md5sum(args.data_path)))
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
+    log_to_cond('data seq length: {}'.format(X.size(1)))
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
     log_to_cond(cfg)
 

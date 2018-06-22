@@ -39,11 +39,10 @@ def load_data(data_path, seq_len):
 
 def data_params(data):
     X, Y, _ = data
-    seq_length, num_chan, image_size = X.size()[1:4]
+    num_chan, image_size = X.size()[2:4]
     x_size = num_chan * image_size**2
     max_obj_count = Y.max().item()
-    return dict(seq_length=seq_length,
-                num_chan=num_chan,
+    return dict(num_chan=num_chan,
                 image_size=image_size,
                 x_size=x_size,
                 max_obj_count=max_obj_count)

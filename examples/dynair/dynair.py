@@ -4,8 +4,7 @@ import pyro.poutine as poutine
 from collections import namedtuple
 
 Config = namedtuple('Config',
-                    ['seq_length', # data specified config
-                     'num_chan',
+                    ['num_chan', # data specified config
                      'image_size',
                      'x_size',
                      'max_obj_count',
@@ -95,7 +94,8 @@ class DynAIR(nn.Module):
         for t in range(num_extra_frames):
             zs_params, ws_params = self.model.transition_params(zs, ws)
             if sample_extra:
-                zs, ws = self.model.sample_zs_and_ws(self.cfg.seq_length + t,
+                seq_length = seqs.size(1)
+                zs, ws = self.model.sample_zs_and_ws(seq_length + t,
                                                      obj_counts,
                                                      zs_params, ws_params)
             else:

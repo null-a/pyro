@@ -45,16 +45,16 @@ class Guide(nn.Module):
 
         seqs, obj_counts = batch
         batch_size = seqs.size(0)
+        seq_length = seqs.size(1)
 
-        assert_size(seqs, (batch_size,
-                           self.cfg.seq_length, self.cfg.num_chan,
+        assert_size(seqs, (batch_size, seq_length, self.cfg.num_chan,
                            self.cfg.image_size, self.cfg.image_size))
 
         assert_size(obj_counts, (batch_size,))
         assert all(0 <= obj_counts) and all(obj_counts <= self.cfg.max_obj_count), 'Object count out of range.'
 
-        ws = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
-        zs = mk_matrix(self.cfg.seq_length, self.cfg.max_obj_count)
+        ws = mk_matrix(seq_length, self.cfg.max_obj_count)
+        zs = mk_matrix(seq_length, self.cfg.max_obj_count)
 
         with pyro.iarange('data', batch_size):
 
@@ -62,7 +62,7 @@ class Guide(nn.Module):
             # first frame only.
             y = self.sample_y(*self.guide_y(seqs[:, 0]))
 
-            for t in range(self.cfg.seq_length):
+            for t in range(seq_length):
 
                 x = seqs[:, t]
                 w_guide_state_prev = None
