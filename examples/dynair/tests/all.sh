@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 function run {
-    python3 opt.py data/single_obj.npz -b 25 --hold-out 39 -e 1 $1 all
+    python3 opt.py data/multi_obj.npz -b 25 --hold-out 39 -e 1 $1 all
 }
 
 run "--use-depth"
