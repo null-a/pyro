@@ -123,14 +123,18 @@ class GuideZ(nn.Module):
         assert type(aux_size) == tuple
         assert aux_method in ['ignore', 'main', 'side']
 
-        main_input_size = (cfg.num_chan,
+        if aux_method == 'main':
+            # We allow the aux input to have extra channels. See
+            # `precombine` for how this is handled.
+            assert (aux_size[0] >= cfg.num_chan and
+                    aux_size[1:] == (cfg.window_size, cfg.window_size)), 'aux/main input size mismatch'
+
+        main_input_size = (aux_size[0] if aux_method == 'main' else cfg.num_chan,
                            cfg.window_size,
                            cfg.window_size)
         side_input_size = (cfg.w_size + cfg.z_size +
                            (product(aux_size) if aux_method == 'side' else 0))
 
-        if aux_method == 'main':
-            assert aux_size == main_input_size, 'aux/main input size mismatch'
 
         self.combine = combine_module(main_input_size, side_input_size)
 
@@ -142,7 +146,21 @@ class GuideZ(nn.Module):
         if self.aux_method == 'ignore':
             return x_att, torch.cat((w, z_prev_i), 1)
         elif self.aux_method == 'main':
-            return x_att - aux(w), torch.cat((w, z_prev_i), 1)
+            aux_input = aux(w)
+            x_att_num_chan = x_att.size(1)
+            aux_num_chan = aux_input.size(1)
+            # When the aux input has more channels than the main input
+            # (e.g. when it contains the depth channel), the main
+            # input will (in effect) be padding with additional
+            # channels set to zero everywhere before the diff is
+            # computed.
+            if aux_num_chan > x_att_num_chan:
+                diff = x_att - aux_input[:,0:x_att_num_chan]
+                extra_aux_chans = aux_input[:,x_att_num_chan:]
+                main_input = torch.cat((diff, extra_aux_chans), 1)
+            else:
+                main_input = x_att - aux_input
+            return main_input, torch.cat((w, z_prev_i), 1)
         elif self.aux_method == 'side':
             batch_size = x_att.size(0)
             aux_flat = aux(w).view(batch_size, -1)
