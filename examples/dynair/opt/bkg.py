@@ -13,11 +13,13 @@ def opt_bkg(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
     if args.show:
         print(vae)
 
-    X_train, _ = X_split
+    X_train, X_test = X_split
     # Extract backgrounds from the input sequences.
     batches = X_train.mode(2)[0].view(X_train.size()[0:2] + (-1,))
+    test_batches = X_test.mode(2)[0].view(X_test.size()[0:2] + (-1,)) if len(X_test) > 0 else []
     if use_cuda:
         batches = batches.cuda()
+        test_batches = test_batches.cuda()
 
     vis_batch = batches[0, 0:10]
     batch_size = batches.size(1)
@@ -34,5 +36,5 @@ def opt_bkg(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
 
     run_svi(vae, batches, args.epochs, optim_args, hook,
             output_path, args.s, args.t, args.log_elbo, args.g, args.n, args.c,
-            elbo_scale=1.0/batch_size)
+            test_batches=test_batches, elbo_scale=1.0/batch_size)
     print()
