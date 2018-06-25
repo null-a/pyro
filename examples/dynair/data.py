@@ -38,7 +38,7 @@ def trunc_seqs(data, seq_len):
     assert 0 < seq_len <= X.size(1)
     return (X[:, 0:seq_len],
             Y,
-            T[:, 0:seq_len if not T is None else None])
+            T[:, 0:seq_len] if not T is None else None)
 
 def data_params(data):
     X, Y, _ = data
