@@ -149,7 +149,7 @@ def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, sample_
     frames = []
     tracks = []
 
-    obj_downscale_factor = 4
+    obj_downscale_factor = 3.5
 
     for t in range(seq_len):
         acc = bkg
