@@ -38,7 +38,13 @@ def save_seq(frames):
 # https://www.emojione.com/
 def load_avatars(path):
     fns = glob.glob(os.path.join(path, '*.png'))
+    print('found {} avatar images'.format(len(fns)))
     return [Image.open(fn).convert('RGBA').resize((SIZE, SIZE), resample=Image.BILINEAR) for fn in fns]
+
+def bkg_filenames(path):
+    fns = glob.glob(os.path.join(path, '*.jpg'))
+    print('found {} background images'.format(len(fns)))
+    return sorted(fns)
 
 def rot(img, angle):
     return img.rotate(angle)
@@ -99,6 +105,7 @@ def sample_position():
     y = np.random.uniform(b, SIZE-b)
     return x, y
 
+# Note, unused.
 def sample_natural_scene_bkg(path, size):
     # I'm using some images from here:
     # http://cvcl.mit.edu/database.htm
@@ -119,11 +126,12 @@ def sample_natural_scene_bkg(path, size):
     #arr = img_to_arr(cropped)
     return cropped, (n, ix, x, y)
 
-def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, sample_bkg, avatars):
+def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, bkg_path):
 
     assert max_num_objs <= len(avatars)
 
-    bkg, bkg_meta = sample_bkg(SIZE)
+    bkg = Image.open(bkg_path).convert('RGBA')
+    assert bkg.size == (SIZE, SIZE)
 
     # Sample objects (without replacement)
     num_objs = np.random.randint(max_num_objs - min_num_objs + 1) + min_num_objs
@@ -184,7 +192,7 @@ def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, sample_
     else:
         np_tracks = np.array(tracks)
 
-    return frames, num_objs, np_tracks, bkg_meta
+    return frames, num_objs, np_tracks
 
 # We pad tracks to that we can pack tracks with differing numbers of
 # objects into a single regular array for convenience.
@@ -239,8 +247,8 @@ def draw_bounding_box(tracks):
         out.append(img_to_arr(img))
     return np.array(out)
 
-def main_one(sample_one, args, avatar_set_size):
-    frames, num_objs, tracks, _ = sample_one()
+def main_one(sample_one, args, avatar_set_size, bkg_fns):
+    frames, num_objs, tracks = sample_one(bkg_fns[np.random.randint(len(bkg_fns))])
 
     if args.f == 'png':
         frames_arr = np.stack(img_to_arr(frame) for frame in frames)
@@ -259,26 +267,23 @@ def main_one(sample_one, args, avatar_set_size):
     else:
         raise Exception('impossible')
 
-def main_dataset(sample_one, args, avatar_set_size):
+def main_dataset(sample_one, args, avatar_set_size, bkg_fns):
     n = args.n
     seq_len = args.l
 
-    seqs, counts, trackss, bkg_metas = tuple(zip(*[sample_one() for _ in range(n)]))
+    assert n <= len(bkg_fns)
+    # For a given n, the same set of background images will always be
+    # used, though they will, in general, appear in a different order
+    # in the final dataset.
+    shuffled_bkg_fns = bkg_fns[0:n]
+    random.shuffle(shuffled_bkg_fns)
+
+    seqs, counts, trackss = tuple(zip(*[sample_one(shuffled_bkg_fns[i]) for i in range(n)]))
 
     seqs_np = np.stack(np.stack(img_to_arr(frame) for frame in seq) for seq in seqs)
     counts_np = np.array(counts, dtype=np.int8)
     trackss_np = np.stack([pad_tracks(tracks, args.max) for tracks in trackss])
-    bkg_metas_np = np.stack(bkg_metas)
 
-    # we don't want to store the size of the set from which
-    # backgrounds were drawn with every example. check the pool was
-    # the same size for all samples, to ensure that it's samfe to drop
-    # the whole column.
-    bkg_set_size = bkg_metas_np[0,0]
-    assert(all(c == bkg_set_size for c in bkg_metas_np[:,0]))
-    bkg_metas_no_set_size_np = bkg_metas_np[:,1:]
-
-    # print(bkg_metas_no_set_size_np)
     # print(trackss_np[0,:,0])
     # print(trackss_np.dtype)
     # print(seqs_np.shape)
@@ -288,15 +293,12 @@ def main_dataset(sample_one, args, avatar_set_size):
     assert(seqs_np.shape == (n, seq_len, 3, SIZE, SIZE))
     assert(counts_np.shape == (n,))
     assert(trackss_np.shape == (n, seq_len, args.max, 4))
-    assert(bkg_metas_no_set_size_np.shape == (n, 3))
 
     np.savez_compressed('out.npz',
                         X=seqs_np,
                         Y=counts_np,
                         T=trackss_np,
-                        avatar_set_size=np.array([avatar_set_size]),
-                        bkg_meta=bkg_metas_no_set_size_np,
-                        bkg_set_size=np.array([bkg_set_size]))
+                        avatar_set_size=np.array([avatar_set_size]))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -323,6 +325,5 @@ if __name__ == '__main__':
     avatars = load_avatars(args.avatar_path)
     sample_one = partial(sample_scene,
                          args.l, args.min, args.max, args.r, args.t,
-                         partial(sample_natural_scene_bkg, args.bkg_path),
                          avatars)
-    args.main(sample_one, args, len(avatars))
+    args.main(sample_one, args, len(avatars), bkg_filenames(args.bkg_path))
