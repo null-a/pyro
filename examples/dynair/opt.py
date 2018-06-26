@@ -73,6 +73,9 @@ if __name__ == '__main__':
                         help='record the elbo of the full training set (and test set when present) during optimisation ' +
                              '(zero disables, otherwise specifies period in epochs)')
 
+    parser.add_argument('--bkg-wd', type=float,
+                        help='weight decay for parameters of background model & guide')
+
     parser.add_argument('--desc', help='argument value is written to desc.txt in output directory to aid identification')
 
     subparsers = parser.add_subparsers(dest='target')
@@ -121,6 +124,7 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond('data seq length: {}'.format(X.size(1)))
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
+    log_to_cond('bkg weight decay: {}'.format(args.bkg_wd))
     log_to_cond(cfg)
 
     append_line(os.path.join(output_path, 'argv.txt'), ' '.join(sys.argv))

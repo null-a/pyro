@@ -33,6 +33,8 @@ def opt_bkg(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
             vis.images(x_mean, nrow=10)
 
     optim_args = {'lr': 1e-4}
+    if not args.bkg_wd is None:
+        optim_args['weight_decay'] = args.bkg_wd
 
     run_svi(vae, batches, args.epochs, optim_args, hook,
             output_path, args.s, args.t, args.log_elbo, args.g, args.n, args.c,

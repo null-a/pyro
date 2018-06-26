@@ -176,9 +176,13 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
 
     def optim_args(module_name, param_name):
         if args.fix_bkg_params and is_bkg_param(module_name, param_name):
-            return {'lr': 0.0}
+            lr = 0.0
         else:
-            return {'lr': 1e-4}
+            lr = 1e-4
+        ret = {'lr': lr}
+        if not args.bkg_wd is None and is_bkg_param(module_name, param_name):
+            ret['weight_decay'] = args.bkg_wd
+        return ret
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
             partial(hook, args.v, visdom.Visdom(), dynair,
