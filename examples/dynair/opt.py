@@ -34,7 +34,6 @@ if __name__ == '__main__':
                         help='throttle progress updates')
     parser.add_argument('-c', type=float, default=float('inf'),
                         help='threshold at which to clip the l2 norm of the gradient')
-    parser.add_argument('--cpu', action='store_true', default=False, help='always use cpu')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
     parser.add_argument('--z-size', type=int, default=50, help='size of z')
@@ -76,6 +75,8 @@ if __name__ == '__main__':
     parser.add_argument('--bkg-wd', type=float,
                         help='weight decay for parameters of background model & guide')
 
+    parser.add_argument('--host', type=str, choices=['cpu', 'gpu'])
+
     parser.add_argument('--desc', help='argument value is written to desc.txt in output directory to aid identification')
 
     subparsers = parser.add_subparsers(dest='target')
@@ -96,7 +97,14 @@ if __name__ == '__main__':
     X_split = split(X, args.batch_size, args.hold_out)
     Y_split = split(Y, args.batch_size, args.hold_out)
 
-    use_cuda = torch.cuda.is_available() and not args.cpu
+    if args.host is None:
+        use_cuda = torch.cuda.is_available()
+    elif args.host == 'cpu':
+        use_cuda = False
+    elif args.host == 'gpu':
+        use_cuda = True
+    else:
+        raise Exception('impossible')
     print('using cuda: {}'.format(use_cuda))
 
     module_config = dict(w_size=3,
