@@ -59,6 +59,10 @@ def elbo_from_batches(dynair, batches, num_particles=1):
     with torch.no_grad():
         for batch in batches:
             loss += elbo.loss(dynair.model, dynair.guide, batch)
+            # Clear full model cache.
+            # TODO: Figure out a more general solution.
+            if hasattr(dynair, 'clear_cache'):
+                dynair.clear_cache()
     return -loss / len(batches)
 
 def hasnan(t):
