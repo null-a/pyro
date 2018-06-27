@@ -100,7 +100,6 @@ def mot_populate_acc(preds, truth):
     preds = preds.numpy()
     truth = truth.numpy()
     assert preds.shape == truth.shape
-    assert preds.shape[0] == 20
     assert truth.shape[2] == 4
 
     obj_count = preds.shape[1]
