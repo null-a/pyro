@@ -1,4 +1,5 @@
 import os
+import os.path
 import argparse
 import json
 import subprocess
@@ -68,9 +69,21 @@ def frames_main(dynair, X, Y, args):
         frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
         frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
         extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
-        save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
-        save_image(make_grid(frames_with_windows, nrow=10), 'frames_{}_recon.png'.format(ix))
-        save_image(make_grid(extra_frames_with_windows, nrow=10), 'frames_{}_extra.png'.format(ix))
+
+        if args.s:
+            save_individual_frames(x, './frames_{}_input'.format(ix))
+            save_individual_frames(frames_with_windows, './frames_{}_recon'.format(ix))
+            save_individual_frames(extra_frames_with_windows, './frames_{}_extra'.format(ix))
+        else:
+            save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
+            save_image(make_grid(frames_with_windows, nrow=10), 'frames_{}_recon.png'.format(ix))
+            save_image(make_grid(extra_frames_with_windows, nrow=10), 'frames_{}_extra.png'.format(ix))
+
+def save_individual_frames(t, path):
+    if not os.path.exists(path):
+        os.mkdir(path)
+    for i, img in enumerate(t):
+        save_image(img, os.path.join(path, 'frame_{:02d}.png').format(i))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -93,6 +106,9 @@ def main():
     # e.g. gif, mp4, etc. (relies on the fact that ffmpeg will
     # determine the format based on the file extension.)
     movie_parser.add_argument('-f', default='gif', help='output format')
+
+    frames_parser.add_argument('-s', default=False, action='store_true',
+                               help='Save each frame as a separate file.')
 
     args = parser.parse_args()
 
