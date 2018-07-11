@@ -110,5 +110,7 @@ class DynAIR(nn.Module):
 
         return (frames_to_tensor(frames),
                 latents_to_tensor(wss),
+                latents_to_tensor(zss),
+                bkg,
                 frames_to_tensor(extra_frames) if len(extra_frames) > 0 else torch.zeros(0),
                 latents_to_tensor(extra_wss) if len(extra_wss) > 0 else torch.zeros(0))

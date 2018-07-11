@@ -40,7 +40,7 @@ def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra):
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
-    frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra)
+    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra)
 
     input_seq = x
     recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
@@ -66,7 +66,7 @@ def frames_main(dynair, X, Y, args):
     for ix in args.indices:
         x = X[ix]
         y = Y[ix]
-        frames, ws, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
+        frames, ws, zs, bkg, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
         frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
         extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
 
@@ -74,6 +74,7 @@ def frames_main(dynair, X, Y, args):
             save_individual_frames(x, './frames_{}_input'.format(ix))
             save_individual_frames(frames_with_windows, './frames_{}_recon'.format(ix))
             save_individual_frames(extra_frames_with_windows, './frames_{}_extra'.format(ix))
+            save_bkg_and_objs(dynair, ix, bkg, zs)
         else:
             save_image(make_grid(x, nrow=10), 'frames_{}_input.png'.format(ix))
             save_image(make_grid(frames_with_windows, nrow=10), 'frames_{}_recon.png'.format(ix))
@@ -84,6 +85,20 @@ def save_individual_frames(t, path):
         os.mkdir(path)
     for i, img in enumerate(t):
         save_image(img, os.path.join(path, 'frame_{:02d}.png').format(i))
+
+
+def save_bkg_and_objs(dynair, ix, bkg, zs):
+    save_image(bkg[0], './background_{}.png'.format(ix))
+
+    objs_path = './objects_{}'.format(ix)
+    if not os.path.exists(objs_path):
+        os.mkdir(objs_path)
+
+    for i, obj in enumerate(zs[0]):
+        for j, z in enumerate(obj):
+            obj_img = dynair.model.decode_obj(z).view(dynair.cfg.num_chan + 1, dynair.cfg.window_size, dynair.cfg.window_size)
+            save_image(obj_img, objs_path + '/obj_{}_frame_{:02d}.png'.format(i, j))
+
 
 def main():
     parser = argparse.ArgumentParser()

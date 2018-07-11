@@ -51,7 +51,7 @@ def tracking_main(dynair, X, Y, T, args):
 
     for i, (X_batch, Y_batch, T_batch) in enumerate(zip(X_batches, Y_batches, T_batches)):
 
-        _, infer_wss, _, extra_wss = dynair.infer(X_batch[:,0:infer_len], Y_batch, extra_len)
+        _, infer_wss, _, _, _, extra_wss = dynair.infer(X_batch[:,0:infer_len], Y_batch, extra_len)
         wss = torch.cat((infer_wss, extra_wss), 2)
         #print(wss.size()) # (batch_size, max_num_objs, seq_len, |w|)
 

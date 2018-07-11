@@ -16,7 +16,7 @@ from vis import overlay_multiple_window_outlines
 
 def run_vis(vis, dynair, X, Y, epoch, batch):
     n = X.size(0)
-    frames, ws, extra_frames, extra_ws = dynair.infer(X, Y, 15)
+    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(X, Y, 15)
 
     for k in range(n):
         out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k,:,:,0:3], Y[k])
