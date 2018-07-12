@@ -83,16 +83,30 @@ def tracking_main(dynair, X, Y, T, args):
     summary = compute_metrics([acc.events.loc[0:infer_len-1] for acc in accs])
     print('inferred:')
     print(summary)
+
     summary = compute_metrics([acc.events.loc[infer_len:] for acc in accs])
     print('extrapolated:')
     print(summary)
 
 def compute_metrics(accs):
     mh = mm.metrics.create()
-    return mh.compute_many(accs,
-                           metrics=['num_frames', 'mota', 'motp'],
-                           names=list(range(len(accs))),
-                           generate_overall=True)
+    # This is the full set of mot challenge metrics plus num_switches,
+    # minus idf1, idp, idr. Computing these was throwing an error,
+    # possibly only formatting related.
+    metrics = ['recall', 'precision', 'num_unique_objects', 'mostly_tracked',
+               'partially_tracked', 'mostly_lost', 'num_false_positives',
+               'num_misses', 'num_switches', 'num_fragmentations', 'mota', 'motp']
+    summary = mh.compute_many(accs,
+                              metrics=metrics,
+                              #metrics=['num_frames', 'mota', 'motp'],
+                              #metrics=mm.metrics.motchallenge_metrics,
+                              names=list(range(len(accs))),
+                              generate_overall=True)
+    return mm.io.render_summary(
+        summary,
+        formatters=mh.formatters,
+        namemap=mm.io.motchallenge_metric_names)
+
 
 def mot_populate_acc(preds, truth):
     # preds (seq_len, obj_count, 4)
