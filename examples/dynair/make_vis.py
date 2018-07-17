@@ -99,6 +99,15 @@ def save_bkg_and_objs(dynair, ix, bkg, zs):
             obj_img = dynair.model.decode_obj(z).view(dynair.cfg.num_chan + 1, dynair.cfg.window_size, dynair.cfg.window_size)
             save_image(obj_img, objs_path + '/obj_{}_frame_{:02d}.png'.format(i, j))
 
+    if dynair.cfg.use_depth:
+        depths = []
+        for i, obj in enumerate(zs[0]):
+            for j, z in enumerate(obj):
+                depth = dynair.model.decode_obj_depth(z)
+                depths.append([i,j,depth.item()])
+        with open('./depths_{}.txt'.format(ix), 'w') as f:
+            f.writelines(', '.join(str(v) for v in row) + '\n' for row in depths)
+
 
 def main():
     parser = argparse.ArgumentParser()
