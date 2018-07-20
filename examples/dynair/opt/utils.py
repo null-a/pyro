@@ -24,7 +24,15 @@ def make_output_dir(base_path):
         symlink_path = os.path.join(base_path, 'latest')
         if os.path.exists(symlink_path):
             os.remove(symlink_path)
-        os.symlink(name, symlink_path)
+        # When creating lots of jobs concurrently creating the symlink
+        # can fail, since another job can create the symlink in
+        # between this job deleting the existing symlink and creating
+        # the new one. We just swallow the error, since the symlink
+        # isn't used in this setting.
+        try:
+            os.symlink(name, symlink_path)
+        except FileExistsError:
+            pass
         with open(os.path.join(path, 'uuid.txt'), 'w') as f:
             f.write(name)
         with open(os.path.join(path, 'timestamp.txt'), 'w') as f:
