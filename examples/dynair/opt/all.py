@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from dynair import DynAIR
-from model import Model, DecodeObj, DecodeBkg, WTransition, ZTransition
+from model import Model, DecodeObj, DecodeObjDepth, DecodeBkg, WTransition, ZTransition
 from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, GuideY, CombineMixin,
                    ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
 from modules import MLP, ResNet
@@ -67,6 +67,9 @@ def build_module(cfg, use_cuda):
     arch, *hids = parse_cla('mlp|resnet', cfg.decode_obj)
     decode_obj = DecodeObj(cfg, partial(arch_lookup[arch], hids=hids))
 
+    arch, *hids = parse_cla('mlp', cfg.decode_obj_depth)
+    decode_obj_depth = DecodeObjDepth(cfg, hids) if cfg.use_depth else None
+
     sd_opt, arch, *hids = parse_cla('sdparam|sdstate-mlp|resnet', cfg.w_transition)
     w_transition = WTransition(cfg,
                                partial(arch_lookup[arch], hids=hids),
@@ -79,6 +82,7 @@ def build_module(cfg, use_cuda):
 
     model = Model(cfg,
                   dict(decode_obj=decode_obj,
+                       decode_obj_depth=decode_obj_depth,
                        decode_bkg=decode_bkg,
                        w_transition=w_transition,
                        z_transition=z_transition),

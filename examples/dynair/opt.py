@@ -47,6 +47,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--decode-obj', default='mlp-100-100',
                         help='architecture of decode object network')
+    parser.add_argument('--decode-obj-depth', default='mlp',
+                        help='architecture of decode object depth network')
+
 
     parser.add_argument('--model-delta-w', action='store_true', default=False,
                         help='use w transition output as delta from previous value to next mean')
@@ -115,6 +118,7 @@ if __name__ == '__main__':
                          w_transition=args.w_transition,
                          z_transition=args.z_transition,
                          decode_obj=args.decode_obj,
+                         decode_obj_depth=args.decode_obj_depth,
                          model_delta_w=args.model_delta_w,
                          model_delta_z=args.model_delta_z,
                          guide_w=args.guide_w,

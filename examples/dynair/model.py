@@ -37,11 +37,9 @@ class Model(nn.Module):
 
         self.decode_obj = arch['decode_obj']
         self._decode_bkg = arch['decode_bkg']
+        self.decode_obj_depth = arch['decode_obj_depth']
         self.w_transition = arch['w_transition']
         self.z_transition = arch['z_transition']
-
-        # TODO: Ought to be part of the arch arg.
-        self.decode_obj_depth = DecodeObjDepth(cfg) if cfg.use_depth else None
 
 
     # We wrap `_decode_bkg` here to enable caching without
@@ -242,14 +240,14 @@ class DecodeObj(nn.Module):
         return self.net(z)
 
 
-# TODO: Add hidden layer?
 class DecodeObjDepth(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, hids):
         super(DecodeObjDepth, self).__init__()
-        # Depths are expected to be >= 0.
-        self.net = nn.Sequential(nn.Linear(cfg.z_size, 1), nn.Softplus())
+        mlp = MLP(cfg.z_size, hids + [1], output_non_linearity=False)
         # Adjust init. such depths of ~2 are output initially.
-        self.net[0].bias.data += 1.9
+        mlp.seq[-1].bias.data += 1.9
+        # Depths are expected to be >= 0.
+        self.net = nn.Sequential(mlp, nn.Softplus())
 
     def forward(self, z):
         return self.net(z)
