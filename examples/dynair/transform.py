@@ -39,9 +39,19 @@ def expand_theta(theta):
     out = out.view(n, 2, 3)
     return out
 
+# If w_scale is large enough (in negative direction) softplus will
+# return exactly zero, which would be problematic as we divide by the
+# scale elsewhere. (e.g. in theta_inverse.) To avoid this we add a
+# constant to ensure that the scale is strictly positive. Smaller
+# scales mean bigger windows. A scale of 0.5 gives a window with the
+# size of the full frame, so adding 0.1 still allows for very big
+# windows.
+def squish_scale(w_scale):
+    return softplus(w_scale) + 0.1
+
 def w_to_theta(w):
-    # Unsquish the `scale` component of w.
-    scale = softplus(w[:, 0:1])
+    # Squish the `scale` component of w.
+    scale = squish_scale(w[:, 0:1])
     xy = w[:, 1:] * scale
     out = torch.cat((scale, xy), 1)
     return out

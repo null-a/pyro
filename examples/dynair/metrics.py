@@ -16,7 +16,7 @@ from dynair import config
 from data import load_data, data_params, split, trunc_seqs
 from opt.all import build_module
 from opt.run_svi import elbo_from_batches
-from transform import over
+from transform import over, squish_scale
 from vis import overlay_multiple_window_outlines
 
 def elbo_main(dynair, X, Y, T, args):
@@ -137,7 +137,7 @@ def mot_populate_acc(preds, truth):
 
 # Map (a batch of) w (as used by the spatial transformer) to (x,y,w,h)
 def ws_to_bounding_box(ws, x_size):
-    ws_scale = softplus(ws[:,0])
+    ws_scale = squish_scale(ws[:,0])
     ws_x = ws[:,1]
     ws_y = ws[:,2]
     w = x_size / ws_scale
