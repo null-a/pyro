@@ -34,6 +34,7 @@ if __name__ == '__main__':
                         help='throttle progress updates')
     parser.add_argument('-c', type=float, default=float('inf'),
                         help='threshold at which to clip the l2 norm of the gradient')
+    parser.add_argument('-w', type=float, help='weight decay')
 
     parser.add_argument('--y-size', type=int, default=50, help='size of y')
     parser.add_argument('--z-size', type=int, default=50, help='size of z')
@@ -76,9 +77,6 @@ if __name__ == '__main__':
     parser.add_argument('--log-elbo', type=int, default=0,
                         help='record the elbo of the full training set (and test set when present) during optimisation ' +
                              '(zero disables, otherwise specifies period in epochs)')
-
-    parser.add_argument('--bkg-wd', type=float,
-                        help='weight decay for parameters of background model & guide')
 
     parser.add_argument('--host', type=str, choices=['cpu', 'gpu'])
 
@@ -139,7 +137,7 @@ if __name__ == '__main__':
     log_to_cond('data split: {}/{}'.format(len(X_split[0]), len(X_split[1])))
     log_to_cond('data seq length: {}'.format(X.size(1)))
     log_to_cond('gradient clipping threshold: {:e}'.format(args.c))
-    log_to_cond('bkg weight decay: {}'.format(args.bkg_wd))
+    log_to_cond('weight decay: {}'.format(args.w))
     log_to_cond(cfg)
 
     append_line(os.path.join(output_path, 'argv.txt'), ' '.join(sys.argv))
