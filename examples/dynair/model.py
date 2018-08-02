@@ -157,6 +157,15 @@ class Model(nn.Module):
     def emission(self, zs, ws, bkg, obj_counts):
         acc = bkg
         if self.cfg.use_depth:
+            # TODO: Use of append_channel (here and in the guide)
+            # defeats the attempt to cache `composite_object`, since
+            # the model and guide start building the output from
+            # different starting point. One fix would be to also cache
+            # `append_channel`. This doesn't matter when using the "no
+            # background" option with the ISF guide, since then we're
+            # explicitly asking to start building the ISF from
+            # different places, so there's no computation to share.
+
             # Add depth channel.
             acc = append_channel(acc)
 
