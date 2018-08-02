@@ -45,7 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--z-transition', default='sdparam-mlp-50',
                         help='architecture of z transition')
 
-    parser.add_argument('--decode-obj', default='mlp-100-100',
+    parser.add_argument('--decode-obj', default='mlp-full-100-100',
                         help='architecture of decode object network')
     parser.add_argument('--decode-obj-depth', default='mlp',
                         help='architecture of decode object depth network')

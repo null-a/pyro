@@ -44,5 +44,6 @@ run "--z-transition sdstate-mlp-10-10"
 run "--z-transition sdparam-resnet-10-10"
 run "--z-transition sdstate-resnet-10-10"
 
-run "--decode-obj mlp-10-10"
-run "--decode-obj resnet-10-10"
+run "--decode-obj mlp-half-10-10"
+run "--decode-obj mlp-full-10-10"
+run "--decode-obj resnet-full-10-10"
