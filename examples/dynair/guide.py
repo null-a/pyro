@@ -60,7 +60,7 @@ class Guide(nn.Module):
 
             # NOTE: Here we're guiding y based on the contents of the
             # first frame only.
-            y = self.sample_y(*self.guide_y(seqs[:, 0]))
+            y = self.sample_y(*self.guide_y(seqs[:, 0])) if self.cfg.use_bkg_model else None
 
             for t in range(seq_length):
 
@@ -300,7 +300,7 @@ class GuideW_ImageSoFar(nn.Module):
         if i == 0:
             assert image_so_far_prev is None
             assert mask_prev is None
-            image_so_far = self.decode_bkg(y) if self.include_bkg else torch.zeros_like(x)
+            image_so_far = self.decode_bkg(y) if (self.cfg.use_bkg_model and self.include_bkg) else torch.zeros_like(x)
             if self.cfg.use_depth:
                 # Add depth channel.
                 image_so_far = append_channel(image_so_far)

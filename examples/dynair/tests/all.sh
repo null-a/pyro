@@ -11,8 +11,11 @@ run "--guide-input-embed resnet-10-10"
 run "--guide-input-embed cnn"
 run "--guide-input-embed id"
 
+run "--guide-w rnn-tanh-10-10 --no-bkg"
 run "--guide-w rnn-tanh-10-10"
 run "--guide-w rnn-relu-10-10"
+
+run "--guide-w isf-block-nobkg-mlp-10-10 --no-bkg"
 run "--guide-w isf-block-nobkg-mlp-10-10"
 run "--guide-w isf-noblock-bkg-mlp-10-10"
 run "--guide-w isf-noblock-bkg-resnet-10-10"

@@ -13,6 +13,7 @@ Config = namedtuple('Config',
                      'z_size',
                      'window_size',
                      'use_depth',
+                     'use_bkg_model',
                      'w_transition',
                      'z_transition',
                      'decode_obj',
@@ -80,10 +81,8 @@ class DynAIR(nn.Module):
 
     def infer(self, seqs, obj_counts, num_extra_frames=0, sample_extra=True):
         trace = poutine.trace(self.guide).get_trace((seqs, obj_counts))
-        frames, _, _ = poutine.replay(self.model, trace)((seqs, obj_counts))
+        frames, _, _, bkg = poutine.replay(self.model, trace)((seqs, obj_counts))
         wss, zss, y = trace.nodes['_RETURN']['value']
-
-        bkg = self.model.decode_bkg(y)
 
         extra_wss = []
         extra_zss = []

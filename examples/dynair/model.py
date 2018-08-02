@@ -72,8 +72,16 @@ class Model(nn.Module):
         # http://pyro.ai/examples/tensor_shapes.html
         with pyro.iarange('data', batch_size):
 
-            y = self.sample_y(batch_size)
-            bkg = self.decode_bkg(y)
+            if self.cfg.use_bkg_model:
+                bkg = self.decode_bkg(self.sample_y(batch_size))
+            else:
+                # TODO: The fact that the model and guide create their
+                # own empty image when not using the background model
+                # will defeat attempts to cache the `composite_object`
+                # method. This is similar to the problem cause by use
+                # of `append_channel` elsewhere.
+                bkg = self.prototype.new_ones(batch_size, self.cfg.num_chan,
+                                              self.cfg.image_size, self.cfg.image_size)
 
             for t in range(seq_length):
                 if t>0:
@@ -91,7 +99,7 @@ class Model(nn.Module):
                 obs = seqs[:,t] if not seqs is None else None
                 self.likelihood(t, frame_mean, obs)
 
-        return frames, wss, zss
+        return frames, wss, zss, bkg
 
     def likelihood(self, t, frame_mean, obs):
         frame_sd = (self.likelihood_sd * self.prototype.new_ones(1)).expand_as(frame_mean)

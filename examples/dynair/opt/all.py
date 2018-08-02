@@ -62,7 +62,7 @@ def is_bkg_param(module_name, param_name):
 arch_lookup = dict(mlp=MLP, resnet=ResNet)
 
 def build_module(cfg, use_cuda):
-    decode_bkg, guide_y = bkg_modules(cfg)
+    decode_bkg, guide_y = bkg_modules(cfg) if cfg.use_bkg_model else (None, None)
 
     arch, width, *hids = parse_cla('mlp|resnet-half|full', cfg.decode_obj)
     decode_obj = DecodeObj(cfg, partial(arch_lookup[arch], hids=hids), use_half_z=dict(half=True, full=False)[width])
