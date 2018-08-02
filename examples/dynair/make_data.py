@@ -41,11 +41,6 @@ def load_avatars(path):
     print('found {} avatar images'.format(len(fns)))
     return [Image.open(fn).convert('RGBA').resize((SIZE, SIZE), resample=Image.BILINEAR) for fn in fns]
 
-def bkg_filenames(path):
-    fns = glob.glob(os.path.join(path, '*.jpg'))
-    print('found {} background images'.format(len(fns)))
-    return sorted(fns)
-
 def rot(img, angle):
     return img.rotate(angle)
 
@@ -126,11 +121,9 @@ def sample_natural_scene_bkg(path, size):
     #arr = img_to_arr(cropped)
     return cropped, (n, ix, x, y)
 
-def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, bkg_path):
+def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, bkg):
 
     assert max_num_objs <= len(avatars)
-
-    bkg = Image.open(bkg_path).convert('RGBA')
     assert bkg.size == (SIZE, SIZE)
 
     # Sample objects (without replacement)
@@ -247,8 +240,8 @@ def draw_bounding_box(tracks):
         out.append(img_to_arr(img))
     return np.array(out)
 
-def main_one(sample_one, args, avatar_set_size, bkg_fns):
-    frames, num_objs, tracks = sample_one(bkg_fns[np.random.randint(len(bkg_fns))])
+def main_one(sample_one, args, avatar_set_size, num_bkg, get_bkg):
+    frames, num_objs, tracks = sample_one(get_bkg(np.random.randint(num_bkg)))
 
     if args.f == 'png':
         frames_arr = np.stack(img_to_arr(frame) for frame in frames)
@@ -267,18 +260,20 @@ def main_one(sample_one, args, avatar_set_size, bkg_fns):
     else:
         raise Exception('impossible')
 
-def main_dataset(sample_one, args, avatar_set_size, bkg_fns):
+def main_dataset(sample_one, args, avatar_set_size, num_bkg, get_bkg):
     n = args.n
     seq_len = args.l
 
-    assert n <= len(bkg_fns)
+    if n > num_bkg:
+        print('WARNING: too few background images, backgrounds will not be unique')
+
+    perm = list(range(min(n, num_bkg)))
     # For a given n, the same set of background images will always be
     # used, though they will, in general, appear in a different order
     # in the final dataset.
-    shuffled_bkg_fns = bkg_fns[0:n]
-    random.shuffle(shuffled_bkg_fns)
+    random.shuffle(perm)
 
-    seqs, counts, trackss = tuple(zip(*[sample_one(shuffled_bkg_fns[i]) for i in range(n)]))
+    seqs, counts, trackss = tuple(zip(*[sample_one(get_bkg(perm[i % num_bkg])) for i in range(n)]))
 
     seqs_np = np.stack(np.stack(img_to_arr(frame) for frame in seq) for seq in seqs)
     counts_np = np.array(counts, dtype=np.int8)
@@ -300,10 +295,25 @@ def main_dataset(sample_one, args, avatar_set_size, bkg_fns):
                         T=trackss_np,
                         avatar_set_size=np.array([avatar_set_size]))
 
+
+def bkgs_from_dir(bkg_path):
+    fns = sorted(glob.glob(os.path.join(bkg_path, '*.jpg')))
+    print('found {} background images'.format(len(fns)))
+    def get_bkg(i):
+        return Image.open(fns[i]).convert('RGBA')
+    return len(fns), get_bkg
+
+def empty_bkg():
+    print('using empty background')
+    def get_bkg(i):
+        assert i == 0
+        return Image.new('RGBA', (SIZE,SIZE), 'white')
+    return 1, get_bkg
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('bkg_path')
     parser.add_argument('avatar_path')
+    parser.add_argument('--bkg-path')
     parser.add_argument('--min', type=int, default=0)
     parser.add_argument('--max', type=int, required=True)
     parser.add_argument('-l', type=int, required=True, help='sequence length')
@@ -322,8 +332,11 @@ if __name__ == '__main__':
     assert args.max >= 0
     assert args.max >= args.min
 
+    # bkgs is a pair of (num_bkgs, get_bkg_fn)
+    bkgs = bkgs_from_dir(args.bkg_path) if args.bkg_path else empty_bkg()
+
     avatars = load_avatars(args.avatar_path)
     sample_one = partial(sample_scene,
                          args.l, args.min, args.max, args.r, args.t,
                          avatars)
-    args.main(sample_one, args, len(avatars), bkg_filenames(args.bkg_path))
+    args.main(sample_one, args, len(avatars), *bkgs)
