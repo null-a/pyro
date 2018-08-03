@@ -122,6 +122,14 @@ class Model(nn.Module):
         w_mean_or_delta, w_sd = self.w_transition(z_prev, w_prev)
         z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
         w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
+        if not self.delta_w:
+            # Have the model output sensible window scales when not
+            # using the delta guide. It might also be sensible to have
+            # the sd be similar to the prior but that's slightly
+            # trickier since we need to account for any init. done to
+            # the sd bias terms. (Add prior_sd + softplus(bias_init)?)
+            # Is there a nicer way to structure all this?
+            w_mean = w_mean + self.w_0_prior_mean
         return z_mean, z_sd, w_mean, w_sd
 
     def transition_params(self, zs_prev, ws_prev):
