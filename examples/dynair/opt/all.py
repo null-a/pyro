@@ -65,7 +65,10 @@ def build_module(cfg, use_cuda):
     decode_bkg, guide_y = bkg_modules(cfg) if cfg.use_bkg_model else (None, None)
 
     arch, width, *hids = parse_cla('mlp|resnet-half|full', cfg.decode_obj)
-    decode_obj = DecodeObj(cfg, partial(arch_lookup[arch], hids=hids), use_half_z=dict(half=True, full=False)[width])
+    decode_obj = DecodeObj(cfg,
+                           partial(arch_lookup[arch], hids=hids),
+                           use_half_z=dict(half=True, full=False)[width],
+                           alpha_bias=(0.0 if cfg.use_bkg_model else -0.8))
 
     arch, *hids = parse_cla('mlp', cfg.decode_obj_depth)
     decode_obj_depth = DecodeObjDepth(cfg, hids) if cfg.use_depth else None
