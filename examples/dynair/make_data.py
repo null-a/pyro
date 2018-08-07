@@ -307,7 +307,7 @@ def empty_bkg():
     print('using empty background')
     def get_bkg(i):
         assert i == 0
-        return Image.new('RGBA', (SIZE,SIZE), 'white')
+        return Image.new('RGBA', (SIZE,SIZE), 'black')
     return 1, get_bkg
 
 if __name__ == '__main__':
