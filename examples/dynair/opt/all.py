@@ -155,6 +155,35 @@ def build_module(cfg, use_cuda):
 def bkg_modules(cfg):
     return DecodeBkg(cfg), GuideY(cfg)
 
+def weight_init(m):
+    def mlp_init(m):
+        if type(m) == nn.Linear:
+            torch.nn.init.xavier_normal_(m.weight, torch.nn.init.calculate_gain('relu'))
+    def norm_init(m):
+        if type(m) == nn.Linear:
+            torch.nn.init.xavier_normal_(m.weight)
+
+    if type(m) == MLP:
+        m.apply(mlp_init)
+    elif m._get_name().startswith('Normal'):
+        # This overwrites the custom init. implemented in the module.
+        #It causes the magnitude of gradients to increase by a factor
+        #of ~2, and optimisation to fail. (elbo decrease after first
+        #few epochs.) This suggests that the init of these modules may
+        #be important?
+
+        #m.apply(norm_init)
+        pass
+    elif type(m) == nn.Conv2d:
+        torch.nn.init.xavier_normal_(m.weight)
+    elif type(m) == nn.RNNCell:
+        # Assuming ReLU, although tanh can be used.
+        torch.nn.init.xavier_normal_(m.weight_ih, torch.nn.init.calculate_gain('relu'))
+        torch.nn.init.xavier_normal_(m.weight_hh, torch.nn.init.calculate_gain('relu'))
+    else:
+        for c in m.children():
+            weight_init(c)
+
 def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
 
     X_train, X_test = X_split
@@ -174,6 +203,10 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
 
     if args.show:
         print(dynair)
+
+    if args.xinit:
+        weight_init(dynair)
+    log_to_cond('xavier init: {}'.format(args.xinit))
 
     if args.bkg_params is not None:
         load_bkg_params(dynair, args.bkg_params)
