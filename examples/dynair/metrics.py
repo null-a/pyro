@@ -90,12 +90,12 @@ def tracking_main(dynair, X, Y, T, args):
 
 def compute_metrics(accs):
     mh = mm.metrics.create()
-    # This is the full set of mot challenge metrics plus num_switches,
-    # minus idf1, idp, idr. Computing these was throwing an error,
-    # possibly only formatting related.
+    # This is the full set of mot challenge metrics plus num_switches
+    # and num_matches, minus idf1, idp, idr. Computing these was
+    # throwing an error, possibly only formatting related.
     metrics = ['recall', 'precision', 'num_unique_objects', 'mostly_tracked',
                'partially_tracked', 'mostly_lost', 'num_false_positives',
-               'num_misses', 'num_switches', 'num_fragmentations', 'mota', 'motp']
+               'num_misses', 'num_switches', 'num_matches', 'num_fragmentations', 'mota', 'motp']
     summary = mh.compute_many(accs,
                               metrics=metrics,
                               #metrics=['num_frames', 'mota', 'motp'],
