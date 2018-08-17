@@ -1,0 +1,237 @@
+<CoordinateSystem> { Z-Up }
+
+<Comment> {
+  "dae2egg model.dae model.egg"
+}
+<Material> Material2 {
+  <Scalar> diffr { 1 }
+  <Scalar> diffg { 0 }
+  <Scalar> diffb { 0 }
+  <Scalar> ambr { 0 }
+  <Scalar> ambg { 0 }
+  <Scalar> ambb { 0 }
+  <Scalar> emitr { 0 }
+  <Scalar> emitg { 0 }
+  <Scalar> emitb { 0 }
+  <Scalar> specr { 0 }
+  <Scalar> specg { 0 }
+  <Scalar> specb { 0 }
+  <Scalar> shininess { 20 }
+}
+<Group> ID2 {
+  <Dart> { 1 }
+  <Group> VisualSceneNode {
+    <Group> ID3 {
+      <VertexPool> ID3 {
+        <Vertex> 0 {
+          0 172.91340637207 173.149597167969
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 1 {
+          0 0 0
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 2 {
+          0 0 173.149597167969
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 3 {
+          0 0 0
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 4 {
+          0 172.91340637207 173.149597167969
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 5 {
+          0 172.91340637207 0
+          <Normal> { -1 0 0 }
+        }
+        <Vertex> 6 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 7 {
+          0 0 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 8 {
+          0 172.91340637207 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 9 {
+          0 0 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 10 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 11 {
+          172.91340637207 0 0
+          <Normal> { 0 0 -1 }
+        }
+        <Vertex> 12 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 13 {
+          0 0 0
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 14 {
+          172.91340637207 0 0
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 15 {
+          0 0 0
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 16 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 17 {
+          0 0 173.149597167969
+          <Normal> { 0 -1 0 }
+        }
+        <Vertex> 18 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 19 {
+          0 172.91340637207 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 20 {
+          0 0 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 21 {
+          0 172.91340637207 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 22 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 23 {
+          172.91340637207 172.91340637207 173.149597167969
+          <Normal> { 0 0 1 }
+        }
+        <Vertex> 24 {
+          0 172.91340637207 173.149597167969
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 25 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 26 {
+          0 172.91340637207 0
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 27 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 28 {
+          0 172.91340637207 173.149597167969
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 29 {
+          172.91340637207 172.91340637207 173.149597167969
+          <Normal> { 0 1 0 }
+        }
+        <Vertex> 30 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 1 0 0 }
+        }
+        <Vertex> 31 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 1 0 0 }
+        }
+        <Vertex> 32 {
+          172.91340637207 0 0
+          <Normal> { 1 0 0 }
+        }
+        <Vertex> 33 {
+          172.91340637207 0 173.149597167969
+          <Normal> { 1 0 0 }
+        }
+        <Vertex> 34 {
+          172.91340637207 172.91340637207 0
+          <Normal> { 1 0 0 }
+        }
+        <Vertex> 35 {
+          172.91340637207 172.91340637207 173.149597167969
+          <Normal> { 1 0 0 }
+        }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 0 1 2 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 3 4 5 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 6 7 8 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 9 10 11 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 12 13 14 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 15 16 17 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 18 19 20 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 21 22 23 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 24 25 26 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 27 28 29 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 30 31 32 <Ref> { ID3 } }
+      }
+      <Polygon> {
+        <MRef> { Material2 }
+        <VertexRef> { 33 34 35 <Ref> { ID3 } }
+      }
+    }
+    <Group> VisualSceneNode1 {
+      <Transform> {
+        <Matrix4> {
+          -0.962354123592377 0.27179878950119 0 0
+          -0.13398939371109 -0.47441428899765 0.870044827461243 0
+          0.236477196216583 0.837291181087494 0.492972701787949 0
+          274.976409912109 807.080017089844 501.113403320312 1
+        }
+      }
+    }
+  }
+}
+<Table> {
+  <Bundle> ID2 {
+    <Table> "<skeleton>" {
+    }
+  }
+}
