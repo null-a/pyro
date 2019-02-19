@@ -1,0 +1,41 @@
+var a = 0.9
+var b = 0.6
+var c = 0.3
+
+var exactPost = function(obs) {
+  var x = obs ? 1 : 0;
+  var t1 = a * Math.pow(b, x) * Math.pow((1-b), (1-x));
+  var t2 = (1-a) * Math.pow(c, x) * Math.pow((1-c), (1-x))
+  return t1 / (t1 + t2);
+}
+
+display(Infer(function() {
+  var z = flip(a);
+  observe(Bernoulli({p: z ? b : c}), true)
+  return z;
+}));
+
+display(exactPost(true)) // 0.9473684210526315
+display(exactPost(false)) // 0.8372093023255814
+
+var guideP = function(obs) {
+  var x = obs ? 1 : 0;
+  var p1 = param({name: 'p1'});
+  var p2 = param({name: 'p2'});
+  return Math.sigmoid(x * p1 + p2);
+}
+
+var model = function() {
+  mapData({data: [true, false]}, function(obs) {
+    var z = sample(Bernoulli({p: a}), {guide() {
+      return Bernoulli({p: guideP(obs)})
+    }})
+    observe(Bernoulli({p: z ? b : c}), obs)
+    return z;
+  })
+}
+
+Optimize({model, steps: 10000, verbose: 1, optMethod: {adam: {stepSize: 0.01}}})
+
+display(guideP(true))
+display(guideP(false))
