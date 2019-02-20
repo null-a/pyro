@@ -119,6 +119,70 @@ for i in range(100000):
         print(torch.exp(pyro.param('sd')).tolist())
 
 
+# --------------------------------------------------
+# toy long range dep model i've played with before
+
+# var model = function() {
+#   var zs = repeat(4, function() {
+#     sample(Gaussian({mu: 0, sigma: 1}))
+#   })
+#   observe(Gaussian({mu: zs[0] - zs[3], sigma: 0.1}), 0)
+#   return [zs[0], zs[3]]
+# }
+# Infer({model, method: 'MCMC', kernel: 'HMC', samples: 1000})
+
+def model3():
+    zs = [pyro.sample('z%d' % i, dist.Normal(torch.tensor(0.), torch.tensor(1.)))
+          for i in range(2)]
+    pyro.sample('x',
+                dist.Normal(zs[0] - zs[-1], torch.tensor(0.1)),
+                obs=torch.tensor(0.0))
+
+# I need to figure out what a sensible guide for this is. i.e.
+# something that's actually capable of implementing the hoped for
+# computation.
+def guide3():
+    # initial hidden state
+    ctx_size = 10
+    pos_size = 1
+    ctx = pyro.param('ctx0', torch.zeros(1, ctx_size))
+    in_size = 1 + pos_size # the value sampled (embedded) and the current position param
+    rnn = nn.RNNCell(in_size, ctx_size)
+    predict = nn.Sequential(nn.Linear(ctx_size, ctx_size), nn.ReLU(), nn.Linear(ctx_size, 2))
+    #embed = nn.Sequential(nn.Linear(1, ctx_size), nn.ReLU())
+    pyro.module('rnn', rnn)
+    pyro.module('predict', predict)
+    #pyro.module('embed', embed)
+    zs = []
+    for i in range(2):
+        out = predict(ctx)
+        loc = out[0,0]
+        scale = torch.exp(out[0,1])
+        z = pyro.sample('z%d' % i, dist.Normal(loc, scale))
+        pos = pyro.param('pos%d'%i, torch.zeros(pos_size))
+        rnn_input = torch.cat(((z.reshape(1)), pos))
+        # print(rnn_input)
+        # print(rnn_input.shape)
+        ctx = rnn(rnn_input.reshape(1,-1), ctx)
+        zs.append(z)
+    return zs
+
+# optimizer = pyro.optim.Adam({"lr": 0.01})
+
+# #svi = pyro.infer.SVI(model3, guide3, optimizer, loss=pyro.infer.Trace_ELBO())
+# svi = pyro.infer.SVI(model3, guide3, optimizer, loss=wake_guide_update)
+
+# for i in range(2000):
+#     loss = svi.step()
+#     if (i+1) % 10 == 0:
+#         print(loss)
+
+# print('\n\n')
+# print('posterior samples')
+# print('--------------------------------------------------')
+# for _ in range(10):
+#     zs = guide3()
+#     print(zs[0].item(), zs[-1].item())
 
 
 # ==================================================
