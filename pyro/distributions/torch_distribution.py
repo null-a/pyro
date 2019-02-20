@@ -39,7 +39,11 @@ class TorchDistributionMixin(Distribution):
             batched). The shape of the result should be `self.shape()`.
         :rtype: torch.Tensor
         """
-        return self.rsample(sample_shape) if self.has_rsample else self.sample(sample_shape)
+        # Don't use reparameterisation. Doing so doesn't do the right
+        # thing for RWS.
+
+        #return self.rsample(sample_shape) if self.has_rsample else self.sample(sample_shape)
+        return self.sample(sample_shape)
 
     @property
     def event_dim(self):
