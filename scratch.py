@@ -6,7 +6,9 @@ import pyro
 import pyro.distributions as dist
 import pyro.infer
 import pyro.optim
+from pyro.contrib.autoguide import AutoDiagonalNormal, AutoMultivariateNormal
 
+from torch.distributions import constraints
 
 # def model():
 #     z = pyro.sample('z', dist.Bernoulli(torch.tensor(0.9)))
@@ -61,6 +63,11 @@ def guide(obs):
 # can this be made to work with reparam somehow? and even if it can,
 # is there any benefit?
 
+
+# TODO: Have this return both the loss and the grads. (surrogate isn't
+# the loss, and having the loss is useful for monitoring/comparing
+# progress etc.)
+
 def wake_guide_update(model, guide, *args, **kwargs):
     surrogate = 0.0
     ws = []
@@ -77,7 +84,7 @@ def wake_guide_update(model, guide, *args, **kwargs):
     # rather than the sum of the weight produces better results,
     # particularly when the number of samples (per-gradient step) is
     # small.
-    return surrogate / 5. #sum(ws)
+    return surrogate / 5. # sum(ws)
 
 
 
@@ -107,16 +114,16 @@ def guide2():
     z = pyro.sample('x', dist.MultivariateNormal(torch.tensor([0., 0]), cov))
 
 
-optimizer = pyro.optim.Adam({"lr": 0.01})
+#optimizer = pyro.optim.Adam({"lr": 0.01})
 
 #svi = pyro.infer.SVI(model2, guide2, optimizer, loss=pyro.infer.Trace_ELBO())
-svi = pyro.infer.SVI(model2, guide2, optimizer, loss=wake_guide_update)
+# svi = pyro.infer.SVI(model2, guide2, optimizer, loss=wake_guide_update)
 
-for i in range(100000):
-    loss = svi.step()
-    if (i+1) % 50 == 0:
-        #print(loss)
-        print(torch.exp(pyro.param('sd')).tolist())
+# for i in range(100000):
+#     loss = svi.step()
+#     if (i+1) % 50 == 0:
+#         #print(loss)
+#         print(torch.exp(pyro.param('sd')).tolist())
 
 
 # --------------------------------------------------
@@ -131,9 +138,10 @@ for i in range(100000):
 # }
 # Infer({model, method: 'MCMC', kernel: 'HMC', samples: 1000})
 
-def model3():
-    zs = [pyro.sample('z%d' % i, dist.Normal(torch.tensor(0.), torch.tensor(1.)))
-          for i in range(2)]
+def model3(l=2):
+    assert l >= 2
+    zs = [pyro.sample('z%d' % i, dist.MultivariateNormal(torch.tensor([0.]), torch.tensor([[1.]])))
+          for i in range(l)]
     pyro.sample('x',
                 dist.Normal(zs[0] - zs[-1], torch.tensor(0.1)),
                 obs=torch.tensor(0.0))
@@ -141,49 +149,68 @@ def model3():
 # I need to figure out what a sensible guide for this is. i.e.
 # something that's actually capable of implementing the hoped for
 # computation.
-def guide3():
-    # initial hidden state
-    ctx_size = 10
-    pos_size = 1
-    ctx = pyro.param('ctx0', torch.zeros(1, ctx_size))
-    in_size = 1 + pos_size # the value sampled (embedded) and the current position param
-    rnn = nn.RNNCell(in_size, ctx_size)
-    predict = nn.Sequential(nn.Linear(ctx_size, ctx_size), nn.ReLU(), nn.Linear(ctx_size, 2))
-    #embed = nn.Sequential(nn.Linear(1, ctx_size), nn.ReLU())
+
+
+pos_size = 10
+hid_size = 10
+in_size = 1 + pos_size # the value sampled (embedded) plus the current position param
+rnn = nn.LSTMCell(in_size, hid_size)
+predict_loc = nn.Sequential(nn.Linear(hid_size, 1))
+predict_scale = nn.Sequential(nn.Linear(hid_size, 1), nn.Softplus())
+
+def guide3(l=2):
+    assert l >= 2
+
+    c = pyro.param('c0', torch.zeros(1, hid_size))
+    h = pyro.param('h0', torch.zeros(1, hid_size))
+
     pyro.module('rnn', rnn)
-    pyro.module('predict', predict)
-    #pyro.module('embed', embed)
+    pyro.module('predict_scale', predict_scale)
+    pyro.module('predict_loc', predict_loc)
+
     zs = []
-    for i in range(2):
-        out = predict(ctx)
-        loc = out[0,0]
-        scale = torch.exp(out[0,1])
+    for i in range(l):
+        loc = predict_loc(h).reshape(1)
+        scale = predict_scale(h).reshape(1)
+
+        # When used with MF, Normal seems to work better than MVNormal?!?
         z = pyro.sample('z%d' % i, dist.Normal(loc, scale))
+        #z = pyro.sample('z%d' % i, dist.MultivariateNormal(loc, scale))
+
         pos = pyro.param('pos%d'%i, torch.zeros(pos_size))
-        rnn_input = torch.cat(((z.reshape(1)), pos))
-        # print(rnn_input)
-        # print(rnn_input.shape)
-        ctx = rnn(rnn_input.reshape(1,-1), ctx)
+        rnn_input = torch.cat((z.reshape(1), pos)).reshape(1, -1)
+        h, c = rnn(rnn_input, (h, c))
+
         zs.append(z)
-    return zs
 
-# optimizer = pyro.optim.Adam({"lr": 0.01})
+    return (zs[0], zs[-1])
 
-# #svi = pyro.infer.SVI(model3, guide3, optimizer, loss=pyro.infer.Trace_ELBO())
-# svi = pyro.infer.SVI(model3, guide3, optimizer, loss=wake_guide_update)
 
-# for i in range(2000):
-#     loss = svi.step()
-#     if (i+1) % 10 == 0:
-#         print(loss)
+optimizer = pyro.optim.Adam({"lr": 0.001})
 
-# print('\n\n')
-# print('posterior samples')
-# print('--------------------------------------------------')
-# for _ in range(10):
-#     zs = guide3()
-#     print(zs[0].item(), zs[-1].item())
+#guide3 = AutoDiagonalNormal(model3)
+#guide3 = AutoMultivariateNormal(model3)
 
+
+# NOTE: **need to noodle with torch_distributions.py to re-enable reparam**
+svi = pyro.infer.SVI(model3, guide3, optimizer, loss=pyro.infer.Trace_ELBO(num_particles=5))
+#svi = pyro.infer.SVI(model3, guide3, optimizer, loss=wake_guide_update)
+
+l = 2 # length/size of latent zs
+for i in range(2000):
+    loss = svi.step(l)
+    if (i+1) % 50 == 0:
+        print('%d -- %f' % (i+1, loss))
+
+zss = []
+for _ in range(1000):
+    zs = guide3(l)
+    zss.append(zs)
+from matplotlib import pyplot as plt
+xs, ys = zip(*zss)
+plt.plot(xs, ys, 'b.')
+plt.axis('equal')
+plt.show()
 
 # ==================================================
 
