@@ -10,6 +10,8 @@ from pyro.contrib.autoguide import AutoDiagonalNormal, AutoMultivariateNormal
 
 from torch.distributions import constraints
 
+from matplotlib import pyplot as plt
+
 # def model():
 #     z = pyro.sample('z', dist.Bernoulli(torch.tensor(0.9)))
 #     x = pyro.sample('x', dist.Bernoulli(torch.tensor(0.6 if z else 0.3)), obs=torch.tensor(0.0))
@@ -138,13 +140,14 @@ def guide2():
 # }
 # Infer({model, method: 'MCMC', kernel: 'HMC', samples: 1000})
 
-def model3(l=2):
+def model3(l=2, observations=dict(x=torch.tensor([0.]))):
     assert l >= 2
-    zs = [pyro.sample('z%d' % i, dist.MultivariateNormal(torch.tensor([0.]), torch.tensor([[1.]])))
+    zs = [pyro.sample('z%d' % i, dist.Normal(torch.tensor([0.]), torch.tensor([1.])))
           for i in range(l)]
-    pyro.sample('x',
-                dist.Normal(zs[0] - zs[-1], torch.tensor(0.1)),
-                obs=torch.tensor(0.0))
+    x = pyro.sample('x',
+                    dist.Normal(zs[0] - zs[-1], torch.tensor(0.1)),
+                    obs=observations['x'])
+    #print(x)
 
 # I need to figure out what a sensible guide for this is. i.e.
 # something that's actually capable of implementing the hoped for
@@ -158,13 +161,20 @@ rnn = nn.LSTMCell(in_size, hid_size)
 predict_loc = nn.Sequential(nn.Linear(hid_size, 1))
 predict_scale = nn.Sequential(nn.Linear(hid_size, 1), nn.Softplus())
 
-def guide3(l=2):
+init_c = nn.Sequential(nn.Linear(1, hid_size))
+init_h = nn.Sequential(nn.Linear(1, hid_size))
+
+def guide3(l=2, observations=dict(x=torch.tensor([0.]))):
     assert l >= 2
 
-    c = pyro.param('c0', torch.zeros(1, hid_size))
-    h = pyro.param('h0', torch.zeros(1, hid_size))
+    #c = pyro.param('c0', torch.zeros(1, hid_size))
+    #h = pyro.param('h0', torch.zeros(1, hid_size))
+    c = init_c(observations['x']).reshape(1,-1)
+    h = init_h(observations['x']).reshape(1,-1)
 
     pyro.module('rnn', rnn)
+    pyro.module('init_c', init_c)
+    pyro.module('init_h', init_h)
     pyro.module('predict_scale', predict_scale)
     pyro.module('predict_loc', predict_loc)
 
@@ -193,25 +203,30 @@ optimizer = pyro.optim.Adam({"lr": 0.001})
 
 
 # NOTE: **need to noodle with torch_distributions.py to re-enable reparam**
-svi = pyro.infer.SVI(model3, guide3, optimizer, loss=pyro.infer.Trace_ELBO(num_particles=5))
-#svi = pyro.infer.SVI(model3, guide3, optimizer, loss=wake_guide_update)
+#svi = pyro.infer.SVI(model3, guide3, optimizer, loss=pyro.infer.Trace_ELBO(num_particles=5))
+svi = pyro.infer.SVI(model3, guide3, optimizer, loss=wake_guide_update)
 
-l = 2 # length/size of latent zs
-for i in range(2000):
+
+# NOTE: **need to noodle with torch_distributions.py to re-enable reparam when using this**
+# this gets length 8 better than the others.
+# it gets length 12 after about 12k steps.
+#svi = pyro.infer.CSIS(model3, guide3, optimizer)
+
+l = 12 # length/size of latent zs
+for i in range(1000000):
     loss = svi.step(l)
-    if (i+1) % 50 == 0:
+    if (i+1) % 20 == 0:
         print('%d -- %f' % (i+1, loss))
 
-zss = []
-for _ in range(1000):
-    zs = guide3(l)
-    zss.append(zs)
-from matplotlib import pyplot as plt
-xs, ys = zip(*zss)
-plt.plot(xs, ys, 'b.')
-plt.axis('equal')
-plt.show()
+    if (i+1) % 1000 == 0:
+        zss = []
+        for _ in range(1000):
+            zs = guide3(l)
+            zss.append(zs)
+
+        xs, ys = zip(*zss)
+        plt.plot(xs, ys, 'b.')
+        plt.axis('equal')
+        plt.show()
 
 # ==================================================
-
-# TODO: Try trad. sleep phase guide update.
