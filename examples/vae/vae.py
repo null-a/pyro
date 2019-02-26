@@ -114,6 +114,86 @@ class VAE(nn.Module):
         loc_img = self.decoder(z)
         return loc_img
 
+def batch_log_prob(trace):
+    trace.compute_log_prob()
+    log_prob = 0.0
+    for name, site in trace.nodes.items():
+        if site["type"] == "sample" and name != "data":
+            # print(name)
+            # print(site)
+            # print(site['log_prob'].shape)
+            log_prob += site['unscaled_log_prob']
+    return log_prob
+
+
+def rws_guide(model, guide, *args, **kwargs):
+    n = 5
+    surrogate = 0.0
+    log_ws = []
+    log_qs = []
+    # TODO: vectorize
+    for i in range(n):
+        guide_trace = pyro.poutine.trace(guide).get_trace(*args, **kwargs)
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.replay(model, trace=guide_trace)).get_trace(*args, **kwargs)
+        log_p = batch_log_prob(model_trace)
+        log_q = batch_log_prob(guide_trace)
+        log_w = (log_p - log_q).detach()
+        log_ws.append(log_w)
+        log_qs.append(log_q)
+
+    all_log_ws = torch.stack(log_ws)
+    assert all_log_ws.shape[0] == n
+    #assert all_log_ws.shape[1] == batch_size
+    log_ws_sum = torch.logsumexp(all_log_ws, 0)
+    assert log_ws_sum.shape == log_ws[0].shape
+
+    log_ws_norm = [log_w - log_ws_sum for log_w in log_ws]
+
+    # sum over samples/batch
+    surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_q for (log_w_norm, log_q) in zip(log_ws_norm, log_qs)))
+
+    loss = torch.sum(sum(torch.exp(log_w_norm) * log_w for (log_w_norm, log_w) in zip(log_ws_norm, log_ws)) - log_ws_sum + torch.log(torch.tensor(float(n))))
+    # print(loss)
+    # print(surrogate)
+
+    return loss + surrogate - surrogate.detach()
+
+
+def rws_model(model, guide, *args, **kwargs):
+    n = 5
+    surrogate = 0.0
+    log_ws = []
+    log_ps = []
+    # TODO: vectorize
+    for i in range(n):
+        guide_trace = pyro.poutine.trace(guide).get_trace(*args, **kwargs)
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.replay(model, trace=guide_trace)).get_trace(*args, **kwargs)
+        log_p = batch_log_prob(model_trace)
+        log_q = batch_log_prob(guide_trace)
+        log_w = (log_p - log_q).detach()
+        log_ws.append(log_w)
+        log_ps.append(log_p)
+
+    all_log_ws = torch.stack(log_ws)
+    assert all_log_ws.shape[0] == n
+    #assert all_log_ws.shape[1] == batch_size
+    log_ws_sum = torch.logsumexp(all_log_ws, 0)
+    assert log_ws_sum.shape == log_ws[0].shape
+
+    log_ws_norm = [log_w - log_ws_sum for log_w in log_ws]
+
+    # sum over samples/batch
+    surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_p for (log_w_norm, log_p) in zip(log_ws_norm, log_ps)))
+
+    loss = torch.sum(-log_ws_sum + torch.log(torch.tensor(float(n))))
+    # print(loss)
+    # print(surrogate)
+
+    return loss + surrogate - surrogate.detach()
+
+
 
 def main(args):
     # clear param store
@@ -131,8 +211,12 @@ def main(args):
     optimizer = Adam(adam_args)
 
     # setup the inference algorithm
-    elbo = JitTrace_ELBO() if args.jit else Trace_ELBO()
-    svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
+    # elbo = JitTrace_ELBO() if args.jit else Trace_ELBO()
+    # svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
+
+    svi_model = SVI(vae.model, vae.guide, optimizer, loss=rws_model)
+    svi_guide = SVI(vae.model, vae.guide, optimizer, loss=rws_guide)
+
 
     # setup visdom for visualization
     if args.visdom_flag:
@@ -144,6 +228,7 @@ def main(args):
     for epoch in range(args.num_epochs):
         # initialize loss accumulator
         epoch_loss = 0.
+        guide_loss = 0.
         # do a training epoch over each mini-batch x returned
         # by the data loader
         for x, _ in train_loader:
@@ -151,7 +236,9 @@ def main(args):
             if args.cuda:
                 x = x.cuda()
             # do ELBO gradient and accumulate loss
-            epoch_loss += svi.step(x)
+            # epoch_loss += svi.step(x)
+            epoch_loss += svi_model.step(x)
+            guide_loss += svi_guide.step(x)
 
         # report training diagnostics
         normalizer_train = len(train_loader.dataset)
@@ -161,14 +248,14 @@ def main(args):
 
         if epoch % args.test_frequency == 0:
             # initialize loss accumulator
-            test_loss = 0.
+            #test_loss = 0.
             # compute the loss over the entire test set
             for i, (x, _) in enumerate(test_loader):
                 # if on GPU put mini-batch into CUDA memory
                 if args.cuda:
                     x = x.cuda()
                 # compute ELBO estimate and accumulate loss
-                test_loss += svi.evaluate_loss(x)
+                #test_loss += svi.evaluate_loss(x)
 
                 # pick three random test images from the first mini-batch and
                 # visualize how well we're reconstructing them
@@ -185,14 +272,14 @@ def main(args):
                                       opts={'caption': 'reconstructed image'})
 
             # report test diagnostics
-            normalizer_test = len(test_loader.dataset)
-            total_epoch_loss_test = test_loss / normalizer_test
-            test_elbo.append(total_epoch_loss_test)
-            print("[epoch %03d]  average test loss: %.4f" % (epoch, total_epoch_loss_test))
+            # normalizer_test = len(test_loader.dataset)
+            # total_epoch_loss_test = test_loss / normalizer_test
+            # test_elbo.append(total_epoch_loss_test)
+            # print("[epoch %03d]  average test loss: %.4f" % (epoch, total_epoch_loss_test))
 
-        if epoch == args.tsne_iter:
-            mnist_test_tsne(vae=vae, test_loader=test_loader)
-            plot_llk(np.array(train_elbo), np.array(test_elbo))
+        # if epoch == args.tsne_iter:
+        #     mnist_test_tsne(vae=vae, test_loader=test_loader)
+        #     plot_llk(np.array(train_elbo), np.array(test_elbo))
 
     return vae
 
