@@ -7,7 +7,7 @@ import visdom
 
 import pyro
 import pyro.distributions as dist
-from pyro.infer import SVI, JitTrace_ELBO, Trace_ELBO
+from pyro.infer import SVI, JitTrace_ELBO, Trace_ELBO, CSIS
 from pyro.optim import Adam
 from utils.mnist_cached import MNISTCached as MNIST
 from utils.mnist_cached import setup_data_loaders
@@ -67,7 +67,7 @@ class SBN(nn.Module):
         # create the encoder and decoder networks
         self.encoder = Encoder(z_dim, hidden_dim)
         self.decoder = Decoder(z_dim, hidden_dim)
-
+        self.proto = torch.zeros([1])
         if use_cuda:
             # calling cuda() here will put all the parameters of
             # the encoder and decoder networks into gpu memory
@@ -76,28 +76,30 @@ class SBN(nn.Module):
         self.z_dim = z_dim
 
     # define the model p(x|z)p(z)
-    def model(self, x):
+    def model(self, batch_size, observations=dict(x=0.)):
+        #print('.')
         # register PyTorch module `decoder` with Pyro
         pyro.module("decoder", self.decoder)
-        with pyro.plate("data", x.shape[0]):
+        with pyro.plate("data", batch_size):
             # setup hyperparameters for prior p(z)
-            z_prob = 0.5 * x.new_ones(torch.Size((x.shape[0], self.z_dim)))
+            z_prob = 0.5 * self.proto.new_ones(torch.Size((batch_size, self.z_dim)))
             # sample from prior (value will be sampled by guide when computing the ELBO)
             z = pyro.sample("latent", dist.Bernoulli(z_prob).to_event(1))
             # decode the latent code z
             loc_img = self.decoder.forward(z)
             # score against actual images
-            pyro.sample("obs", dist.Bernoulli(loc_img).to_event(1), obs=x.reshape(-1, 784))
+            pyro.sample("x", dist.Bernoulli(loc_img).to_event(1), obs=observations['x']) # x.reshape(-1, 784))
             # return the loc so we can visualize it later
             return loc_img
 
     # define the guide (i.e. variational distribution) q(z|x)
-    def guide(self, x):
+    def guide(self, batch_size, observations=dict(x=None)):
+        #print(observations)
         # register PyTorch module `encoder` with Pyro
         pyro.module("encoder", self.encoder)
-        with pyro.plate("data", x.shape[0]):
+        with pyro.plate("data", batch_size):
             # use the encoder to get the parameters used to define q(z|x)
-            z_prob = self.encoder.forward(x)
+            z_prob = self.encoder.forward(observations['x'])
             # sample the latent code z
             pyro.sample("latent", dist.Bernoulli(z_prob).to_event(1))
 
@@ -122,6 +124,30 @@ def batch_log_prob(trace):
             log_prob += site['unscaled_log_prob']
     return log_prob
 
+def wake(model, guide, *args, **kwargs):
+    n = 1
+    surrogate = 0.0
+    log_ws = []
+    log_ps = []
+    log_qs = []
+    # TODO: vectorize
+    for i in range(n):
+        guide_trace = pyro.poutine.trace(guide).get_trace(*args, **kwargs)
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.replay(model, trace=guide_trace)).get_trace(*args, **kwargs)
+        log_p = batch_log_prob(model_trace)
+        log_q = batch_log_prob(guide_trace)
+        log_ps.append(log_p)
+        log_qs.append(log_q)
+
+    # sum over samples/batch
+    surrogate = -torch.sum(sum(log_ps)) / float(n)
+
+    loss = -torch.sum(sum(log_p.detach() - log_q.detach() for (log_p, log_q) in zip(log_ps, log_qs))) / float(n)
+    # print(loss)
+    # print(surrogate)
+
+    return loss + surrogate - surrogate.detach()
 
 def rws(model, guide, *args, **kwargs):
     n = 5
@@ -177,8 +203,8 @@ def main(args):
     optimizer = Adam(adam_args)
 
     # setup the inference algorithm
-    elbo = JitTrace_ELBO() if args.jit else Trace_ELBO(num_particles=5)
-    svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
+    # elbo = JitTrace_ELBO() if args.jit else Trace_ELBO(num_particles=5)
+    # svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
 
     # Don't forget to tweak torch_distribution.py to enable/disable
     # reparameterisation as appropriate.
@@ -216,6 +242,9 @@ def main(args):
     # [epoch 027]  average training loss: 139.7160
     #svi_rws = SVI(vae.model, vae.guide, optimizer, loss=rws)
 
+    # wake-sleep
+    svi_model = SVI(vae.model, vae.guide, optimizer, loss=wake)
+    svi_guide = CSIS(vae.model, vae.guide, optimizer, training_batch_size=1)
 
     # setup visdom for visualization
     if args.visdom_flag:
@@ -235,10 +264,11 @@ def main(args):
             if args.cuda:
                 x = x.cuda()
             # do ELBO gradient and accumulate loss
-            epoch_loss += svi.step(x)
+            #epoch_loss += svi.step(x)
             #epoch_loss += svi_model.step(x)
             #guide_loss += svi_guide.step(x)
-            #epoch_loss += svi_rws.step(x)
+            epoch_loss += svi_model.step(x.shape[0], dict(x=x.reshape(-1, 784)))
+            guide_loss += svi_guide.step(x.shape[0])
 
 
         # report training diagnostics
@@ -246,6 +276,7 @@ def main(args):
         total_epoch_loss_train = epoch_loss / normalizer_train
         train_elbo.append(total_epoch_loss_train)
         print("[epoch %03d]  average training loss: %.4f" % (epoch, total_epoch_loss_train))
+        print(guide_loss / normalizer_train)
 
         if epoch % args.test_frequency == 0:
             # initialize loss accumulator
