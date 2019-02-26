@@ -193,6 +193,42 @@ def rws_model(model, guide, *args, **kwargs):
 
     return loss + surrogate - surrogate.detach()
 
+def rws(model, guide, *args, **kwargs):
+    n = 5
+    surrogate = 0.0
+    log_ws = []
+    log_ps = []
+    log_qs = []
+    # TODO: vectorize
+    for i in range(n):
+        guide_trace = pyro.poutine.trace(guide).get_trace(*args, **kwargs)
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.replay(model, trace=guide_trace)).get_trace(*args, **kwargs)
+        log_p = batch_log_prob(model_trace)
+        log_q = batch_log_prob(guide_trace)
+        log_w = (log_p - log_q).detach()
+        log_ws.append(log_w)
+        log_ps.append(log_p)
+        log_qs.append(log_q)
+
+    all_log_ws = torch.stack(log_ws)
+    assert all_log_ws.shape[0] == n
+    #assert all_log_ws.shape[1] == batch_size
+    log_ws_sum = torch.logsumexp(all_log_ws, 0)
+    assert log_ws_sum.shape == log_ws[0].shape
+
+    # normalised weights (log space)
+    log_ws_norm = [log_w - log_ws_sum for log_w in log_ws]
+
+    # estimate of -log p(x)
+    loss = torch.sum(-log_ws_sum + torch.log(torch.tensor(float(n))))
+
+    # model_surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_p for (log_w_norm, log_p) in zip(log_ws_norm, log_ps)))
+    # guide_surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_q for (log_w_norm, log_q) in zip(log_ws_norm, log_qs)))
+
+    surrogate = -torch.sum(sum(torch.exp(log_w_norm) * (log_p + log_q) for (log_w_norm, log_p, log_q) in zip(log_ws_norm, log_ps, log_qs)))
+
+    return loss + surrogate - surrogate.detach()
 
 
 def main(args):
@@ -214,8 +250,11 @@ def main(args):
     # elbo = JitTrace_ELBO() if args.jit else Trace_ELBO()
     # svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
 
-    svi_model = SVI(vae.model, vae.guide, optimizer, loss=rws_model)
-    svi_guide = SVI(vae.model, vae.guide, optimizer, loss=rws_guide)
+    # Don't forget to tweak torch_distribution.py to enable/disable
+    # reparameterisation as appropriate.
+    #svi_model = SVI(vae.model, vae.guide, optimizer, loss=rws_model)
+    #svi_guide = SVI(vae.model, vae.guide, optimizer, loss=rws_guide)
+    svi_rws = SVI(vae.model, vae.guide, optimizer, loss=rws)
 
 
     # setup visdom for visualization
@@ -237,8 +276,10 @@ def main(args):
                 x = x.cuda()
             # do ELBO gradient and accumulate loss
             # epoch_loss += svi.step(x)
-            epoch_loss += svi_model.step(x)
-            guide_loss += svi_guide.step(x)
+            #epoch_loss += svi_model.step(x)
+            #guide_loss += svi_guide.step(x)
+            epoch_loss += svi_rws.step(x)
+
 
         # report training diagnostics
         normalizer_train = len(train_loader.dataset)
