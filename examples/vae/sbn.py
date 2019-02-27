@@ -1,4 +1,5 @@
 import argparse
+import json
 
 import numpy as np
 import torch
@@ -7,7 +8,7 @@ import visdom
 
 import pyro
 import pyro.distributions as dist
-from pyro.infer import SVI, JitTrace_ELBO, Trace_ELBO, CSIS
+from pyro.infer import SVI, JitTrace_ELBO, Trace_ELBO, TraceGraph_ELBO, CSIS
 from pyro.optim import Adam
 from utils.mnist_cached import MNISTCached as MNIST
 from utils.mnist_cached import setup_data_loaders
@@ -58,22 +59,39 @@ class Decoder(nn.Module):
         loc_img = torch.sigmoid(self.fc21(hidden))
         return loc_img
 
+class Baseline(nn.Module):
+    def __init__(self):
+        super(Baseline, self).__init__()
+        hidden_dim = 400
+        self.fc1 = nn.Linear(28**2, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.softplus = nn.Softplus()
+
+    def forward(self, x):
+        hidden = self.softplus(self.fc1(x))
+        baseline = self.fc2(hidden).reshape([-1])
+        return baseline
 
 class SBN(nn.Module):
     # by default our latent space is 50-dimensional
     # and we use 400 hidden units
-    def __init__(self, z_dim=50, hidden_dim=400, use_cuda=False):
+    def __init__(self, z_dim=50, hidden_dim=400, use_baseline=None, use_cuda=False):
         super(SBN, self).__init__()
         # create the encoder and decoder networks
         self.encoder = Encoder(z_dim, hidden_dim)
         self.decoder = Decoder(z_dim, hidden_dim)
+        if use_baseline == 'net':
+            self.baseline = Baseline()
+
         self.proto = torch.zeros([1])
         if use_cuda:
             # calling cuda() here will put all the parameters of
             # the encoder and decoder networks into gpu memory
             self.cuda()
+            self.proto = self.proto.cuda()
         self.use_cuda = use_cuda
         self.z_dim = z_dim
+        self.use_baseline = use_baseline
 
     # define the model p(x|z)p(z)
     def model(self, batch_size, observations=dict(x=0.)):
@@ -101,7 +119,18 @@ class SBN(nn.Module):
             # use the encoder to get the parameters used to define q(z|x)
             z_prob = self.encoder.forward(observations['x'])
             # sample the latent code z
-            pyro.sample("latent", dist.Bernoulli(z_prob).to_event(1))
+            if self.use_baseline == 'avg':
+                infer = dict(baseline={'use_decaying_avg_baseline': True,
+                                       'baseline_beta': 0.9})
+            elif self.use_baseline == 'net':
+                pyro.module("baseline", self.baseline)
+                infer = dict(baseline={'nn_baseline': self.baseline,
+                                       'nn_baseline_input': observations['x']})
+            else:
+                infer = dict()
+            pyro.sample("latent",
+                        dist.Bernoulli(z_prob).to_event(1),
+                        infer=infer)
 
     # define a helper function for reconstructing images
     def reconstruct_img(self, x):
@@ -193,18 +222,32 @@ def main(args):
 
     # setup MNIST data loaders
     # train_loader, test_loader
-    train_loader, test_loader = setup_data_loaders(MNIST, use_cuda=args.cuda, batch_size=256)
+    train_loader, test_loader = setup_data_loaders(MNIST, use_cuda=args.cuda, batch_size=250)
 
     # setup the VAE
-    vae = SBN(use_cuda=args.cuda)
+    vae = SBN(use_baseline=args.baseline, use_cuda=args.cuda)
 
     # setup the optimizer
-    adam_args = {"lr": args.learning_rate}
+    def adam_args(module_name, param_name):
+        if 'baseline' in param_name or 'baseline' in module_name:
+            return {"lr": args.learning_rate * 10.0}
+        else:
+            return {"lr": args.learning_rate}
     optimizer = Adam(adam_args)
 
     # setup the inference algorithm
-    # elbo = JitTrace_ELBO() if args.jit else Trace_ELBO(num_particles=5)
-    # svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
+
+    if args.loss == 'elbo':
+        print('loss is elbo...')
+        print('baseline=%s' % args.baseline)
+        #elbo = JitTrace_ELBO() if args.jit else Trace_ELBO(num_particles=1)
+        elbo = TraceGraph_ELBO(num_particles=1)
+        svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
+    elif args.loss == 'rws':
+        print('loss is rws...')
+        svi = SVI(vae.model, vae.guide, optimizer, loss=rws)
+    else:
+        raise 'unknown loss'
 
     # Don't forget to tweak torch_distribution.py to enable/disable
     # reparameterisation as appropriate.
@@ -240,11 +283,11 @@ def main(args):
 
     # TraceELBO(num_particles=5)
     # [epoch 027]  average training loss: 139.7160
-    #svi_rws = SVI(vae.model, vae.guide, optimizer, loss=rws)
+
 
     # wake-sleep
-    svi_model = SVI(vae.model, vae.guide, optimizer, loss=wake)
-    svi_guide = CSIS(vae.model, vae.guide, optimizer, training_batch_size=1)
+    # svi_model = SVI(vae.model, vae.guide, optimizer, loss=wake)
+    # svi_guide = CSIS(vae.model, vae.guide, optimizer, training_batch_size=1)
 
     # setup visdom for visualization
     if args.visdom_flag:
@@ -264,11 +307,13 @@ def main(args):
             if args.cuda:
                 x = x.cuda()
             # do ELBO gradient and accumulate loss
-            #epoch_loss += svi.step(x)
+            epoch_loss += svi.step(x.shape[0], dict(x=x.reshape(-1, 784)))
             #epoch_loss += svi_model.step(x)
             #guide_loss += svi_guide.step(x)
-            epoch_loss += svi_model.step(x.shape[0], dict(x=x.reshape(-1, 784)))
-            guide_loss += svi_guide.step(x.shape[0])
+            #epoch_loss += svi_model.step(x.shape[0], dict(x=x.reshape(-1, 784)))
+            #guide_loss += svi_guide.step(x.shape[0])
+            # print([name for (name, val) in pyro.get_param_store().named_parameters()])
+            # assert False
 
 
         # report training diagnostics
@@ -276,32 +321,32 @@ def main(args):
         total_epoch_loss_train = epoch_loss / normalizer_train
         train_elbo.append(total_epoch_loss_train)
         print("[epoch %03d]  average training loss: %.4f" % (epoch, total_epoch_loss_train))
-        print(guide_loss / normalizer_train)
+        #print(guide_loss / normalizer_train)
 
-        if epoch % args.test_frequency == 0:
-            # initialize loss accumulator
-            #test_loss = 0.
-            # compute the loss over the entire test set
-            for i, (x, _) in enumerate(test_loader):
-                # if on GPU put mini-batch into CUDA memory
-                if args.cuda:
-                    x = x.cuda()
-                # compute ELBO estimate and accumulate loss
-                #test_loss += svi.evaluate_loss(x)
+        # if epoch % args.test_frequency == 0:
+        #     # initialize loss accumulator
+        #     #test_loss = 0.
+        #     # compute the loss over the entire test set
+        #     for i, (x, _) in enumerate(test_loader):
+        #         # if on GPU put mini-batch into CUDA memory
+        #         if args.cuda:
+        #             x = x.cuda()
+        #         # compute ELBO estimate and accumulate loss
+        #         #test_loss += svi.evaluate_loss(x)
 
-                # pick three random test images from the first mini-batch and
-                # visualize how well we're reconstructing them
-                if i == 0:
-                    if args.visdom_flag:
-                        plot_vae_samples(vae, vis)
-                        reco_indices = np.random.randint(0, x.shape[0], 3)
-                        for index in reco_indices:
-                            test_img = x[index, :]
-                            reco_img = vae.reconstruct_img(test_img)
-                            vis.image(test_img.reshape(28, 28).detach().cpu().numpy(),
-                                      opts={'caption': 'test image'})
-                            vis.image(reco_img.reshape(28, 28).detach().cpu().numpy(),
-                                      opts={'caption': 'reconstructed image'})
+        #         # pick three random test images from the first mini-batch and
+        #         # visualize how well we're reconstructing them
+        #         if i == 0:
+        #             if args.visdom_flag:
+        #                 plot_vae_samples(vae, vis)
+        #                 reco_indices = np.random.randint(0, x.shape[0], 3)
+        #                 for index in reco_indices:
+        #                     test_img = x[index, :]
+        #                     reco_img = vae.reconstruct_img(test_img)
+        #                     vis.image(test_img.reshape(28, 28).detach().cpu().numpy(),
+        #                               opts={'caption': 'test image'})
+        #                     vis.image(reco_img.reshape(28, 28).detach().cpu().numpy(),
+        #                               opts={'caption': 'reconstructed image'})
 
             # report test diagnostics
             # normalizer_test = len(test_loader.dataset)
@@ -312,6 +357,10 @@ def main(args):
         # if epoch == args.tsne_iter:
         #     mnist_test_tsne(vae=vae, test_loader=test_loader)
         #     plot_llk(np.array(train_elbo), np.array(test_elbo))
+
+    if args.save:
+        with open('history.json', 'w') as f:
+            json.dump(train_elbo, f)
 
     return vae
 
@@ -327,6 +376,9 @@ if __name__ == '__main__':
     parser.add_argument('--jit', action='store_true', default=False, help='whether to use PyTorch jit')
     parser.add_argument('-visdom', '--visdom_flag', action="store_true", help='Whether plotting in visdom is desired')
     parser.add_argument('-i-tsne', '--tsne_iter', default=100, type=int, help='epoch when tsne visualization runs')
+    parser.add_argument('--save', default=False, action='store_true', help='write training history to fs')
+    parser.add_argument('--baseline', choices='none avg net'.split(), default='none')
+    parser.add_argument('--loss', choices='elbo rws'.split(), default='elbo')
     args = parser.parse_args()
 
     model = main(args)
