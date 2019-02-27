@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 
 import numpy as np
 import torch
@@ -289,6 +290,8 @@ def main(args):
     # svi_model = SVI(vae.model, vae.guide, optimizer, loss=wake)
     # svi_guide = CSIS(vae.model, vae.guide, optimizer, training_batch_size=1)
 
+    t0 = time.time()
+
     # setup visdom for visualization
     if args.visdom_flag:
         vis = visdom.Visdom()
@@ -319,7 +322,8 @@ def main(args):
         # report training diagnostics
         normalizer_train = len(train_loader.dataset)
         total_epoch_loss_train = epoch_loss / normalizer_train
-        train_elbo.append(total_epoch_loss_train)
+        elapsed = time.time() - t0
+        train_elbo.append((total_epoch_loss_train, elapsed))
         print("[epoch %03d]  average training loss: %.4f" % (epoch, total_epoch_loss_train))
         #print(guide_loss / normalizer_train)
 
