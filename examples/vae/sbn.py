@@ -290,14 +290,14 @@ def main(args):
     # svi_model = SVI(vae.model, vae.guide, optimizer, loss=wake)
     # svi_guide = CSIS(vae.model, vae.guide, optimizer, training_batch_size=1)
 
-    t0 = time.time()
+    elapsed = 0.0
 
     # setup visdom for visualization
     if args.visdom_flag:
         vis = visdom.Visdom()
 
-    train_elbo = []
-    test_elbo = []
+    train_loss = []
+    test_likelihood = []
     # training loop
     for epoch in range(args.num_epochs):
         # initialize loss accumulator
@@ -305,6 +305,7 @@ def main(args):
         guide_loss = 0.
         # do a training epoch over each mini-batch x returned
         # by the data loader
+        t0 = time.time()
         for x, _ in train_loader:
             # if on GPU put mini-batch into CUDA memory
             if args.cuda:
@@ -317,26 +318,26 @@ def main(args):
             #guide_loss += svi_guide.step(x.shape[0])
             # print([name for (name, val) in pyro.get_param_store().named_parameters()])
             # assert False
-
+        elapsed += time.time() - t0
 
         # report training diagnostics
         normalizer_train = len(train_loader.dataset)
         total_epoch_loss_train = epoch_loss / normalizer_train
-        elapsed = time.time() - t0
-        train_elbo.append((total_epoch_loss_train, elapsed))
+        train_loss.append((total_epoch_loss_train, elapsed))
         print("[epoch %03d]  average training loss: %.4f" % (epoch, total_epoch_loss_train))
         #print(guide_loss / normalizer_train)
 
-        # if epoch % args.test_frequency == 0:
-        #     # initialize loss accumulator
-        #     #test_loss = 0.
-        #     # compute the loss over the entire test set
-        #     for i, (x, _) in enumerate(test_loader):
-        #         # if on GPU put mini-batch into CUDA memory
-        #         if args.cuda:
-        #             x = x.cuda()
-        #         # compute ELBO estimate and accumulate loss
-        #         #test_loss += svi.evaluate_loss(x)
+        if (epoch+1) % args.test_frequency == 0:
+            # initialize loss accumulator
+            test_loss = 0.
+            # compute the loss over the entire test set
+            for i, (x, _) in enumerate(test_loader):
+                # if on GPU put mini-batch into CUDA memory
+                if args.cuda:
+                    x = x.cuda()
+                # compute marginal likelihood estimate
+                test_loss += rws(vae.model, vae.guide, x.shape[0], dict(x=x.reshape(-1, 784))).item()
+
 
         #         # pick three random test images from the first mini-batch and
         #         # visualize how well we're reconstructing them
@@ -353,10 +354,10 @@ def main(args):
         #                               opts={'caption': 'reconstructed image'})
 
             # report test diagnostics
-            # normalizer_test = len(test_loader.dataset)
-            # total_epoch_loss_test = test_loss / normalizer_test
-            # test_elbo.append(total_epoch_loss_test)
-            # print("[epoch %03d]  average test loss: %.4f" % (epoch, total_epoch_loss_test))
+            normalizer_test = len(test_loader.dataset)
+            total_epoch_loss_test = test_loss / normalizer_test
+            test_likelihood.append((epoch, total_epoch_loss_test))
+            print("[epoch %03d]  average test loss: %.4f" % (epoch, total_epoch_loss_test))
 
         # if epoch == args.tsne_iter:
         #     mnist_test_tsne(vae=vae, test_loader=test_loader)
@@ -364,7 +365,7 @@ def main(args):
 
     if args.save:
         with open('history.json', 'w') as f:
-            json.dump(train_elbo, f)
+            json.dump(dict(train=train_loss, test=test_likelihood), f)
 
     return vae
 
