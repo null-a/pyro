@@ -272,7 +272,13 @@ def main(**kwargs):
 
     adam = optim.Adam(per_param_optim_args)
     elbo = JitTraceGraph_ELBO() if args.jit else TraceGraph_ELBO()
-    svi = SVI(air.model, air.guide, adam, loss=elbo)
+    if args.rws:
+        print('using rws...')
+        assert args.no_baselines, 'baselines not used by rws, turn off with --no-baselines'
+        svi = SVI(air.model, air.guide, adam, loss=rws)
+    else:
+        print('using elbo...')
+        svi = SVI(air.model, air.guide, adam, loss=elbo)
 
     # don't bother making prior annealing work. assume it's not used,
     # then just pass in zero for (usused) current step arg.
@@ -433,6 +439,8 @@ if __name__ == '__main__':
                         help='std. dev. of the window scale prior')
     parser.add_argument('--no-masking', action='store_true', default=False,
                         help='do not mask out the costs of unused choices')
+    parser.add_argument('--rws', action='store_true', default=False,
+                        help='use reweighted wake sleep')
     parser.add_argument('--seed', type=int, help='random seed', default=None)
     parser.add_argument('-v', '--verbose', action='store_true', default=False,
                         help='write hyper parameters and network architecture to stdout')
