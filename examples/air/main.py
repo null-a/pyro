@@ -314,7 +314,8 @@ def main(**kwargs):
                 test_loss += rws(air.model, air.guide, batch, batch_size=batch.shape[0], z_pres_prior_p=z_pres_prior_p).item()
             test_loss /= X_test.shape[0]
             print('test log prob: %f' % test_loss)
-            test_history.append((epoch, test_loss))
+
+            test_history.append((epoch, test_loss, acc))
 
     with open('history.json', 'w') as f:
         json.dump(dict(train=train_history, test=test_history), f)
