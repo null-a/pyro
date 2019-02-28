@@ -315,7 +315,7 @@ def main(**kwargs):
             test_loss /= X_test.shape[0]
             print('test log prob: %f' % test_loss)
 
-            test_history.append((epoch, test_loss, acc))
+            test_history.append((epoch, test_loss, acc.item()))
 
     with open('history.json', 'w') as f:
         json.dump(dict(train=train_history, test=test_history), f)
