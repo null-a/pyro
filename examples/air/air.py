@@ -161,10 +161,9 @@ class AIR(nn.Module):
 
         return ModelState(x=x, z_pres=z_pres, z_where=z_where)
 
-    def model(self, data, batch_size, **kwargs):
+    def model(self, batch, batch_size, **kwargs):
         pyro.module("decode", self.decode)
-        with pyro.plate('data', data.size(0), device=data.device) as ix:
-            batch = data[ix]
+        with pyro.plate('data'):
             n = batch.size(0)
             (z_where, z_pres), x = self.prior(n, **kwargs)
             pyro.sample('obs',
@@ -173,7 +172,7 @@ class AIR(nn.Module):
                             .to_event(1),
                         obs=batch.view(n, -1))
 
-    def guide(self, data, batch_size, **kwargs):
+    def guide(self, batch, batch_size, **kwargs):
         pyro.module('rnn', self.rnn),
         pyro.module('predict', self.predict),
         pyro.module('encode', self.encode),
@@ -189,8 +188,7 @@ class AIR(nn.Module):
         pyro.param('bl_h_init', self.bl_h_init)
         pyro.param('bl_c_init', self.bl_c_init)
 
-        with pyro.plate('data', data.size(0), subsample_size=batch_size, device=data.device) as ix:
-            batch = data[ix]
+        with pyro.plate('data'):
             n = batch.size(0)
 
             # Embed inputs.

@@ -11,6 +11,7 @@ import argparse
 import math
 import os
 import time
+import json
 from functools import partial
 
 import numpy as np
@@ -28,9 +29,9 @@ from pyro.infer import SVI, JitTraceGraph_ELBO, TraceGraph_ELBO
 from viz import draw_many, tensor_to_objs
 
 
-def count_accuracy(X, true_counts, air, batch_size):
-    assert X.size(0) == true_counts.size(0), 'Size mismatch.'
-    assert X.size(0) % batch_size == 0, 'Input size must be multiple of batch_size.'
+def count_accuracy(X_batches, true_counts_batches, air):
+    #assert X.size(0) == true_counts.size(0), 'Size mismatch.'
+    #assert X.size(0) % batch_size == 0, 'Input size must be multiple of batch_size.'
     counts = torch.LongTensor(3, 4).zero_()
     error_latents = []
     error_indicators = []
@@ -40,24 +41,24 @@ def count_accuracy(X, true_counts, air, batch_size):
         out.scatter_(1, vec.type(torch.LongTensor).view(vec.size(0), 1), 1)
         return out
 
-    for i in range(X.size(0) // batch_size):
-        X_batch = X[i * batch_size:(i + 1) * batch_size]
-        true_counts_batch = true_counts[i * batch_size:(i + 1) * batch_size]
-        z_where, z_pres = air.guide(X_batch, batch_size)
+    for i in range(X_batches.shape[0]):
+        X_batch = X_batches[i]
+        true_counts_batch = true_counts_batches[i]
+        z_where, z_pres = air.guide(X_batch, X_batch.shape[0])
         inferred_counts = sum(z.cpu() for z in z_pres).squeeze().data
         true_counts_m = count_vec_to_mat(true_counts_batch, 2)
         inferred_counts_m = count_vec_to_mat(inferred_counts, 3)
         counts += torch.mm(true_counts_m.t(), inferred_counts_m)
-        error_ind = 1 - (true_counts_batch == inferred_counts)
-        error_ix = error_ind.nonzero().squeeze()
-        error_latents.append(latents_to_tensor((z_where, z_pres)).index_select(0, error_ix))
-        error_indicators.append(error_ind)
+        #error_ind = 1 - (true_counts_batch == inferred_counts)
+        #error_ix = error_ind.nonzero().squeeze()
+        #error_latents.append(latents_to_tensor((z_where, z_pres)).index_select(0, error_ix))
+        #error_indicators.append(error_ind)
 
-    acc = counts.diag().sum().float() / X.size(0)
-    error_indices = torch.cat(error_indicators).nonzero().squeeze()
-    if X.is_cuda:
-        error_indices = error_indices.cuda()
-    return acc, counts, torch.cat(error_latents), error_indices
+    acc = counts.diag().sum().float() / (X_batches.shape[0] * X_batches.shape[1])
+    #error_indices = torch.cat(error_indicators).nonzero().squeeze()
+    #if X.is_cuda:
+    #    error_indices = error_indices.cuda()
+    return acc, counts#, torch.cat(error_latents), error_indices
 
 
 # Defines something like a truncated geometric. Like the geometric,
@@ -113,14 +114,65 @@ def exp_decay(initial, final, begin, duration, t):
 
 def load_data():
     inpath = get_data_directory(__file__)
-    (X_np, Y), _ = multi_mnist(inpath, max_digits=2, canvas_size=50, seed=42)
-    X_np = X_np.astype(np.float32)
-    X_np /= 255.0
-    X = torch.from_numpy(X_np)
-    # Using FloatTensor to allow comparison with values sampled from
-    # Bernoulli.
-    counts = torch.FloatTensor([len(objs) for objs in Y])
-    return X, counts
+    train, test = multi_mnist(inpath, max_digits=2, canvas_size=50, seed=42)
+    def process(X_np, Y):
+        X_np = X_np.astype(np.float32)
+        X_np /= 255.0
+        X = torch.from_numpy(X_np)
+        # Using FloatTensor to allow comparison with values sampled from
+        # Bernoulli.
+        counts = torch.FloatTensor([len(objs) for objs in Y])
+        return X, counts
+    return process(*train), process(*test)
+
+def batch_log_prob(trace):
+    trace.compute_log_prob()
+    log_prob = 0.0
+    for name, site in trace.nodes.items():
+        if site["type"] == "sample" and name != "data":
+            # print(name)
+            # print(site)
+            # print(site['log_prob'].shape)
+            log_prob += site['unscaled_log_prob']
+    return log_prob
+
+
+def rws(model, guide, *args, **kwargs):
+    n = 5
+    surrogate = 0.0
+    log_ws = []
+    log_ps = []
+    log_qs = []
+    # TODO: vectorize
+    for i in range(n):
+        guide_trace = pyro.poutine.trace(guide).get_trace(*args, **kwargs)
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.replay(model, trace=guide_trace)).get_trace(*args, **kwargs)
+        log_p = batch_log_prob(model_trace)
+        log_q = batch_log_prob(guide_trace)
+        log_w = (log_p - log_q).detach()
+        log_ws.append(log_w)
+        log_ps.append(log_p)
+        log_qs.append(log_q)
+
+    all_log_ws = torch.stack(log_ws)
+    assert all_log_ws.shape[0] == n
+    #assert all_log_ws.shape[1] == batch_size
+    log_ws_sum = torch.logsumexp(all_log_ws, 0)
+    assert log_ws_sum.shape == log_ws[0].shape
+
+    # normalised weights (log space)
+    log_ws_norm = [log_w - log_ws_sum for log_w in log_ws]
+
+    # estimate of -log p(x)
+    loss = torch.sum(-log_ws_sum + torch.log(torch.tensor(float(n))))
+
+    # model_surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_p for (log_w_norm, log_p) in zip(log_ws_norm, log_ps)))
+    # guide_surrogate = -torch.sum(sum(torch.exp(log_w_norm) * log_q for (log_w_norm, log_q) in zip(log_ws_norm, log_qs)))
+
+    surrogate = -torch.sum(sum(torch.exp(log_w_norm) * (log_p + log_q) for (log_w_norm, log_p, log_q) in zip(log_ws_norm, log_ps, log_qs)))
+
+    return loss + surrogate - surrogate.detach()
 
 
 def main(**kwargs):
@@ -134,10 +186,24 @@ def main(**kwargs):
     if args.seed is not None:
         pyro.set_rng_seed(args.seed)
 
-    X, true_counts = load_data()
-    X_size = X.size(0)
+    (X, true_counts), (X_test, _) = load_data()
+
+    # X = X[0:1000]
+    # true_counts = true_counts[0:1000]
+    # X_test = X_test[0:1000]
+
+
+    assert X.shape[0] % args.batch_size == 0
+    assert X_test.shape[0] % args.batch_size == 0
+    train_batches = torch.stack(torch.chunk(X, X.shape[0] // args.batch_size))
+    train_counts_batches = torch.stack(torch.chunk(true_counts, true_counts.shape[0] // args.batch_size))
+    test_batches = torch.stack(torch.chunk(X_test, X_test.shape[0] // args.batch_size))
+
+    #X_size = X.size(0)
     if args.cuda:
-        X = X.cuda()
+        #X = X.cuda()
+        train_batches = train_batches.cuda()
+        test_batches = test_batches.cuda()
 
     # Build a function to compute z_pres prior probabilities.
     if args.z_pres_prior_raw:
@@ -145,6 +211,7 @@ def main(**kwargs):
             return args.z_pres_prior
     else:
         base_z_pres_prior_p = make_prior(args.z_pres_prior)
+
 
     # Wrap with logic to apply any annealing.
     def z_pres_prior_p(opt_step, time_step):
@@ -207,49 +274,89 @@ def main(**kwargs):
     elbo = JitTraceGraph_ELBO() if args.jit else TraceGraph_ELBO()
     svi = SVI(air.model, air.guide, adam, loss=elbo)
 
-    # Do inference.
-    t0 = time.time()
-    examples_to_viz = X[5:10]
+    # don't bother making prior annealing work. assume it's not used,
+    # then just pass in zero for (usused) current step arg.
+    assert args.anneal_prior == 'none', 'annealing prior not supported'
+    z_pres_prior_p = partial(z_pres_prior_p, 0)
 
-    for i in range(1, args.num_steps + 1):
+    train_history = []
+    test_history = []
+    elapsed = 0.0
+    for epoch in range(args.num_epochs):
 
-        loss = svi.step(X, batch_size=args.batch_size, z_pres_prior_p=partial(z_pres_prior_p, i))
+        t0 = time.time()
+        epoch_loss = 0.0
+        for i in range(train_batches.shape[0]):
+            batch = train_batches[i]
+            loss = svi.step(batch, batch_size=batch.shape[0], z_pres_prior_p=z_pres_prior_p)
+            epoch_loss += loss
+        elapsed += time.time() - t0
+        epoch_loss /= X.shape[0]
+        print('epoch=%d: %f' % (epoch, epoch_loss))
+        train_history.append((epoch_loss, elapsed))
 
-        if args.progress_every > 0 and i % args.progress_every == 0:
-            print('i={}, epochs={:.2f}, elapsed={:.2f}, elbo={:.2f}'.format(
-                i,
-                (i * args.batch_size) / X_size,
-                (time.time() - t0) / 3600,
-                loss / X_size))
-
-        if args.viz and i % args.viz_every == 0:
-            trace = poutine.trace(air.guide).get_trace(examples_to_viz, None)
-            z, recons = poutine.replay(air.prior, trace=trace)(examples_to_viz.size(0))
-            z_wheres = tensor_to_objs(latents_to_tensor(z))
-
-            # Show data with inferred objection positions.
-            vis.images(draw_many(examples_to_viz, z_wheres))
-            # Show reconstructions of data.
-            vis.images(draw_many(recons, z_wheres))
 
         if args.eval_every > 0 and i % args.eval_every == 0:
             # Measure accuracy on subset of training data.
-            acc, counts, error_z, error_ix = count_accuracy(X, true_counts, air, 1000)
-            print('i={}, accuracy={}, counts={}'.format(i, acc, counts.numpy().tolist()))
-            if args.viz and error_ix.size(0) > 0:
-                vis.images(draw_many(X[error_ix[0:5]], tensor_to_objs(error_z[0:5])),
-                           opts=dict(caption='errors ({})'.format(i)))
+            acc, counts = count_accuracy(train_batches, train_counts_batches, air)
+            print('epoch={}, accuracy={}, counts={}'.format(epoch, acc, counts.numpy().tolist()))
 
-        if 'save' in args and i % args.save_every == 0:
-            print('Saving parameters...')
-            torch.save(air.state_dict(), args.save)
+            # estimate test log p(x)
+            test_loss = 0.
+            for i in range(test_batches.shape[0]):
+                batch = test_batches[i]
+                test_loss += rws(air.model, air.guide, batch, batch_size=batch.shape[0], z_pres_prior_p=z_pres_prior_p).item()
+            test_loss /= X_test.shape[0]
+            print('test log prob: %f' % test_loss)
+            test_history.append((epoch, test_loss))
+
+    with open('history.json', 'w') as f:
+        json.dump(dict(train=train_history, test=test_history), f)
+
+
+    # # Do inference.
+    # t0 = time.time()
+    # examples_to_viz = X[5:10]
+
+    # for i in range(1, args.num_steps + 1):
+
+    #     loss = svi.step(X, batch_size=args.batch_size, z_pres_prior_p=partial(z_pres_prior_p, i))
+
+    #     if args.progress_every > 0 and i % args.progress_every == 0:
+    #         print('i={}, epochs={:.2f}, elapsed={:.2f}, elbo={:.2f}'.format(
+    #             i,
+    #             (i * args.batch_size) / X_size,
+    #             (time.time() - t0) / 3600,
+    #             loss / X_size))
+
+    #     if args.viz and i % args.viz_every == 0:
+    #         trace = poutine.trace(air.guide).get_trace(examples_to_viz, None)
+    #         z, recons = poutine.replay(air.prior, trace=trace)(examples_to_viz.size(0))
+    #         z_wheres = tensor_to_objs(latents_to_tensor(z))
+
+    #         # Show data with inferred objection positions.
+    #         vis.images(draw_many(examples_to_viz, z_wheres))
+    #         # Show reconstructions of data.
+    #         vis.images(draw_many(recons, z_wheres))
+
+    #     if args.eval_every > 0 and i % args.eval_every == 0:
+    #         # Measure accuracy on subset of training data.
+    #         acc, counts, error_z, error_ix = count_accuracy(X, true_counts, air, 1000)
+    #         print('i={}, accuracy={}, counts={}'.format(i, acc, counts.numpy().tolist()))
+    #         if args.viz and error_ix.size(0) > 0:
+    #             vis.images(draw_many(X[error_ix[0:5]], tensor_to_objs(error_z[0:5])),
+    #                        opts=dict(caption='errors ({})'.format(i)))
+
+    #     if 'save' in args and i % args.save_every == 0:
+    #         print('Saving parameters...')
+    #         torch.save(air.state_dict(), args.save)
 
 
 if __name__ == '__main__':
     assert pyro.__version__.startswith('0.3.1')
     parser = argparse.ArgumentParser(description="Pyro AIR example", argument_default=argparse.SUPPRESS)
-    parser.add_argument('-n', '--num-steps', type=int, default=int(1e8),
-                        help='number of optimization steps to take')
+    parser.add_argument('-n', '--num-epochs', type=int, default=int(1e5),
+                        help='number of optimization epochs')
     parser.add_argument('-b', '--batch-size', type=int, default=64,
                         help='batch size')
     parser.add_argument('-lr', '--learning-rate', type=float, default=1e-4,
