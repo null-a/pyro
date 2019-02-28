@@ -302,7 +302,7 @@ def main(**kwargs):
         train_history.append((epoch_loss, elapsed))
 
 
-        if args.eval_every > 0 and i % args.eval_every == 0:
+        if args.eval_every > 0 and epoch % args.eval_every == 0:
             # Measure accuracy on subset of training data.
             acc, counts = count_accuracy(train_batches, train_counts_batches, air)
             print('epoch={}, accuracy={}, counts={}'.format(epoch, acc, counts.numpy().tolist()))
