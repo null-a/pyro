@@ -137,8 +137,7 @@ def batch_log_prob(trace):
     return log_prob
 
 
-def rws(model, guide, *args, **kwargs):
-    n = 5
+def rws(n, model, guide, *args, **kwargs):
     surrogate = 0.0
     log_ws = []
     log_ps = []
@@ -275,7 +274,7 @@ def main(**kwargs):
     if args.rws:
         print('using rws...')
         assert args.no_baselines, 'baselines not used by rws, turn off with --no-baselines'
-        svi = SVI(air.model, air.guide, adam, loss=rws)
+        svi = SVI(air.model, air.guide, adam, loss=partial(rws, 5))
     else:
         print('using elbo...')
         svi = SVI(air.model, air.guide, adam, loss=elbo)
@@ -311,7 +310,7 @@ def main(**kwargs):
             test_loss = 0.
             for i in range(test_batches.shape[0]):
                 batch = test_batches[i]
-                test_loss += rws(air.model, air.guide, batch, batch_size=batch.shape[0], z_pres_prior_p=z_pres_prior_p).item()
+                test_loss += rws(5, air.model, air.guide, batch, batch_size=batch.shape[0], z_pres_prior_p=z_pres_prior_p).item()
             test_loss /= X_test.shape[0]
             print('test log prob: %f' % test_loss)
 
