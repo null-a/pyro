@@ -29,12 +29,13 @@ def load_data(data_path):
     if not T is None:
         assert T.size(0) == X.size(0) # data points
         assert T.size(1) == X.size(1) # frames
-    return X, Y, T
+    O = data['O'] if 'O' in data else None
+    return X, Y, T, O
 
 def trunc_seqs(data, seq_len):
     if seq_len is None:
         return data
-    X, Y, T = data
+    X, Y, T, _ = data
     assert 0 < seq_len <= X.size(1)
     return (X[:, 0:seq_len],
             Y,

@@ -196,7 +196,7 @@ def main():
     # computing metrics always requires full sequences in order to
     # compute metrics for extrapolated frames.
     data = load_data(args.data_path)
-    X, Y, T = data
+    X, Y, T, _ = data
 
     with open(args.module_config_path) as f:
         module_config = json.load(f)

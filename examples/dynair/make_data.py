@@ -185,7 +185,7 @@ def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars
     else:
         np_tracks = np.array(tracks)
 
-    return frames, num_objs, np_tracks
+    return frames, num_objs, np_tracks, avatars_ix
 
 # We pad tracks to that we can pack tracks with differing numbers of
 # objects into a single regular array for convenience.
@@ -241,7 +241,7 @@ def draw_bounding_box(tracks):
     return np.array(out)
 
 def main_one(sample_one, args, avatar_set_size, num_bkg, get_bkg):
-    frames, num_objs, tracks = sample_one(get_bkg(np.random.randint(num_bkg)))
+    frames, num_objs, tracks, _ = sample_one(get_bkg(np.random.randint(num_bkg)))
 
     if args.f == 'png':
         frames_arr = np.stack(img_to_arr(frame) for frame in frames)
@@ -273,26 +273,31 @@ def main_dataset(sample_one, args, avatar_set_size, num_bkg, get_bkg):
     # in the final dataset.
     random.shuffle(perm)
 
-    seqs, counts, trackss = tuple(zip(*[sample_one(get_bkg(perm[i % num_bkg])) for i in range(n)]))
+    seqs, counts, trackss, obj_ids = tuple(zip(*[sample_one(get_bkg(perm[i % num_bkg])) for i in range(n)]))
 
     seqs_np = np.stack(np.stack(img_to_arr(frame) for frame in seq) for seq in seqs)
     counts_np = np.array(counts, dtype=np.int8)
     trackss_np = np.stack([pad_tracks(tracks, args.max) for tracks in trackss])
+    obj_ids_np = np.stack(obj_ids)
 
     # print(trackss_np[0,:,0])
     # print(trackss_np.dtype)
     # print(seqs_np.shape)
     # print(counts_np.shape)
     # print(trackss_np.shape)
+    # print(obj_ids_np.shape)
+    # print(obj_ids_np.dtype)
 
     assert(seqs_np.shape == (n, seq_len, 3, SIZE, SIZE))
     assert(counts_np.shape == (n,))
     assert(trackss_np.shape == (n, seq_len, args.max, 4))
+    assert(obj_ids_np.shape == (n, 3))
 
     np.savez_compressed('out.npz',
                         X=seqs_np,
                         Y=counts_np,
                         T=trackss_np,
+                        O=obj_ids_np,
                         avatar_set_size=np.array([avatar_set_size]))
 
 
