@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw
 from data import load_data
-from guide import InputCnn, CombineMixin
+from guide import InputCnn, ImgEmbedMlp, ImgEmbedResNet, CombineMixin
 from modules import MLP
 
 # Prepare training data.
@@ -26,20 +26,28 @@ def load(path):
 
 all_img, all_obj_ids, all_pos = load('./out.npz')
 
+all_img = all_img[0:14000]
+all_obj_ids = all_obj_ids[0:14000]
+all_pos = all_pos[0:14000]
+
 # print(all_img.shape)
+# print(all_obj_ids.shape)
+# print(all_pos.shape)
 # assert False
 
-bs = 50 # batch_size
-img_train = torch.stack(torch.split(all_img[0:3000], bs))
-obj_ids_train = torch.stack(torch.split(all_obj_ids[0:3000], bs))
-pos_train = torch.stack(torch.split(all_pos[0:3000], bs))
 
-img_test = torch.stack(torch.split(all_img[3000:], bs))
-obj_ids_test = torch.stack(torch.split(all_obj_ids[3000:], bs))
-pos_test = torch.stack(torch.split(all_pos[3000:], bs))
+bs = 50 # batch_size
+img_train = torch.stack(torch.split(all_img[0:13000], bs))
+obj_ids_train = torch.stack(torch.split(all_obj_ids[0:13000], bs))
+pos_train = torch.stack(torch.split(all_pos[0:13000], bs))
+
+img_test = torch.stack(torch.split(all_img[13000:], bs))
+obj_ids_test = torch.stack(torch.split(all_obj_ids[13000:], bs))
+pos_test = torch.stack(torch.split(all_pos[13000:], bs))
 
 
 net = CombineMixin(InputCnn,
+                   #partial(ImgEmbedResNet, hids=[1000, 1000]),
                    partial(MLP, hids=[800, 800, 2], output_non_linearity=False),
                    (3,50,50), # main input size
                    3)         # side input size
@@ -57,8 +65,6 @@ def do_epoch(img_b, obj_ids_b, pos_b, optimize):
             optimizer.step()
             net.zero_grad()
     return epoch_loss / (img_b.size(0) * img_b.size(1))
-
-
 
 def img_to_arr(img):
     #assert img.mode == 'RGBA'
@@ -116,11 +122,11 @@ for i in range(1000):
 
         top_n_ix = losses.argsort(descending=True)[0:5].tolist()
         for ix in top_n_ix:
-            obj_id = all_obj_ids[3000+ix].argmax().item()
+            obj_id = all_obj_ids[13000+ix].argmax().item()
             color = ["pink", "gray", "yellow"][obj_id]
             p = outputs[ix]
             x = (p[0] * 25) + 25
             y = (p[1] * 25) + 25
-            img = draw_bounding_box(all_img[3000+ix].numpy(), x, y, 14.3, 14.3, color)
-            plt.imshow(img.transpose((1,2,0)))
+            img = draw_bounding_box(all_img[13000+ix].numpy(), x, y, 14.3, 14.3, color)
+            plt.imshow(img.transpose((1,2,0)), interpolation='none')
             plt.show()
