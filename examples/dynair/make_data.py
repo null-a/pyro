@@ -318,11 +318,11 @@ def bkgs_from_dir(bkg_path):
         return Image.open(fns[i]).convert('RGBA')
     return len(fns), get_bkg
 
-def empty_bkg():
+def empty_bkg(colour):
     print('using empty background')
     def get_bkg(i):
         assert i == 0
-        return Image.new('RGBA', (SIZE,SIZE), 'black')
+        return Image.new('RGBA', (SIZE,SIZE), colour)
     return 1, get_bkg
 
 if __name__ == '__main__':
@@ -335,6 +335,7 @@ if __name__ == '__main__':
     parser.add_argument('-r', action='store_true', default=False, help='rotate objects over time')
     parser.add_argument('-t', action='store_true', default=False, help='translate objects over time')
     parser.add_argument('-g', action='store_true', default=False, help='generate grayscale frames')
+    parser.add_argument('-b', default='black', help='background colour (only has an effect when not using bkg images)')
     subparsers = parser.add_subparsers(dest='target')
     one_parser = subparsers.add_parser('one')
     one_parser.add_argument('-f', choices=['png', 'tiff'], default='png')
@@ -349,7 +350,7 @@ if __name__ == '__main__':
     assert args.max >= args.min
 
     # bkgs is a pair of (num_bkgs, get_bkg_fn)
-    bkgs = bkgs_from_dir(args.bkg_path) if args.bkg_path else empty_bkg()
+    bkgs = bkgs_from_dir(args.bkg_path) if args.bkg_path else empty_bkg(args.b)
 
     avatars = load_avatars(args.avatar_path)
     sample_one = partial(sample_scene,
