@@ -74,11 +74,11 @@ def theta_inverse(theta):
 def over(a, b):
     # a over b
     # https://en.wikipedia.org/wiki/Alpha_compositing
-    # assert a.size() == (n, 4, image_size, image_size)
-    assert a.size(1) == 4
-    assert b.size(1) == 3
-    rgb_a = a[:, 0:3] # .size() == (n, 3, image_size, image_size)
-    alpha_a = a[:, 3:4] # .size() == (n, 1, image_size, image_size)
+    c = b.size(1)             # number of channels (rgb or grayscale)
+    assert c == 3 or c == 1
+    assert a.size(1) == c + 1 # a has additional alpha channel
+    rgb_a = a[:, 0:c] # .size() == (n, c, image_size, image_size)
+    alpha_a = a[:, c:c+1] # .size() == (n, 1, image_size, image_size)
     return rgb_a * alpha_a + b * (1 - alpha_a)
 
 def insert(a, a_depth, b):

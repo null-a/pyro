@@ -121,7 +121,7 @@ def sample_natural_scene_bkg(path, size):
     #arr = img_to_arr(cropped)
     return cropped, (n, ix, x, y)
 
-def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, bkg):
+def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, output_grayscale, bkg):
 
     assert max_num_objs <= len(avatars)
     assert bkg.size == (SIZE, SIZE)
@@ -175,7 +175,7 @@ def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars
                                 obj_pixel_size,  # width
                                 obj_pixel_size]) # height
 
-        frames.append(acc.convert('RGB')) # convert to RGB since all pixels now opaque
+        frames.append(acc.convert('L' if output_grayscale else 'RGB')) # convert to L/RGB since all pixels now opaque
         tracks.append(annotations)
 
     # tracks for seq with zero objects need special handling to ensure
@@ -200,7 +200,17 @@ def pad_tracks(tracks, max_num_objs):
 # Arrays of pixel intensities that range over 0..255
 def img_to_arr(img):
     #assert img.mode == 'RGBA'
-    channels = 4 if img.mode == 'RGBA' else 3
+    #channels = 4 if img.mode == 'RGBA' else 3
+    if img.mode == 'RGBA':
+        channels = 4
+    elif img.mode == 'RGB':
+        channels = 3
+    elif img.mode == 'LA':
+        channels = 2
+    elif img.mode == 'L':
+        channels = 1
+    else:
+        raise Exception('unsupport image mode')
     w, h = img.size
     arr = np.fromstring(img.tobytes(), dtype=np.uint8)
     return arr.reshape(w * h, channels).T.reshape(channels, h, w)
@@ -227,12 +237,12 @@ def arr_to_img(nparr):
 # Before doing so, I might want to first switch this over to using
 # torch rather than numpy.
 
-def draw_bounding_box(tracks):
+def draw_bounding_box(tracks, output_grayscale):
     # tracks. np tensor (seq_len, num_obj, len([x,y,w,h]))
     # returns np tensor of size (seq_len, num_chan=3, w, h), with pixel intensities in 0..255
     out = []
     for obj_positions in tracks:
-        img = Image.new('RGBA', (SIZE,SIZE), 0)
+        img = Image.new('LA' if output_grayscale else 'RGBA', (SIZE,SIZE), 0)
         draw = ImageDraw.Draw(img)
         for ix, obj_pos in enumerate(obj_positions):
             x, y, w, h = obj_pos
@@ -251,7 +261,7 @@ def main_one(sample_one, args, avatar_set_size, num_bkg, get_bkg):
         tracks = pad_tracks(tracks, args.max)[:,0:num_objs]
 
         # This will be ints in 0..255
-        boxes_overlay = draw_bounding_box(tracks)
+        boxes_overlay = draw_bounding_box(tracks, args.g)
         boxes_overlay_t = torch.from_numpy(boxes_overlay / 255.)
 
         save_image(make_grid(over(boxes_overlay_t, frames_arr_t), nrow=10), 'out.png')
@@ -288,7 +298,7 @@ def main_dataset(sample_one, args, avatar_set_size, num_bkg, get_bkg):
     # print(obj_ids_np.shape)
     # print(obj_ids_np.dtype)
 
-    assert(seqs_np.shape == (n, seq_len, 3, SIZE, SIZE))
+    assert(seqs_np.shape == (n, seq_len, 1 if args.g else 3, SIZE, SIZE))
     assert(counts_np.shape == (n,))
     assert(trackss_np.shape == (n, seq_len, args.max, 4))
     assert(obj_ids_np.shape == (n, 3))
@@ -324,6 +334,7 @@ if __name__ == '__main__':
     parser.add_argument('-l', type=int, required=True, help='sequence length')
     parser.add_argument('-r', action='store_true', default=False, help='rotate objects over time')
     parser.add_argument('-t', action='store_true', default=False, help='translate objects over time')
+    parser.add_argument('-g', action='store_true', default=False, help='generate grayscale frames')
     subparsers = parser.add_subparsers(dest='target')
     one_parser = subparsers.add_parser('one')
     one_parser.add_argument('-f', choices=['png', 'tiff'], default='png')
@@ -343,5 +354,5 @@ if __name__ == '__main__':
     avatars = load_avatars(args.avatar_path)
     sample_one = partial(sample_scene,
                          args.l, args.min, args.max, args.r, args.t,
-                         avatars)
+                         avatars, args.g)
     args.main(sample_one, args, len(avatars), *bkgs)
