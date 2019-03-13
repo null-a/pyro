@@ -32,16 +32,16 @@ def movie_main(dynair, X, Y, args):
         os.mkdir(tmp_dir)
 
     for ix in args.indices:
-        make_movie(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f), not args.d)
+        make_movie(dynair, X[ix], Y[ix], tmp_dir, 'movie_{}.{}'.format(ix, args.f), not args.d, args.n)
 
-def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra):
+def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra, num_extra_frames):
     # x is an input sequence
     # y is the object count
     size = dynair.cfg.image_size
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
-    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra)
+    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), num_extra_frames, sample_extra)
 
     input_seq = x
     recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
@@ -71,7 +71,7 @@ def frames_main(dynair, X, Y, args):
     for ix in args.indices:
         x = X[ix]
         y = Y[ix]
-        frames, ws, zs, bkg, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), 20, sample_extra=not args.d)
+        frames, ws, zs, bkg, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), args.n, sample_extra=not args.d)
         frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
         extra_frames_with_windows = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
 
@@ -123,6 +123,7 @@ def main():
                         help='indices of data points for which to create visualisations')
 
     parser.add_argument('-l', type=int, help='sequence length')
+    parser.add_argument('-n', type=int, default=5, help='number of frames to extrapolate')
     parser.add_argument('-d', action='store_true', default=False,
                         help='do not sample latent variables when generating extra frames')
 
