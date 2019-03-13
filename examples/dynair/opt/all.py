@@ -79,10 +79,11 @@ def build_module(cfg, use_cuda):
                                partial(arch_lookup[arch], hids=hids),
                                state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
 
-    sd_opt, arch, *hids = parse_cla('sdparam|sdstate-mlp|resnet', cfg.z_transition)
+    sd_opt, arch, z_dep, *hids = parse_cla('sdparam|sdstate-mlp|resnet-part|full', cfg.z_transition)
     z_transition = ZTransition(cfg,
                                partial(arch_lookup[arch], hids=hids),
-                               state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt])
+                               state_dependent_sd=dict(sdstate=True, sdparam=False)[sd_opt],
+                               depend_on_w_prev=(z_dep == 'full'))
 
     model = Model(cfg,
                   dict(decode_obj=decode_obj,

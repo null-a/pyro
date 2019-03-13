@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--w-transition', default='sdparam-mlp-50',
                         help='architecture of w transition')
-    parser.add_argument('--z-transition', default='sdparam-mlp-50',
+    parser.add_argument('--z-transition', default='sdparam-mlp-part-50',
                         help='architecture of z transition')
 
     parser.add_argument('--decode-obj', default='mlp-full-100-100',

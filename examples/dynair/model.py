@@ -118,7 +118,7 @@ class Model(nn.Module):
         batch_size = z_prev.size(0)
         assert_size(z_prev, (batch_size, self.cfg.z_size))
         assert_size(w_prev, (batch_size, self.cfg.w_size))
-        z_mean_or_delta, z_sd = self.z_transition(z_prev)
+        z_mean_or_delta, z_sd = self.z_transition(z_prev, w_prev)
         w_mean_or_delta, w_sd = self.w_transition(z_prev, w_prev)
         z_mean = delta_mean(z_prev, z_mean_or_delta, self.delta_z)
         w_mean = delta_mean(w_prev, w_mean_or_delta, self.delta_w)
@@ -222,15 +222,18 @@ class WTransition(nn.Module):
 
 
 class ZTransition(nn.Module):
-    def __init__(self, cfg, netfn, state_dependent_sd):
+    def __init__(self, cfg, netfn, state_dependent_sd, depend_on_w_prev):
         super(ZTransition, self).__init__()
-        net = netfn(cfg.z_size)
+        self.depend_on_w_prev = depend_on_w_prev
+        in_size = cfg.z_size + cfg.w_size if depend_on_w_prev else cfg.z_size
+        net = netfn(in_size)
         params_module = NormalParams if state_dependent_sd else NormalMeanWithSdParam
         params = params_module(net.output_size, cfg.z_size, sd_bias=-2.25)
         self.net = nn.Sequential(net, params)
 
-    def forward(self, z_prev):
-        return self.net(z_prev)
+    def forward(self, z_prev, w_prev):
+        inp = torch.cat((w_prev, z_prev), 1) if self.depend_on_w_prev else z_prev
+        return self.net(inp)
 
 
 class ZGatedTransition(nn.Module):
