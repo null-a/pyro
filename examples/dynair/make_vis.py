@@ -61,7 +61,11 @@ def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra):
         img.paste(extra_img, box=(size,0))
         img.save('{}/frame_{:02d}.png'.format(tmp_dir, i + input_seq.shape[0]))
 
-    subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-y', '-s', '400x200', out_fn])
+    # Create palette to fix artifacts seen in gray scale gifs.
+    # https://engineering.giphy.com/how-to-make-gifs-with-ffmpeg/
+    subprocess.call(['ffmpeg', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-filter_complex', '[0:v] palettegen', '-y', 'palette.png'])
+    # Adding '-s', '400x200' (after -y) is still problematic though, so avoiding.
+    subprocess.call(['ffmpeg', '-framerate', '8', '-i', '{}/frame_%2d.png'.format(tmp_dir), '-i', 'palette.png', '-filter_complex', '[0:v][1:v] paletteuse', '-y', out_fn])
 
 def frames_main(dynair, X, Y, args):
     for ix in args.indices:
