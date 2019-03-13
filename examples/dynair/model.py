@@ -80,8 +80,8 @@ class Model(nn.Module):
                 # will defeat attempts to cache the `composite_object`
                 # method. This is similar to the problem cause by use
                 # of `append_channel` elsewhere.
-                bkg = self.prototype.new_zeros(batch_size, self.cfg.num_chan,
-                                               self.cfg.image_size, self.cfg.image_size)
+                bkg = self.prototype.new_ones(batch_size, self.cfg.num_chan,
+                                              self.cfg.image_size, self.cfg.image_size)
 
             for t in range(seq_length):
                 if t>0:
