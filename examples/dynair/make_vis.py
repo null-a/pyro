@@ -15,14 +15,15 @@ from data import load_data, data_params, trunc_seqs
 from opt.all import build_module
 from vis import overlay_multiple_window_outlines
 
-def frame_to_img(frame, mark=False):
-    assert frame.shape[0] == 3
+def frame_to_img(frame):
+    num_chan = frame.shape[0]
+    assert num_chan == 3 or num_chan == 1
     shape = frame.shape[1:]
     byte_str = (frame.transpose(1,2,0) * 255).astype(np.uint8).tostring()
-    img = Image.frombuffer('RGB', shape, byte_str, 'raw', 'RGB', 0, 1)
-    if mark:
-        draw = ImageDraw.Draw(img, mode='RGBA')
-        draw.rectangle([(0,0), (5,5)], fill=(255,255,255,127))
+    mode = 'RGB' if num_chan == 3 else 'L'
+    img = Image.frombuffer(mode, shape, byte_str, 'raw', mode, 0, 1)
+    if num_chan == 1:
+        img = img.convert('RGB')
     return img
 
 def movie_main(dynair, X, Y, args):

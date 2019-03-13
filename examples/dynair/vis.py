@@ -6,21 +6,33 @@ from transform import window_to_image, over
 from utils import batch_expand
 
 def img_to_arr(img):
-    assert img.mode == 'RGBA'
-    channels = 4
+    #assert img.mode == 'RGBA'
+    #channels = 4 if img.mode == 'RGBA' else 3
+    if img.mode == 'RGBA':
+        channels = 4
+    elif img.mode == 'RGB':
+        channels = 3
+    elif img.mode == 'LA':
+        channels = 2
+    elif img.mode == 'L':
+        channels = 1
+    else:
+        raise Exception('unsupport image mode')
     w, h = img.size
     arr = np.fromstring(img.tobytes(), dtype=np.uint8)
     return arr.reshape(w * h, channels).T.reshape(channels, h, w)
 
-def draw_rect(size, color):
-    img = Image.new('RGBA', (size, size))
+def draw_rect(num_chan, size, color):
+    assert num_chan == 3 or num_chan == 1
+    mode = 'RGBA' if num_chan == 3 else 'LA'
+    img = Image.new(mode, (size, size))
     draw = ImageDraw.Draw(img)
     draw.rectangle([0, 0, size - 1, size - 1], outline=color)
     return torch.from_numpy(img_to_arr(img).astype(np.float32) / 255.0)
 
 def draw_window_outline(cfg, z_where, color):
     n = z_where.size(0)
-    rect = draw_rect(cfg.window_size, color)
+    rect = draw_rect(cfg.num_chan, cfg.window_size, color)
     if z_where.is_cuda:
         rect = rect.cuda()
     rect_batch = batch_expand(rect.contiguous().view(-1), n).contiguous()
