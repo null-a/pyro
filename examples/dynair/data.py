@@ -34,7 +34,7 @@ def load_data(data_path):
 
 def trunc_seqs(data, seq_len):
     if seq_len is None:
-        return data
+        return data[0:3]
     X, Y, T, _ = data
     assert 0 < seq_len <= X.size(1)
     return (X[:, 0:seq_len],
