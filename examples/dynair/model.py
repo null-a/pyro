@@ -31,7 +31,10 @@ class Model(nn.Module):
         self.w_0_prior_sd = torch.Tensor([0.8, 0.7, 0.7]).type_as(self.prototype)
 
         self.z_0_prior_mean = self.prototype.new_zeros(cfg.z_size)
-        self.z_0_prior_sd = self.prototype.new_ones(cfg.z_size)
+        self.z_0_prior_pre_sd = self.prototype.new_ones(cfg.z_size) * 0.541325
+        if cfg.model_opt_z0_prior:
+            self.z_0_prior_mean = nn.Parameter(self.z_0_prior_mean)
+            self.z_0_prior_pre_sd = nn.Parameter(self.z_0_prior_pre_sd)
 
         self.likelihood_sd = 0.3
 
@@ -146,8 +149,9 @@ class Model(nn.Module):
         return zs, ws
 
     def initial_params(self, batch_size):
+        z_0_prior_sd = softplus(self.z_0_prior_pre_sd)
         z_mean = self.z_0_prior_mean.expand(batch_size, -1)
-        z_sd = self.z_0_prior_sd.expand(batch_size, -1)
+        z_sd = z_0_prior_sd.expand(batch_size, -1)
         w_mean = self.w_0_prior_mean.expand(batch_size, -1)
         w_sd = self.w_0_prior_sd.expand(batch_size, -1)
         zs_params = [(z_mean, z_sd)] * self.cfg.max_obj_count

@@ -56,6 +56,8 @@ if __name__ == '__main__':
                         help='use w transition output as delta from previous value to next mean')
     parser.add_argument('--model-delta-z', action='store_true', default=False,
                         help='use z transition output as delta from previous value to next mean')
+    parser.add_argument('--model-opt-z0-prior', action='store_true', default=False,
+                        help='optimise the parameters of the prior on z_0')
 
     parser.add_argument('--use-depth', action='store_true', default=False,
                         help='render scene using explicit object depths')
@@ -123,6 +125,7 @@ if __name__ == '__main__':
                          decode_obj_depth=args.decode_obj_depth,
                          model_delta_w=args.model_delta_w,
                          model_delta_z=args.model_delta_z,
+                         model_opt_z0_prior=args.model_opt_z0_prior,
                          guide_w=args.guide_w,
                          guide_z=args.guide_z,
                          guide_input_embed=args.guide_input_embed,
