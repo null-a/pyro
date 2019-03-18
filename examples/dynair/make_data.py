@@ -121,6 +121,83 @@ def sample_natural_scene_bkg(path, size):
     #arr = img_to_arr(cropped)
     return cropped, (n, ix, x, y)
 
+def sample_scene_bounce(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, output_grayscale, bkg):
+    assert min_num_objs == 1
+    assert max_num_objs == 1
+    assert not rotate
+    assert translate
+
+    assert bkg.size == (SIZE, SIZE)
+
+    obj_downscale_factor = 3.5
+    obj_pixel_size = SIZE/float(obj_downscale_factor)
+    b = obj_pixel_size / 2.0
+
+    # Sample velocity.
+    x_dir = np.random.randint(0, 2)
+    x_vel = np.random.normal(3, 0.9)
+    if x_dir:
+        x_vel *= -1.0
+
+    y_dir = np.random.randint(0, 2)
+    y_vel = np.random.normal(3, 0.9)
+    if y_dir:
+        y_vel *= -1.0
+
+    assert x_vel < SIZE
+    assert y_vel < SIZE
+
+    # Sample start position.
+    x = np.random.randint(b, SIZE-b)
+    y = np.random.randint(b, SIZE-b)
+
+    num_objs = 1
+    frames = []
+    tracks = []
+    shape=avatars[0]
+
+    for t in range(seq_len):
+
+        acc = bkg
+
+        s = avatars[0]
+        s = scale(s, obj_downscale_factor)
+        s = position(s, x, y)
+        acc = Image.alpha_composite(acc, s)
+        frames.append(acc.convert('L' if output_grayscale else 'RGB'))
+
+        tracks.append([[x-(obj_pixel_size/2),
+                        y-(obj_pixel_size/2),
+                        obj_pixel_size,  # width
+                        obj_pixel_size]])
+
+        # Update position based on velocity.
+        x = x + x_vel
+        y = y + y_vel
+
+        if x < (0 + b):
+            x = (2 * b) - x
+            x_vel *= -1.
+        elif x >= (50 - b):
+            x = (2 * (50 - b)) - x
+            x_vel *=  -1.
+
+        if y < (0 + b):
+            y = (2 * b) - y
+            y_vel *= -1.
+        elif y >= (50 - b):
+            y = (2 * (50 - b)) - y
+            y_vel *=  -1.
+
+        assert x >= 0 and x < 50
+        assert y >= 0 and y < 50
+
+    num_objs = 1
+    np_tracks = np.array(tracks)
+    avatars_ix = [0, 1, 2]
+
+    return frames, num_objs, np_tracks, avatars_ix
+
 def sample_scene(seq_len, min_num_objs, max_num_objs, rotate, translate, avatars, output_grayscale, bkg):
 
     assert max_num_objs <= len(avatars)
@@ -336,6 +413,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', action='store_true', default=False, help='translate objects over time')
     parser.add_argument('-g', action='store_true', default=False, help='generate grayscale frames')
     parser.add_argument('-b', default='black', help='background colour (only has an effect when not using bkg images)')
+    parser.add_argument('--bounce', action='store_true', default=False, help='objects bounce off frame boundary')
     subparsers = parser.add_subparsers(dest='target')
     one_parser = subparsers.add_parser('one')
     one_parser.add_argument('-f', choices=['png', 'tiff'], default='png')
@@ -353,7 +431,7 @@ if __name__ == '__main__':
     bkgs = bkgs_from_dir(args.bkg_path) if args.bkg_path else empty_bkg(args.b)
 
     avatars = load_avatars(args.avatar_path)
-    sample_one = partial(sample_scene,
+    sample_one = partial(sample_scene_bounce if args.bounce else sample_scene,
                          args.l, args.min, args.max, args.r, args.t,
                          avatars, args.g)
     args.main(sample_one, args, len(avatars), *bkgs)
