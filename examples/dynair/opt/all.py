@@ -204,7 +204,7 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
     elbo_scale = 1.0/(seq_length*batch_size)
 
     #dynair = build_module(cfg, use_cuda)
-    dynair = DVBF()
+    dynair = DVBF(use_cuda=use_cuda)
     # print(dvbf.model)
     # print(dvbf.guide)
     # dvbf.guide((X_train[0], Y_train[0]))
