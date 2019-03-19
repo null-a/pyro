@@ -9,6 +9,7 @@ from dynair import DynAIR
 from model import Model, DecodeObj, DecodeObjDepth, DecodeBkg, WTransition, ZTransition
 from guide import (Guide, GuideW_ObjRnn, GuideW_ImageSoFar, GuideZ, GuideY, CombineMixin,
                    ImgEmbedMlp, ImgEmbedResNet, ImgEmbedId, InputCnn, WindowCnn)
+from dvbf import DVBF
 from modules import MLP, ResNet
 from opt.run_svi import run_svi
 from opt.utils import md5sum, parse_cla
@@ -17,17 +18,18 @@ from vis import overlay_multiple_window_outlines
 def run_vis(vis, dynair, X, Y, epoch, batch):
     n = X.size(0)
     seq_len = X.size(1)
-    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(X, Y, seq_len)
+    #frames, ws, _, _, extra_frames, extra_ws = dynair.infer(X, Y, seq_len)
+    frames, extra_frames = dynair.infer(X, Y)
 
     for k in range(n):
-        out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k,:,:,0:3], Y[k])
+        #out = overlay_multiple_window_outlines(dynair.cfg, frames[k], ws[k,:,:,0:3], Y[k])
         vis.images(X[k].cpu(), nrow=10,
                    opts=dict(title='input {} after epoch {} batch {}'.format(k, epoch, batch)))
-        vis.images(out.cpu(), nrow=10,
+        vis.images(frames[k].cpu(), nrow=10,
                    opts=dict(title='recon {} after epoch {} batch {}'.format(k, epoch, batch)))
 
-        out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k,:,:,0:3], Y[k])
-        vis.images(out.cpu(), nrow=10,
+        # out = overlay_multiple_window_outlines(dynair.cfg, extra_frames[k], extra_ws[k,:,:,0:3], Y[k])
+        vis.images(extra_frames[k].cpu(), nrow=10,
                    opts=dict(title='extra {} after epoch {} batch {}'.format(k, epoch, batch)))
 
 def hook(vis_period, vis, dynair, X_train, Y_train, X_test, Y_test, epoch, batch, step):
@@ -201,7 +203,13 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
     seq_length = X_train[0].size(1)
     elbo_scale = 1.0/(seq_length*batch_size)
 
-    dynair = build_module(cfg, use_cuda)
+    #dynair = build_module(cfg, use_cuda)
+    dynair = DVBF()
+    # print(dvbf.model)
+    # print(dvbf.guide)
+    # dvbf.guide((X_train[0], Y_train[0]))
+    # assert False
+
 
     if args.show:
         print(dynair)
