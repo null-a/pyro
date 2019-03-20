@@ -22,9 +22,11 @@ class Model(nn.Module):
         self.image_size = image_size
         x_size = num_chan * image_size**2
 
-        self.transition = MLP(z_size, [z_size, z_size], nn.ELU, output_non_linearity=False)
-        # TODO: Make this wider/deeper.
-        self.emission = nn.Sequential(MLP(z_size, [100, x_size], nn.ELU, output_non_linearity=False), nn.Sigmoid())
+        self.transition = MLP(z_size, [z_size, z_size], nn.Tanh)
+        self.emission_net = MLP(z_size, [500, x_size], nn.ELU, output_non_linearity=False)
+
+    def emission(self, z):
+        return torch.sigmoid(self.emission_net(z) + 2.0).reshape(-1, self.num_chan, self.image_size, self.image_size)
 
     def forward(self, batch):
         pyro.module('model', self)
@@ -47,12 +49,14 @@ class Model(nn.Module):
             for t in range(seq_length):
 
                 w_mean = batch_expand(self.prototype.new_zeros(self.z_size), batch_size)
-                # TODO: Tighten after first frame? (so that guide is
+                # Tighten after first frame? (so that guide is
                 # encouraged to use w only to fix up learned
                 # transitions, and not to output latent state directly
                 # from the observation. (e.g. fix up predicted
                 # position rather than output position directly.)
                 w_sd = batch_expand(self.prototype.new_ones(self.z_size), batch_size)
+                if t == 0:
+                    w_sd = w_sd * 0.1
                 w = self.sample_w(t, w_mean, w_sd)
 
                 if t == 0:
@@ -60,9 +64,9 @@ class Model(nn.Module):
                 else:
                     assert z_prev is not None
                     # *additive* noise for now. the paper has (in one example) an extra mat. mul. in here.
-                    z = self.transition(z_prev) + w
+                    z = z_prev + self.transition(z_prev) + w
 
-                frame_mean = self.emission(z).reshape(-1, self.num_chan, self.image_size, self.image_size)
+                frame_mean = self.emission(z)
 
                 obs = seqs[:,t]
                 self.likelihood(t, frame_mean, obs)
@@ -98,8 +102,7 @@ class Guide(nn.Module):
         self.x_size = x_size
 
         self.z_prev_init = nn.Parameter(self.prototype.new_zeros(z_size))
-        # TODO: wider/deeper:
-        self.predict = nn.Sequential(MLP(x_size + z_size, [100], nn.ELU), NormalParams(100, z_size))
+        self.predict = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
 
     def forward(self, batch):
         pyro.module('guide', self)
@@ -131,7 +134,7 @@ class Guide(nn.Module):
                 if t == 0:
                     z = w
                 else:
-                    z = self.model.transition(z_prev) + w
+                    z = z_prev + self.model.transition(z_prev) + w
 
 
                 z_prev = z
@@ -163,8 +166,8 @@ class DVBF(nn.Module):
         extra_frames = []
 
         for t in range(5):
-            z = self.model.transition(z_prev) # deterministic
-            frame_mean = self.model.emission(z).reshape(-1, self.num_chan, self.image_size, self.image_size)
+            z = z_prev + self.model.transition(z_prev) # deterministic
+            frame_mean = self.model.emission(z)
             extra_frames.append(frame_mean)
             z_prev = z
 
