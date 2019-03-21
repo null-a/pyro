@@ -125,17 +125,19 @@ class Guide(nn.Module):
 
                 x = seqs[:,t].reshape(-1, self.x_size)
 
-                w_mean, w_sd = self.predict(torch.cat((x, z_prev), 1))
-                w = pyro.sample('w_{}'.format(t),
-                                dist.Normal(w_mean, w_sd).independent(1))
-
-
-                # TODO: figure out how to share the computation of this between the model and guide.
                 if t == 0:
+                    w_mean, w_sd = self.predict(torch.cat((x, z_prev), 1))
+                    w = pyro.sample('w_{}'.format(t),
+                                    dist.Normal(w_mean, w_sd).independent(1))
                     z = w
                 else:
-                    z = z_prev + self.model.transition(z_prev) + w
-
+                    # Compute proposed transition. (This is z without the additive w.)
+                    z_prop = z_prev + self.model.transition(z_prev)
+                    # predict w (i.e. error in z_prop) from x_t and z_prop
+                    w_mean, w_sd = self.predict(torch.cat((x, z_prop), 1))
+                    w = pyro.sample('w_{}'.format(t),
+                                    dist.Normal(w_mean, w_sd).independent(1))
+                    z = z_prop + w
 
                 z_prev = z
 
