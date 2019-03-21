@@ -102,7 +102,6 @@ class Guide(nn.Module):
         self.x_size = x_size
 
         self.z_prev_init = nn.Parameter(self.prototype.new_zeros(z_size))
-        self.predict0 = nn.Sequential(MLP(x_size, [500, 250], nn.ELU), NormalParams(250, z_size))
         self.predict = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
 
     def forward(self, batch):
@@ -120,16 +119,14 @@ class Guide(nn.Module):
 
         with pyro.iarange('data', batch_size):
 
-            # Used when sharing predict net between first and subsequent steps.
-            #z_prev = batch_expand(self.z_prev_init, batch_size)
+            z_prev = batch_expand(self.z_prev_init, batch_size)
 
             for t in range(seq_length):
 
                 x = seqs[:,t].reshape(-1, self.x_size)
 
                 if t == 0:
-                    #w_mean, w_sd = self.predict(torch.cat((x, z_prev), 1))
-                    w_mean, w_sd = self.predict0(x)
+                    w_mean, w_sd = self.predict(torch.cat((x, z_prev), 1))
                     w = pyro.sample('w_{}'.format(t),
                                     dist.Normal(w_mean, w_sd).independent(1))
                     z = w
