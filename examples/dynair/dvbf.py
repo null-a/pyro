@@ -49,14 +49,14 @@ class Model(nn.Module):
             for t in range(seq_length):
 
                 w_mean = batch_expand(self.prototype.new_zeros(self.z_size), batch_size)
-                # Tighten after first frame? (so that guide is
+                # TODO: Tighten after first frame? (so that guide is
                 # encouraged to use w only to fix up learned
                 # transitions, and not to output latent state directly
                 # from the observation. (e.g. fix up predicted
                 # position rather than output position directly.)
                 w_sd = batch_expand(self.prototype.new_ones(self.z_size), batch_size)
-                if t == 0:
-                    w_sd = w_sd * 0.1
+                # if t == 0:
+                #     w_sd = w_sd * 0.1
                 w = self.sample_w(t, w_mean, w_sd)
 
                 if t == 0:
@@ -101,7 +101,11 @@ class Guide(nn.Module):
         x_size = num_chan * image_size**2
         self.x_size = x_size
 
-        self.z_prev_init = nn.Parameter(self.prototype.new_zeros(z_size))
+        #self.z_prev_init = nn.Parameter(self.prototype.new_zeros(z_size))
+
+        self.predict0_rnn = nn.RNN(x_size, 100, nonlinearity='relu', bidirectional=True)
+        self.predict0_net = NormalParams(100, z_size)
+
         self.predict = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
 
     def forward(self, batch):
@@ -119,14 +123,16 @@ class Guide(nn.Module):
 
         with pyro.iarange('data', batch_size):
 
-            z_prev = batch_expand(self.z_prev_init, batch_size)
+            #z_prev = batch_expand(self.z_prev_init, batch_size)
 
             for t in range(seq_length):
 
                 x = seqs[:,t].reshape(-1, self.x_size)
 
                 if t == 0:
-                    w_mean, w_sd = self.predict(torch.cat((x, z_prev), 1))
+                    rnn_outputs, rnn_all_hids = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
+                    predict_hid = rnn_outputs[0, :, 100:]
+                    w_mean, w_sd = self.predict0_net(predict_hid)
                     w = pyro.sample('w_{}'.format(t),
                                     dist.Normal(w_mean, w_sd).independent(1))
                     z = w
