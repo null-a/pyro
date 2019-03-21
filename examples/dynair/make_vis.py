@@ -11,6 +11,7 @@ import pyro
 from PIL import Image, ImageDraw
 
 from dynair import config
+from dvbf import DVBF
 from data import load_data, data_params, trunc_seqs
 from opt.all import build_module
 from vis import overlay_multiple_window_outlines
@@ -37,17 +38,21 @@ def movie_main(dynair, X, Y, args):
 def make_movie(dynair, x, y, tmp_dir, out_fn, sample_extra, num_extra_frames):
     # x is an input sequence
     # y is the object count
-    size = dynair.cfg.image_size
+    size = 50 # dynair.cfg.image_size
 
     # Compute recon/extra.
     # Here we unsqueeze x and y into a "batch" of size 1, as expected by the model/guide.
-    frames, ws, _, _, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), num_extra_frames, sample_extra)
+    #frames, ws, _, _, extra_frames, extra_ws = dynair.infer(x.unsqueeze(0), y.unsqueeze(0), num_extra_frames, sample_extra)
+    frames, extra_frames = dynair.infer(x.unsqueeze(0), y.unsqueeze(0))
 
     input_seq = x
-    recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
-    extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
+    # recon_seq = overlay_multiple_window_outlines(dynair.cfg, frames[0], ws[0,:,:,0:3], y)
+    recon_seq = frames[0]
+    # extra_seq = overlay_multiple_window_outlines(dynair.cfg, extra_frames[0], extra_ws[0,:,:,0:3], y)
+    extra_seq = extra_frames[0]
 
     for i, (input_frame, recon_frame) in enumerate(zip(input_seq, recon_seq)):
+        #import pdb; pdb.set_trace()
         input_img = frame_to_img(input_frame.numpy())
         infer_img = frame_to_img(recon_frame.numpy())
         img = Image.new('RGB', (100,50))
@@ -117,7 +122,7 @@ def save_bkg_and_objs(dynair, ix, bkg, zs):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path')
-    parser.add_argument('module_config_path')
+    #parser.add_argument('module_config_path')
     parser.add_argument('params_path')
     parser.add_argument('indices', type=int, nargs='+',
                         help='indices of data points for which to create visualisations')
@@ -145,11 +150,12 @@ def main():
     data = trunc_seqs(load_data(args.data_path), args.l)
     X, Y, _ = data
 
-    with open(args.module_config_path) as f:
-        module_config = json.load(f)
-    cfg = config(module_config, data_params(data))
+    #with open(args.module_config_path) as f:
+    #    module_config = json.load(f)
+    #cfg = config(module_config, data_params(data))
 
-    dynair = build_module(cfg, use_cuda=False)
+    #dynair = build_module(cfg, use_cuda=False)
+    dynair = DVBF(use_cuda=False)
     dynair.load_state_dict(torch.load(args.params_path, map_location=lambda storage, loc: storage))
 
     args.main(dynair, X, Y, args)
