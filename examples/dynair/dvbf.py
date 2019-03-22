@@ -22,11 +22,26 @@ class Model(nn.Module):
         self.image_size = image_size
         x_size = num_chan * image_size**2
 
-        self.transition = MLP(z_size, [z_size, z_size], nn.Tanh)
+        self.transition_net = MLP(z_size, [z_size, z_size], nn.Tanh)
         self.emission_net = MLP(z_size, [500, x_size], nn.ELU, output_non_linearity=False)
 
     def emission(self, z):
         return torch.sigmoid(self.emission_net(z) + 2.0).reshape(-1, self.num_chan, self.image_size, self.image_size)
+
+    def transition(self, t, z_prev, w, deterministic=False):
+        assert t >= 0
+        if t == 0:
+            assert z_prev is None
+            # TODO: make this z = z0 + w, where z0 is learnable?
+            # (check paper, i think they do something different.)
+            return w
+        elif not deterministic:
+            # *additive* noise for now. the paper has (in one example)
+            # an extra mat. mul. in here.
+            return self.transition_net(z_prev) + w
+        else:
+            assert w is None
+            return self.transition_net(z_prev)
 
     def forward(self, batch):
         pyro.module('model', self)
@@ -59,12 +74,7 @@ class Model(nn.Module):
                 #     w_sd = w_sd * 0.1
                 w = self.sample_w(t, w_mean, w_sd)
 
-                if t == 0:
-                    z = w # TODO: make this z = z0 + w, where z0 is learnable?
-                else:
-                    assert z_prev is not None
-                    # *additive* noise for now. the paper has (in one example) an extra mat. mul. in here.
-                    z = z_prev + self.transition(z_prev) + w
+                z = self.transition(t, z_prev, w)
 
                 frame_mean = self.emission(z)
 
@@ -101,16 +111,13 @@ class Guide(nn.Module):
         x_size = num_chan * image_size**2
         self.x_size = x_size
 
-        #self.z_prev_init = nn.Parameter(self.prototype.new_zeros(z_size))
-
         self.predict0_rnn = nn.RNN(x_size, 100, nonlinearity='relu', bidirectional=True)
         self.predict0_net = NormalParams(100, z_size)
 
-        self.predict = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
+        self.predict_net = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
 
     def forward(self, batch):
         pyro.module('guide', self)
-
 
         seqs, obj_counts = batch
         batch_size = seqs.size(0)
@@ -123,29 +130,28 @@ class Guide(nn.Module):
 
         with pyro.iarange('data', batch_size):
 
-            #z_prev = batch_expand(self.z_prev_init, batch_size)
+            z_prev = None
 
             for t in range(seq_length):
 
-                x = seqs[:,t].reshape(-1, self.x_size)
-
+                # TODO: try (for a second time) predicting w from z
+                # rather than z_prev. (this amounts having the guide
+                # predict the error in the transition.)
                 if t == 0:
-                    rnn_outputs, rnn_all_hids = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
+                    # predict w0 from entire sequence.
+                    rnn_outputs, _ = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
                     predict_hid = rnn_outputs[0, :, 100:]
                     w_mean, w_sd = self.predict0_net(predict_hid)
-                    w = pyro.sample('w_{}'.format(t),
-                                    dist.Normal(w_mean, w_sd).independent(1))
-                    z = w
                 else:
-                    # Compute proposed transition. (This is z without the additive w.)
-                    z_prop = z_prev + self.model.transition(z_prev)
-                    # predict w (i.e. error in z_prop) from x_t and z_prop
-                    w_mean, w_sd = self.predict(torch.cat((x, z_prop), 1))
-                    w = pyro.sample('w_{}'.format(t),
-                                    dist.Normal(w_mean, w_sd).independent(1))
-                    z = z_prop + w
+                    # predict w from x and z_prev
+                    x = seqs[:,t].reshape(-1, self.x_size)
+                    w_mean, w_sd = self.predict_net(torch.cat((x, z_prev), 1))
 
+                w = pyro.sample('w_{}'.format(t),
+                                dist.Normal(w_mean, w_sd).independent(1))
+                z = self.model.transition(t, z_prev, w)
                 z_prev = z
+
 
 def frames_to_tensor(arr):
     # Turn an array of frames (of length seq_len) returned by the
@@ -172,9 +178,10 @@ class DVBF(nn.Module):
         z_prev = zs[-1]
 
         extra_frames = []
+        seq_length = seqs.size(1)
 
         for t in range(5):
-            z = z_prev + self.model.transition(z_prev) # deterministic
+            z = self.model.transition(seq_length+t, z_prev, None, deterministic=True)
             frame_mean = self.model.emission(z)
             extra_frames.append(frame_mean)
             z_prev = z
