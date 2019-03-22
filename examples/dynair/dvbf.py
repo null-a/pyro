@@ -22,8 +22,17 @@ class Model(nn.Module):
         self.image_size = image_size
         x_size = num_chan * image_size**2
 
-        self.transition_net = MLP(z_size, [z_size, z_size], nn.Tanh)
         self.emission_net = MLP(z_size, [500, x_size], nn.ELU, output_non_linearity=False)
+
+        # Locally linear transitions.
+        # This follows notation in paper.
+        self.M = 16 # number of transition matrices
+        self.A = nn.Parameter(self.prototype.new_zeros((self.M, z_size, z_size)))
+        torch.nn.init.normal_(self.A, 0., 1e-3)
+
+        # TODO: I don't see the arch. specified in the paper.
+        self.alpha_net = nn.Sequential(nn.Linear(z_size, self.M), nn.Softmax(dim=1))
+
 
     def emission(self, z):
         return torch.sigmoid(self.emission_net(z) + 2.0).reshape(-1, self.num_chan, self.image_size, self.image_size)
@@ -35,13 +44,30 @@ class Model(nn.Module):
             # TODO: make this z = z0 + w, where z0 is learnable?
             # (check paper, i think they do something different.)
             return w
-        elif not deterministic:
-            # *additive* noise for now. the paper has (in one example)
-            # an extra mat. mul. in here.
-            return self.transition_net(z_prev) + w
         else:
-            assert w is None
-            return self.transition_net(z_prev)
+
+            # TODO: Use more recent PyTorch to avoid having to clone
+            # inputs to einsum.
+            # https://github.com/pytorch/pytorch/issues/7763
+
+            batch_size = z_prev.size(0)
+            alpha = self.alpha_net(z_prev)
+            # Per-data point transition matrices:
+            A = torch.einsum('ij,jkl->ikl', (alpha.clone(), self.A.clone()))
+            assert A.shape == (batch_size, self.z_size, self.z_size)
+
+            # Batched matrix-vector multiple (between per data point
+            # transition matrices and batch of z_prev)
+            Az_prev = torch.einsum('ijk,ik->ij', (A.clone(), z_prev.clone()))
+            assert Az_prev.shape == (batch_size, self.z_size)
+
+            if not deterministic:
+                # *additive* noise for now. the paper has (in one example)
+                # an extra mat. mul. in here.
+                return Az_prev + w
+            else:
+                assert w is None
+                return Az_prev
 
     def forward(self, batch):
         pyro.module('model', self)
@@ -159,7 +185,7 @@ def frames_to_tensor(arr):
     return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1).detach()
 
 class DVBF(nn.Module):
-    def __init__(self, z_size=10, num_chan=1, image_size=50, use_cuda=False):
+    def __init__(self, z_size=4, num_chan=1, image_size=50, use_cuda=False):
         super(DVBF, self).__init__()
 
         self.num_chan = num_chan
