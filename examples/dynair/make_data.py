@@ -16,7 +16,7 @@ from torchvision.utils import make_grid, save_image
 
 from transform import over
 
-SIZE = 50
+SIZE = 20
 
 def interp1(n, a, b, t):
     return a + (b - a) * (t / float(n - 1))
@@ -178,19 +178,19 @@ def sample_scene_bounce(seq_len, min_num_objs, max_num_objs, rotate, translate, 
         if x < (0 + b):
             x = (2 * b) - x
             x_vel *= -1.
-        elif x >= (50 - b):
-            x = (2 * (50 - b)) - x
+        elif x >= (SIZE - b):
+            x = (2 * (SIZE - b)) - x
             x_vel *=  -1.
 
         if y < (0 + b):
             y = (2 * b) - y
             y_vel *= -1.
-        elif y >= (50 - b):
-            y = (2 * (50 - b)) - y
+        elif y >= (SIZE - b):
+            y = (2 * (SIZE - b)) - y
             y_vel *=  -1.
 
-        assert x >= 0 and x < 50
-        assert y >= 0 and y < 50
+        assert x >= 0 and x < SIZE
+        assert y >= 0 and y < SIZE
 
     num_objs = 1
     np_tracks = np.array(tracks)

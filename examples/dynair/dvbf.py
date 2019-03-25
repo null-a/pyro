@@ -185,7 +185,7 @@ def frames_to_tensor(arr):
     return torch.cat([t.unsqueeze(0) for t in arr]).transpose(0, 1).detach()
 
 class DVBF(nn.Module):
-    def __init__(self, z_size=4, num_chan=1, image_size=50, use_cuda=False):
+    def __init__(self, z_size=4, num_chan=1, image_size=20, use_cuda=False):
         super(DVBF, self).__init__()
 
         self.num_chan = num_chan
