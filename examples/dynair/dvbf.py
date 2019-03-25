@@ -69,7 +69,7 @@ class Model(nn.Module):
                 assert w is None
                 return Az_prev
 
-    def forward(self, batch):
+    def forward(self, batch, annealing_factor=1.0):
         pyro.module('model', self)
 
         seqs, obj_counts = batch
@@ -105,7 +105,7 @@ class Model(nn.Module):
                 frame_mean = self.emission(z)
 
                 obs = seqs[:,t]
-                self.likelihood(t, frame_mean, obs)
+                self.likelihood(t, frame_mean, obs, annealing_factor)
 
                 frames.append(frame_mean)
                 zs.append(z)
@@ -117,11 +117,12 @@ class Model(nn.Module):
         return pyro.sample('w_{}'.format(t),
                            dist.Normal(w_mean, w_sd).independent(1))
 
-    def likelihood(self, t, frame_mean, obs):
+    def likelihood(self, t, frame_mean, obs, annealing_factor):
         frame_sd = (self.likelihood_sd * self.prototype.new_ones(1)).expand_as(frame_mean)
-        pyro.sample('x_{}'.format(t),
-                    dist.Normal(frame_mean, frame_sd).independent(3),
-                    obs=obs)
+        with poutine.scale(None, annealing_factor):
+            pyro.sample('x_{}'.format(t),
+                        dist.Normal(frame_mean, frame_sd).independent(3),
+                        obs=obs)
 
 class Guide(nn.Module):
     def __init__(self, model, z_size, num_chan, image_size, use_cuda=False):
@@ -142,7 +143,7 @@ class Guide(nn.Module):
 
         self.predict_net = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
 
-    def forward(self, batch):
+    def forward(self, batch, annealing_factor=None):
         pyro.module('guide', self)
 
         seqs, obj_counts = batch
