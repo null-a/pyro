@@ -22,7 +22,7 @@ class Model(nn.Module):
         self.image_size = image_size
         x_size = num_chan * image_size**2
 
-        self.emission_net = MLP(z_size, [500, x_size], nn.ELU, output_non_linearity=False)
+        self.emission_net = MLP(z_size, [128, x_size], nn.ELU, output_non_linearity=False)
 
         # Locally linear transitions.
         # This follows notation in paper.
@@ -139,9 +139,9 @@ class Guide(nn.Module):
         self.x_size = x_size
 
         self.predict0_rnn = nn.RNN(x_size, 100, nonlinearity='relu', bidirectional=True)
-        self.predict0_net = NormalParams(100, z_size)
+        self.predict0_net = nn.Sequential(MLP(100, [100], nn.ELU), NormalParams(100, z_size))
 
-        self.predict_net = nn.Sequential(MLP(x_size + z_size, [500, 250], nn.ELU), NormalParams(250, z_size))
+        self.predict_net = nn.Sequential(MLP(x_size + z_size, [128], nn.ELU), NormalParams(128, z_size))
 
     def forward(self, batch, annealing_factor=None):
         pyro.module('guide', self)
