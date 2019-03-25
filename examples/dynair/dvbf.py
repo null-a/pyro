@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.functional import softplus
 
 import pyro
 import pyro.poutine as poutine
@@ -85,6 +86,17 @@ class Model(nn.Module):
         frames = []
         zs = []
 
+        w_sd0 = batch_expand(self.prototype.new_ones(self.z_size), batch_size)
+
+        # Prior over scale of w for t > 0.
+
+        # TODO: Remove this hack if this sticks around.
+        # (Scale is a hack to account for data sub-sampling without
+        # changing too much code. Hard-coded assuming data set/batch
+        # size I'm currently working with.)
+        with poutine.scale(None, 1. / 200):
+            w_sd = pyro.sample('w_sd', dist.Gamma(torch.ones(self.z_size) * 1., torch.ones(self.z_size) * 3.).independent(1))
+
         with pyro.iarange('data', batch_size):
             z_prev = None
             for t in range(seq_length):
@@ -95,10 +107,10 @@ class Model(nn.Module):
                 # transitions, and not to output latent state directly
                 # from the observation. (e.g. fix up predicted
                 # position rather than output position directly.)
-                w_sd = batch_expand(self.prototype.new_ones(self.z_size), batch_size)
+
                 # if t == 0:
                 #     w_sd = w_sd * 0.1
-                w = self.sample_w(t, w_mean, w_sd)
+                w = self.sample_w(t, w_mean, w_sd if t>0 else w_sd0)
 
                 z = self.transition(t, z_prev, w)
 
@@ -143,6 +155,8 @@ class Guide(nn.Module):
 
         self.predict_net = nn.Sequential(MLP(x_size + z_size, [200, 200], nn.ELU), NormalParams(200, z_size))
 
+        self.w_sd_param = nn.Parameter(torch.zeros(self.z_size) -1.5) # init. to ~0.2 (after softplus)
+
     def forward(self, batch, annealing_factor=None):
         pyro.module('guide', self)
 
@@ -154,6 +168,8 @@ class Guide(nn.Module):
                            self.image_size, self.image_size))
         assert_size(obj_counts, (batch_size,))
         assert all(1 == obj_counts)
+
+        pyro.sample('w_sd', dist.Delta(softplus(self.w_sd_param)).independent(1))
 
         with pyro.iarange('data', batch_size):
 
