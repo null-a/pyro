@@ -166,6 +166,15 @@ class Guide(nn.Module):
                 # predict the error in the transition.)
                 if t == 0:
                     # predict w0 from entire sequence.
+
+                    # TODO: It looks like two RNNs (fwd/back) don't
+                    # interact. So here I'm taking the final hidden
+                    # state of the backward net, but I'm not making
+                    # any use of the forward net. One thing to do
+                    # would be to take the final hidden state of the
+                    # forward net and concat it to the thing I'm
+                    # already using. That hid. state is:
+                    # rnn_outputs[-1,:,0:200]
                     rnn_outputs, _ = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
                     predict_hid = rnn_outputs[0, :, 200:]
                     w_mean, w_sd = self.predict0_net(predict_hid)
