@@ -167,7 +167,7 @@ class Guide(nn.Module):
                 if t == 0:
                     # predict w0 from entire sequence.
                     rnn_outputs, _ = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
-                    predict_hid = rnn_outputs[0, :, 100:]
+                    predict_hid = rnn_outputs[0, :, 200:]
                     w_mean, w_sd = self.predict0_net(predict_hid)
                 else:
                     # predict w from x and z_prev
