@@ -207,7 +207,7 @@ class DVBF(nn.Module):
         extra_frames = []
         seq_length = seqs.size(1)
 
-        for t in range(5):
+        for t in range(10):
             z = self.model.transition(seq_length+t, z_prev, None, deterministic=True)
             frame_mean = self.model.emission(z)
             extra_frames.append(frame_mean)
