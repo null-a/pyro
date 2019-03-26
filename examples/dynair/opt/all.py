@@ -232,6 +232,8 @@ def opt_all(X_split, Y_split, cfg, args, use_cuda, output_path, log_to_cond):
         ret = {'lr': lr}
         if not args.w is None:
             ret['weight_decay'] = args.w
+        elif module_name == 'model' and param_name in ['A', 'C']:
+            ret['weight_decay'] = 1.0
         return ret
 
     run_svi(dynair, list(zip(X_train, Y_train)), args.epochs, optim_args,
