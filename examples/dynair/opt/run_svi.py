@@ -34,7 +34,7 @@ def run_svi(mod, batches, num_epochs, optim_args, hook, output_path,
             # signals no step.
             grad_norm_dict['value'] = 0.0
             step = num_batches*i+j
-            annealing_factor = min(1., 0.01 + (step / 2e5))
+            annealing_factor = min(1., 0.01 + (step / 1e5))
             loss = svi.step(batch, annealing_factor)
             elbo = -loss * elbo_scale
             throttled_report_progress(i, j, step, elbo, grad_norm_dict['value'], t0, output_path)
