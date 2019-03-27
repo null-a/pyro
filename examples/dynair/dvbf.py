@@ -29,8 +29,6 @@ class Model(nn.Module):
         self.M = 16 # number of transition matrices
         self.A = nn.Parameter(self.prototype.new_zeros((self.M, z_size, z_size)))
         torch.nn.init.normal_(self.A, 0., 1e-3)
-        self.C = nn.Parameter(self.prototype.new_zeros((self.M, z_size, z_size)))
-        torch.nn.init.normal_(self.C, 0., 1e-3)
 
         # TODO: I don't see the arch. specified in the paper.
         self.alpha_net = nn.Sequential(nn.Linear(z_size, self.M), nn.Softmax(dim=1))
@@ -54,21 +52,19 @@ class Model(nn.Module):
 
             batch_size = z_prev.size(0)
             alpha = self.alpha_net(z_prev)
-            # Per-data point transition matrices, A & C:
+            # Per-data point transition matrices:
             A = torch.einsum('ij,jkl->ikl', (alpha.clone(), self.A.clone()))
             assert A.shape == (batch_size, self.z_size, self.z_size)
-            C = torch.einsum('ij,jkl->ikl', (alpha.clone(), self.C.clone()))
-            assert C.shape == (batch_size, self.z_size, self.z_size)
 
             # Batched matrix-vector multiple (between per data point
-            # transition matrices and batch of z_prev/w)
+            # transition matrices and batch of z_prev)
             Az_prev = torch.einsum('ijk,ik->ij', (A.clone(), z_prev.clone()))
             assert Az_prev.shape == (batch_size, self.z_size)
 
             if not deterministic:
-                Cw = torch.einsum('ijk,ik->ij', (C.clone(), w.clone()))
-                assert Cw.shape == (batch_size, self.z_size)
-                return Az_prev + Cw
+                # *additive* noise for now. the paper has (in one example)
+                # an extra mat. mul. in here.
+                return Az_prev + w
             else:
                 assert w is None
                 return Az_prev
