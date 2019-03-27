@@ -95,7 +95,9 @@ class Model(nn.Module):
         # changing too much code. Hard-coded assuming data set/batch
         # size I'm currently working with.)
         with poutine.scale(None, 1. / 200):
-            w_sd = pyro.sample('w_sd', dist.Gamma(torch.ones(self.z_size) * 1., torch.ones(self.z_size) * 3.).independent(1))
+            w_sd = pyro.sample('w_sd',
+                               dist.Gamma(self.prototype.new_ones(self.z_size) * 1.,
+                                          self.prototype.new_ones(self.z_size) * 3.).independent(1))
 
         with pyro.iarange('data', batch_size):
             z_prev = None
