@@ -131,18 +131,15 @@ def sample_scene_bounce(seq_len, min_num_objs, max_num_objs, rotate, translate, 
 
     obj_downscale_factor = 3.5
     obj_pixel_size = SIZE/float(obj_downscale_factor)
-    b = obj_pixel_size / 2.0
+    b = np.ceil(obj_pixel_size / 2.0)
 
     # Sample velocity.
-    x_dir = np.random.randint(0, 2)
-    x_vel = np.random.normal(3, 0.9)
-    if x_dir:
-        x_vel *= -1.0
 
-    y_dir = np.random.randint(0, 2)
-    y_vel = np.random.normal(3, 0.9)
-    if y_dir:
-        y_vel *= -1.0
+    speed = np.random.normal(2, 0.7)
+    theta = np.random.randint(0, 360)
+
+    x_vel = speed * np.sin(theta)
+    y_vel = speed * np.cos(theta)
 
     assert x_vel < SIZE
     assert y_vel < SIZE
