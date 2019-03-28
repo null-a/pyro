@@ -2,69 +2,44 @@ from functools import partial
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
+import torch.nn as nn
 from PIL import Image, ImageDraw
 from data import load_data
 from guide import InputCnn, ImgEmbedMlp, ImgEmbedResNet, CombineMixin
 from modules import MLP
+from data import load_data
 
-# Prepare training data.
-def load(path):
-    X, Y, T, O = load_data('./out.npz')
-    imgs = []
-    obj_ids = []
-    positions = []
-    for x, y, t, o in zip(X, Y, T, O):
-        # Use only the first frame of each sequence to begin with.
-        for i in range(y):
-            imgs.append(x[0])
-            one_hot = torch.zeros(3)
-            one_hot[o[i]] = 1
-            obj_ids.append(one_hot)
-            position = torch.tensor(t[0, i, 0:2]).float()
-            positions.append((position - 25.0) / 25.0) # center and scale (x,y) position
-    return torch.stack(imgs), torch.stack(obj_ids), torch.stack(positions)
+all_seqs, _, all_tracks, _ = load_data('./ball-gray-20k-len-30-20x20.npz')
 
-all_img, all_obj_ids, all_pos = load('./out.npz')
+all_tracks = all_tracks.float()
 
-all_img = all_img[0:14000]
-all_obj_ids = all_obj_ids[0:14000]
-all_pos = all_pos[0:14000]
-
-# print(all_img.shape)
-# print(all_obj_ids.shape)
-# print(all_pos.shape)
-# assert False
+x_size = 20 * 20
+all_seqs = all_seqs.reshape(20000, 30, x_size) # flatten images
+all_tracks = all_tracks.reshape(20000, 30, 4) # drop singleton dim
 
 
 bs = 50 # batch_size
-img_train = torch.stack(torch.split(all_img[0:13000], bs))
-obj_ids_train = torch.stack(torch.split(all_obj_ids[0:13000], bs))
-pos_train = torch.stack(torch.split(all_pos[0:13000], bs))
+train_seqs = torch.stack(torch.split(all_seqs[0:18000], bs))
+train_tracks = torch.stack(torch.split(all_tracks[0:18000], bs))
+test_seqs = torch.stack(torch.split(all_seqs[18000:], bs))
+test_tracks = torch.stack(torch.split(all_tracks[18000:], bs))
 
-img_test = torch.stack(torch.split(all_img[13000:], bs))
-obj_ids_test = torch.stack(torch.split(all_obj_ids[13000:], bs))
-pos_test = torch.stack(torch.split(all_pos[13000:], bs))
+rnn = nn.RNN(x_size, 200, nonlinearity='relu', batch_first=True, bidirectional=True)
+#rnn = nn.GRU(x_size, 200, batch_first=True, bidirectional=True)
+mlp = MLP(400, [200, 4], nn.ELU, output_non_linearity=False)
 
+# net = CombineMixin(InputCnn,
+#                    #partial(ImgEmbedResNet, hids=[1000, 1000]),
+#                    partial(MLP, hids=[800, 800, 2], output_non_linearity=False),
+#                    (3,50,50), # main input size
+#                    3)         # side input size
 
-net = CombineMixin(InputCnn,
-                   #partial(ImgEmbedResNet, hids=[1000, 1000]),
-                   partial(MLP, hids=[800, 800, 2], output_non_linearity=False),
-                   (3,50,50), # main input size
-                   3)         # side input size
+params = []
+params.extend(list(rnn.parameters()))
+params.extend(list(mlp.parameters()))
 
-optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(params, lr=0.001)
 
-def do_epoch(img_b, obj_ids_b, pos_b, optimize):
-    epoch_loss = 0.0
-    for img, obj_ids, pos in zip(img_b, obj_ids_b, pos_b):
-        out = net(img, obj_ids)
-        loss = torch.pow(out - pos, 2).sum()
-        epoch_loss += loss.item()
-        if optimize:
-            loss.backward()
-            optimizer.step()
-            net.zero_grad()
-    return epoch_loss / (img_b.size(0) * img_b.size(1))
 
 def img_to_arr(img):
     #assert img.mode == 'RGBA'
@@ -90,43 +65,53 @@ def draw_bounding_box(nparr, x, y, w, h, color='red'):
 for i in range(1000):
     # train
     train_epoch_loss = 0.0
-    for img, obj_ids, pos in zip(img_train, obj_ids_train, pos_train):
-        out = net(img, obj_ids)
-        loss = torch.pow(out - pos, 2).sum()
+    for seqs, tracks in zip(train_seqs, train_tracks):
+
+        rnn_outputs, _ = rnn(seqs)
+        mlp_input1 = rnn_outputs[:, 0, 200:]
+        mlp_input2 = rnn_outputs[:, -1, 0:200]
+        out = mlp(torch.cat((mlp_input1, mlp_input2), 1))
+
+        # We're trying to output the pos/vel at the first first.
+        loss = torch.pow(out - tracks[:, 0], 2).sum()
         train_epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
-        net.zero_grad()
-    train_epoch_loss /= (img_train.size(0) * img_train.size(1))
+        rnn.zero_grad()
+        mlp.zero_grad()
+    train_epoch_loss /= (train_seqs.size(0) * train_seqs.size(1))
 
     # test
     test_epoch_loss = 0.0
     outputs = []
     losses = []
-    for img, obj_ids, pos in zip(img_test, obj_ids_test, pos_test):
-        out = net(img, obj_ids).detach()
-        loss = torch.pow(out - pos, 2).sum(1)
+    for seqs, tracks in zip(test_seqs, test_tracks):
+        rnn_outputs, _ = rnn(seqs)
+        mlp_input1 = rnn_outputs[:, 0, 200:]
+        mlp_input2 = rnn_outputs[:, -1, 0:200]
+        out = mlp(torch.cat((mlp_input1, mlp_input2), 1)).detach()
+
+        loss = torch.pow(out - tracks[:, 0], 2).sum(1)
         outputs.append(out)
         losses.append(loss)
         test_epoch_loss += loss.sum().item()
-    test_epoch_loss /= (img_test.size(0) * img_test.size(1))
+    test_epoch_loss /= (test_seqs.size(0) * test_seqs.size(1))
+
     outputs = torch.cat(outputs)
     losses = torch.cat(losses)
 
+
+    print('\n\n==================================================\n\n')
     print('%6d | train : %.4f | test : %.4f' % (i, train_epoch_loss, test_epoch_loss))
 
-    if (i+1) % 10 == 0:
+    top_n_ix = losses.argsort(descending=True)[0:10].tolist()
+    for ix in top_n_ix:
+        print(ix)
+        print(losses[ix].item())
+        print(outputs[ix])
+        print(all_tracks[18000+ix, 0])
+        print('-------------------------------------')
 
-        plt.hist(losses)
+    if (i+1) % 50 == 0:
+        plt.hist(losses, bins=50)
         plt.show()
-
-        top_n_ix = losses.argsort(descending=True)[0:5].tolist()
-        for ix in top_n_ix:
-            obj_id = all_obj_ids[13000+ix].argmax().item()
-            color = ["pink", "gray", "yellow"][obj_id]
-            p = outputs[ix]
-            x = (p[0] * 25) + 25
-            y = (p[1] * 25) + 25
-            img = draw_bounding_box(all_img[13000+ix].numpy(), x, y, 14.3, 14.3, color)
-            plt.imshow(img.transpose((1,2,0)), interpolation='none')
-            plt.show()
