@@ -145,8 +145,8 @@ def sample_scene_bounce(seq_len, min_num_objs, max_num_objs, rotate, translate, 
     assert y_vel < SIZE
 
     # Sample start position.
-    x = np.random.randint(b, SIZE-b)
-    y = np.random.randint(b, SIZE-b)
+    x = np.random.randint(b+2, SIZE-(b+2))
+    y = np.random.randint(b+2, SIZE-(b+2))
 
     num_objs = 1
     frames = []
