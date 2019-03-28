@@ -163,10 +163,10 @@ def sample_scene_bounce(seq_len, min_num_objs, max_num_objs, rotate, translate, 
         acc = Image.alpha_composite(acc, s)
         frames.append(acc.convert('L' if output_grayscale else 'RGB'))
 
-        tracks.append([[x-(obj_pixel_size/2),
-                        y-(obj_pixel_size/2),
-                        obj_pixel_size,  # width
-                        obj_pixel_size]])
+        tracks.append([[x,
+                        y,
+                        x_vel,
+                        y_vel]])
 
         # Update position based on velocity.
         x = x + x_vel
