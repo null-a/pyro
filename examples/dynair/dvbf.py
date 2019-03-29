@@ -23,7 +23,7 @@ class Model(nn.Module):
         self.image_size = image_size
         x_size = num_chan * image_size**2
 
-        self.emission_net = MLP(z_size, [200, 200, x_size], nn.ELU, output_non_linearity=False)
+        self.emission_net = MLP(z_size, [200, 200, 200, x_size], nn.ELU, output_non_linearity=False)
 
         # Locally linear transitions.
         # This follows notation in paper.
