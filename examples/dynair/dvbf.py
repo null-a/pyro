@@ -29,10 +29,11 @@ class Model(nn.Module):
         # This follows notation in paper.
         self.M = 16 # number of transition matrices
         self.A = nn.Parameter(self.prototype.new_zeros((self.M, z_size, z_size)))
-        torch.nn.init.normal_(self.A, 0., 1e-3)
+        for A_i in self.A:
+            torch.nn.init.eye_(A_i)
 
-        # TODO: I don't see the arch. specified in the paper.
-        self.alpha_net = nn.Sequential(nn.Linear(z_size, self.M), nn.Softmax(dim=1))
+        self.alpha_net = nn.Sequential(nn.Linear(z_size, 50), nn.ELU(),
+                                       nn.Linear(50, self.M), nn.Softmax(dim=1))
 
 
     def emission(self, z):
