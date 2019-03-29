@@ -152,8 +152,9 @@ class Guide(nn.Module):
         x_size = num_chan * image_size**2
         self.x_size = x_size
 
-        self.predict0_rnn = nn.RNN(x_size, 200, nonlinearity='relu', bidirectional=True)
-        self.predict0_net = nn.Sequential(MLP(200, [200], nn.ELU), NormalParams(200, z_size))
+        self.rnn_hid_size = 200
+        self.predict0_rnn = nn.RNN(x_size, self.rnn_hid_size, nonlinearity='relu', bidirectional=True)
+        self.predict0_net = nn.Sequential(MLP(self.rnn_hid_size * 2, [200], nn.ELU), NormalParams(200, z_size))
 
         self.predict_net = nn.Sequential(MLP(x_size + z_size, [200, 200], nn.ELU), NormalParams(200, z_size))
 
@@ -194,7 +195,8 @@ class Guide(nn.Module):
                     # already using. That hid. state is:
                     # rnn_outputs[-1,:,0:200]
                     rnn_outputs, _ = self.predict0_rnn(seqs.reshape(batch_size, seq_length, -1).transpose(0, 1))
-                    predict_hid = rnn_outputs[0, :, 200:]
+                    predict_hid = torch.cat((rnn_outputs[0, :, self.rnn_hid_size:],
+                                             rnn_outputs[-1, :, 0:self.rnn_hid_size]), 1)
                     w_mean, w_sd = self.predict0_net(predict_hid)
                 else:
                     # predict w from x and z_prev
