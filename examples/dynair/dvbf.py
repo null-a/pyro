@@ -157,7 +157,7 @@ class Guide(nn.Module):
         self.predict0_rnn = nn.RNN(x_size, self.rnn_hid_size, nonlinearity='relu', bidirectional=True)
         self.predict0_net = nn.Sequential(MLP(self.rnn_hid_size * 2, [200], nn.ELU), NormalParams(200, z_size))
 
-        self.predict_net = nn.Sequential(MLP(x_size + z_size, [200, 200], nn.ELU), NormalParams(200, z_size))
+        self.predict_net = nn.Sequential(MLP(x_size + 2 * z_size, [200, 200], nn.ELU), NormalParams(200, z_size))
 
         self.w_sd_param = nn.Parameter(torch.zeros(self.z_size) -1.5) # init. to ~0.2 (after softplus)
 
@@ -202,7 +202,13 @@ class Guide(nn.Module):
                 else:
                     # predict w from x and z_prev
                     x = seqs[:,t].reshape(-1, self.x_size)
-                    w_mean, w_sd = self.predict_net(torch.cat((x, z_prev), 1))
+
+                    # TODO: This duplicates computation, since we also
+                    # transition from z_prev below. I ought to improve
+                    # efficiency if I stick with this.
+                    z_prop = self.model.transition(t, z_prev, None, deterministic=True)
+
+                    w_mean, w_sd = self.predict_net(torch.cat((x, z_prev, z_prop), 1))
 
                 w = pyro.sample('w_{}'.format(t),
                                 dist.Normal(w_mean, w_sd).independent(1))
