@@ -143,7 +143,7 @@ class Guide(nn.Module):
     def __init__(self, model, z_size, num_chan, image_size, use_cuda=False):
         super(Guide, self).__init__()
 
-        self.model = model
+        self.transition = model.transition
         self.prototype = torch.tensor(0.).cuda() if use_cuda else torch.tensor(0.)
 
         self.z_size = z_size
@@ -208,13 +208,13 @@ class Guide(nn.Module):
                     # TODO: This duplicates computation, since we also
                     # transition from z_prev below. I ought to improve
                     # efficiency if I stick with this.
-                    z_prop = self.model.transition(t, z_prev, None, deterministic=True)
+                    z_prop = self.transition(t, z_prev, None, deterministic=True)
 
                     w_mean, w_sd = self.predict_net(torch.cat((x, z_prev, z_prop), 1))
 
                 w = pyro.sample('w_{}'.format(t),
                                 dist.Normal(w_mean, w_sd).independent(1))
-                z = self.model.transition(t, z_prev, w)
+                z = self.transition(t, z_prev, w)
                 z_prev = z
 
 
