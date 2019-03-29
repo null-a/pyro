@@ -173,7 +173,9 @@ class Guide(nn.Module):
         assert_size(obj_counts, (batch_size,))
         assert all(1 == obj_counts)
 
-        pyro.sample('w_sd', dist.Delta(softplus(self.w_sd_param)).independent(1))
+        # See similar scaling in model for an explanation of why this is here.
+        with poutine.scale(None, 1. / 200):
+            pyro.sample('w_sd', dist.Delta(softplus(self.w_sd_param)).independent(1))
 
         with pyro.iarange('data', batch_size):
 
