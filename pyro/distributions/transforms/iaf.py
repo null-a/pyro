@@ -6,12 +6,7 @@ from torch.distributions import constraints
 
 from pyro.distributions.torch_transform import TransformModule
 from pyro.distributions.util import copy_docs_from
-
-# This helper function clamps gradients but still passes through the gradient in clamped regions
-
-
-def clamp_preserve_gradients(x, min, max):
-    return x + (x.clamp(min, max) - x).detach()
+from pyro.distributions.transforms.utils import clamp_preserve_gradients
 
 
 @copy_docs_from(TransformModule)
@@ -69,6 +64,7 @@ class InverseAutoregressiveFlow(TransformModule):
     codomain = constraints.real
     bijective = True
     event_dim = 1
+    autoregressive = True
 
     def __init__(self, autoregressive_nn, log_scale_min_clip=-5., log_scale_max_clip=3.):
         super(InverseAutoregressiveFlow, self).__init__(cache_size=1)

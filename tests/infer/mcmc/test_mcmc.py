@@ -10,31 +10,35 @@ import pyro.distributions as dist
 from pyro import poutine
 from pyro.infer.mcmc import HMC, NUTS
 from pyro.infer.mcmc.mcmc import MCMC, _SingleSampler, _ParallelSampler
-from pyro.infer.mcmc.trace_kernel import TraceKernel
+from pyro.infer.mcmc.mcmc_kernel import MCMCKernel
 from pyro.util import optional
 from tests.common import assert_equal, skipif_param
 
 
-class PriorKernel(TraceKernel):
+class PriorKernel(MCMCKernel):
     """
     Disregards the value of the current trace (or observed data) and
     samples a value from the model's prior.
     """
     def __init__(self, model):
         self.model = model
+        self.transforms = {}
         self.data = None
+        self._prototype_trace = None
 
     def setup(self, warmup_steps, data):
         self.data = data
+        self._prototype_trace = poutine.trace(self.model).get_trace(data)
 
     def cleanup(self):
         self.data = None
 
-    def initial_trace(self):
-        return poutine.trace(self.model).get_trace(self.data)
+    def initial_params(self):
+        trace = poutine.trace(self.model).get_trace(self.data)
+        return {k: v["value"] for k, v in trace.iter_stochastic_nodes()}
 
     def sample(self, trace):
-        return self.initial_trace()
+        return self.initial_params()
 
 
 def normal_normal_model(data):
@@ -58,7 +62,7 @@ def test_mcmc_interface():
 
 @pytest.mark.parametrize("num_chains", [
     1,
-    skipif_param(2, condition="CI" in os.environ, reason="CI only provides 1 CPU"),
+    skipif_param(2, condition="CI" in os.environ, reason="CI only provides 2-core CPU"),
 ])
 def test_mcmc_diagnostics(num_chains):
     data = torch.tensor([2.0]).repeat(3)
@@ -100,12 +104,14 @@ def _empty_model():
 @pytest.mark.parametrize("jit", [False, True])
 @pytest.mark.parametrize("num_chains", [
     1,
-    skipif_param(2, condition="CI" in os.environ, reason="CI only provides 1 CPU")
+    skipif_param(2, condition="CI" in os.environ, reason="CI only provides 2-core CPU")
 ])
 def test_empty_sample_sites(kernel, kernel_args, jit, num_chains):
     num_warmup, num_samples = 10, 10
     kern = kernel(kernel_args, jit_compile=jit)
-    mcmc = MCMC(kern, num_samples=num_samples, warmup_steps=num_warmup, num_chains=num_chains).run()
+    mp_context = "spawn" if "CUDA_TEST" in os.environ else None
+    mcmc = MCMC(kern, num_samples=num_samples, warmup_steps=num_warmup, num_chains=num_chains, mp_context=mp_context)\
+        .run()
     expected = torch.ones(num_samples) if num_chains <= 1 else torch.ones(num_chains, num_samples)
     assert_equal(mcmc.marginal(["_RETURN"]).empirical["_RETURN"].enumerate_support(),
                  expected)

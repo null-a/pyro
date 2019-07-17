@@ -6,10 +6,16 @@ import torch
 
 import pyro
 import pyro.distributions as dist
-from pyro.distributions.util import logsumexp
+from pyro.distributions.util import scalar_like
 from pyro.infer.mcmc.hmc import HMC
 from pyro.ops.integrator import velocity_verlet
 from pyro.util import optional, torch_isnan
+
+
+def _logaddexp(x, y):
+    minval, maxval = (x, y) if x < y else (y, x)
+    return (minval - maxval).exp().log1p() + maxval
+
 
 # sum_accept_probs and num_proposals are used to calculate
 # the statistic accept_prob for Dual Averaging scheme;
@@ -52,6 +58,8 @@ class NUTS(HMC):
         Radford M. Neal
 
     :param model: Python callable containing Pyro primitives.
+    :param potential_fn: Python callable calculating potential energy with input
+        is a dict of real support parameters.
     :param float step_size: Determines the size of a single step taken by the
         verlet integrator while computing the trajectory using Hamiltonian
         dynamics. If not specified, it will be set to 1.
@@ -101,14 +109,15 @@ class NUTS(HMC):
         ...     return y
         >>>
         >>> nuts_kernel = NUTS(model, adapt_step_size=True)
-        >>> mcmc_run = MCMC(nuts_kernel, num_samples=500, warmup_steps=300).run(data)
-        >>> posterior = mcmc_run.marginal('beta').empirical['beta']
-        >>> posterior.mean  # doctest: +SKIP
+        >>> mcmc = MCMC(nuts_kernel, num_samples=500, warmup_steps=300)
+        >>> mcmc.run(data)
+        >>> mcmc.get_samples()['beta'].mean(0)  # doctest: +SKIP
         tensor([ 0.9221,  1.9464,  2.9228])
     """
 
     def __init__(self,
-                 model,
+                 model=None,
+                 potential_fn=None,
                  step_size=1,
                  adapt_step_size=True,
                  adapt_mass_matrix=True,
@@ -122,6 +131,7 @@ class NUTS(HMC):
                  target_accept_prob=0.8,
                  max_tree_depth=10):
         super(NUTS, self).__init__(model,
+                                   potential_fn,
                                    step_size,
                                    adapt_step_size=adapt_step_size,
                                    adapt_mass_matrix=adapt_mass_matrix,
@@ -163,11 +173,11 @@ class NUTS(HMC):
     def _build_basetree(self, z, r, z_grads, log_slice, direction, energy_current):
         step_size = self.step_size if direction == 1 else -self.step_size
         z_new, r_new, z_grads, potential_energy = velocity_verlet(
-            z, r, self._potential_energy, self.inverse_mass_matrix, step_size, z_grads=z_grads)
+            z, r, self.potential_fn, self.inverse_mass_matrix, step_size, z_grads=z_grads)
         r_new_flat = torch.cat([r_new[site_name].reshape(-1) for site_name in sorted(r_new)])
         energy_new = potential_energy + self._kinetic_energy(r_new)
         # handle the NaN case
-        energy_new = energy_new.new_tensor(float("inf")) if torch_isnan(energy_new) else energy_new
+        energy_new = scalar_like(energy_new, float("inf")) if torch_isnan(energy_new) else energy_new
         sliced_energy = energy_new + log_slice
         diverging = (sliced_energy > self._max_sliced_energy)
         delta_energy = energy_new - energy_current
@@ -180,8 +190,7 @@ class NUTS(HMC):
             #   we eliminate states which p(z, r) < u, or dE > 0.
             # Due to this elimination (and stop doubling conditions),
             #   the weight of binary tree might not equal to 2^tree_depth.
-            tree_weight = (sliced_energy.new_ones(()) if sliced_energy <= 0
-                           else sliced_energy.new_zeros(()))
+            tree_weight = scalar_like(sliced_energy, 1. if sliced_energy <= 0 else 0.)
 
         return _TreeInfo(z_new, r_new, z_grads, z_new, r_new, z_grads, z_new, potential_energy,
                          z_grads, r_new_flat, tree_weight, False, diverging, accept_prob, 1)
@@ -216,7 +225,7 @@ class NUTS(HMC):
                                            direction, tree_depth-1, energy_current)
 
         if self.use_multinomial_sampling:
-            tree_weight = logsumexp(torch.stack([half_tree.weight, other_half_tree.weight]), dim=0)
+            tree_weight = _logaddexp(half_tree.weight, other_half_tree.weight)
         else:
             tree_weight = half_tree.weight + other_half_tree.weight
         sum_accept_probs = half_tree.sum_accept_probs + other_half_tree.sum_accept_probs
@@ -232,7 +241,7 @@ class NUTS(HMC):
             #   we choose the proposal from the first half
             #   (any is fine, because the probability of picking it at the end is 0!).
             other_half_tree_prob = (other_half_tree.weight / tree_weight if tree_weight > 0
-                                    else tree_weight.new_zeros(()))
+                                    else scalar_like(tree_weight, 0.))
         is_other_half_tree = pyro.sample("is_other_half_tree",
                                          dist.Bernoulli(probs=other_half_tree_prob))
 
@@ -268,13 +277,20 @@ class NUTS(HMC):
                          z_proposal_pe, z_proposal_grads, r_sum, tree_weight, turning, diverging,
                          sum_accept_probs, num_proposals)
 
-    def sample(self, trace):
+    def sample(self, params):
         z, potential_energy, z_grads = self._fetch_from_cache()
+        # recompute PE when cache is cleared
+        if z is None:
+            z = params
+            potential_energy = self.potential_fn(z)
+            self._cache(z, potential_energy)
         # return early if no sample sites
-        if not z:
-            self._accept_cnt += 1
+        elif len(z) == 0:
             self._t += 1
-            return self._get_trace(z)
+            self._mean_accept_prob = 1.
+            if self._t > self._warmup_steps:
+                self._accept_cnt += 1
+            return z
         r, r_flat = self._sample_r(name="r_t={}".format(self._t))
         energy_current = self._kinetic_energy(r) + potential_energy
 
@@ -300,7 +316,7 @@ class NUTS(HMC):
             # sample log_slice directly using `energy`, so as to avoid potential underflow or
             # overflow issues ([2]).
             slice_exp_term = pyro.sample("slicevar_exp_t={}".format(self._t),
-                                         dist.Exponential(energy_current.new_tensor(1.)))
+                                         dist.Exponential(scalar_like(energy_current, 1.)))
             log_slice = -energy_current - slice_exp_term
 
         z_left = z_right = z
@@ -310,10 +326,7 @@ class NUTS(HMC):
         r_sum = r_flat
         sum_accept_probs = 0.
         num_proposals = 0
-        if self.use_multinomial_sampling:
-            tree_weight = energy_current.new_zeros(())
-        else:
-            tree_weight = energy_current.new_ones(())
+        tree_weight = scalar_like(energy_current, 0. if self.use_multinomial_sampling else 1.)
 
         # Temporarily disable distributions args checking as
         # NaNs are expected during step size adaptation.
@@ -322,7 +335,7 @@ class NUTS(HMC):
             tree_depth = 0
             while tree_depth < self._max_tree_depth:
                 direction = pyro.sample("direction_t={}_treedepth={}".format(self._t, tree_depth),
-                                        dist.Bernoulli(probs=tree_weight.new_tensor(0.5)))
+                                        dist.Bernoulli(probs=scalar_like(tree_weight, 0.5)))
                 direction = int(direction.item())
                 if direction == 1:  # go to the right, start from the right leaf of current tree
                     new_tree = self._build_tree(z_right, r_right, z_right_grads, log_slice,
@@ -341,7 +354,13 @@ class NUTS(HMC):
                 sum_accept_probs = sum_accept_probs + new_tree.sum_accept_probs
                 num_proposals = num_proposals + new_tree.num_proposals
 
-                if new_tree.turning or new_tree.diverging:  # stop doubling
+                # stop doubling
+                if new_tree.diverging:
+                    if self._t >= self._warmup_steps:
+                        self._divergences.append(self._t - self._warmup_steps)
+                    break
+
+                if new_tree.turning:
                     break
 
                 tree_depth += 1
@@ -351,8 +370,8 @@ class NUTS(HMC):
                 else:
                     new_tree_prob = new_tree.weight / tree_weight
                 rand = pyro.sample("rand_t={}_treedepth={}".format(self._t, tree_depth),
-                                   dist.Uniform(new_tree_prob.new_tensor(0.),
-                                                new_tree_prob.new_tensor(1.)))
+                                   dist.Uniform(scalar_like(new_tree_prob, 0.),
+                                                scalar_like(new_tree_prob, 1.)))
                 if rand < new_tree_prob:
                     accepted = True
                     z = new_tree.z_proposal
@@ -363,20 +382,20 @@ class NUTS(HMC):
                     break
                 else:  # update tree_weight
                     if self.use_multinomial_sampling:
-                        tree_weight = logsumexp(torch.stack([tree_weight, new_tree.weight]), dim=0)
+                        tree_weight = _logaddexp(tree_weight, new_tree.weight)
                     else:
                         tree_weight = tree_weight + new_tree.weight
 
-        if self._t < self._warmup_steps:
-            accept_prob = sum_accept_probs / num_proposals
-            self._adapter.step(self._t, z, accept_prob)
-
-        if accepted:
-            self._accept_cnt += 1
+        accept_prob = sum_accept_probs / num_proposals
 
         self._t += 1
-        # get trace with the constrained values for `z`.
-        z = z.copy()
-        for name, transform in self.transforms.items():
-            z[name] = transform.inv(z[name])
-        return self._get_trace(z)
+        if self._t > self._warmup_steps:
+            n = self._t - self._warmup_steps
+            if accepted:
+                self._accept_cnt += 1
+        else:
+            n = self._t
+            self._adapter.step(self._t, z, accept_prob)
+        self._mean_accept_prob += (accept_prob.item() - self._mean_accept_prob) / n
+
+        return z.copy()

@@ -11,11 +11,34 @@ import pyro
 import pyro.distributions as dist
 from pyro import poutine
 from pyro.infer import TraceEnum_ELBO
-from pyro.infer.discrete import infer_discrete
+from pyro.infer.discrete import TraceEnumSample_ELBO, infer_discrete
 from pyro.infer.enum import config_enumerate
 from tests.common import assert_equal
 
 logger = logging.getLogger(__name__)
+
+
+def elbo_infer_discrete(model, first_available_dim, temperature):
+    """
+    Wrapper around ``TraceEnumSample_ELBO`` to test agreement with
+    ``TraceEnum_ELBO`` and then return ``.sample_saved()``.
+    """
+    assert temperature == 1
+    max_plate_nesting = -first_available_dim - 1
+    expected_elbo = TraceEnum_ELBO(max_plate_nesting=max_plate_nesting)
+    actual_elbo = TraceEnumSample_ELBO(max_plate_nesting=max_plate_nesting)
+
+    def empty_guide(*args, **kwargs):
+        pass
+
+    def inferred_model(*args, **kwargs):
+        with poutine.block():
+            expected_loss = expected_elbo.loss(model, empty_guide, *args, **kwargs)
+            actual_loss = actual_elbo.loss(model, empty_guide, *args, **kwargs)
+        assert_equal(actual_loss, expected_loss)
+        return actual_elbo.sample_saved()
+
+    return inferred_model
 
 
 def log_mean_prob(trace, particle_dim):
@@ -34,8 +57,38 @@ def log_mean_prob(trace, particle_dim):
     return total.logsumexp(0) - math.log(num_particles)
 
 
-@pytest.mark.parametrize('temperature', [0, 1], ids=['map', 'sample'])
-def test_distribution_1(temperature):
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+@pytest.mark.parametrize('plate_size', [2])
+def test_plate_smoke(infer, temperature, plate_size):
+    #       +-----------------+
+    #  z1 --|--> z2 ---> x2   |
+    #       |               N | for N in {1,2}
+    #       +-----------------+
+
+    @config_enumerate
+    def model():
+        p = pyro.param("p", torch.tensor([0.25, 0.75]))
+        q = pyro.param("q", torch.tensor([[0.25, 0.75], [0.75, 0.25]]))
+        loc = pyro.param("loc", torch.tensor([-1., 1.]))
+        z1 = pyro.sample("z1", dist.Categorical(p))
+        with pyro.plate("plate", plate_size):
+            z2 = pyro.sample("z2", dist.Categorical(q[z1]))
+            pyro.sample("x2", dist.Normal(loc[z2], 1.), obs=torch.ones(plate_size))
+
+    first_available_dim = -2
+    infer(model, first_available_dim, temperature)()
+
+
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+def test_distribution_1(infer, temperature):
     #      +-------+
     #  z --|--> x  |
     #      +-------+
@@ -52,7 +105,7 @@ def test_distribution_1(temperature):
                 pyro.sample("x", dist.Normal(z, 1.), obs=data)
 
     first_available_dim = -3
-    sampled_model = infer_discrete(model, first_available_dim, temperature)
+    sampled_model = infer(model, first_available_dim, temperature)
     sampled_trace = poutine.trace(sampled_model).get_trace(num_particles)
     conditioned_traces = {z: poutine.trace(model).get_trace(z=torch.tensor(z)) for z in [0., 1.]}
 
@@ -67,8 +120,12 @@ def test_distribution_1(temperature):
     assert_equal(actual_z_mean, expected_z_mean, prec=1e-2)
 
 
-@pytest.mark.parametrize('temperature', [0, 1], ids=['map', 'sample'])
-def test_distribution_2(temperature):
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+def test_distribution_2(infer, temperature):
     #       +--------+
     #  z1 --|--> x1  |
     #   |   |        |
@@ -92,7 +149,7 @@ def test_distribution_2(temperature):
                 pyro.sample("x2", dist.Normal(loc[z2], 1.), obs=data[1])
 
     first_available_dim = -3
-    sampled_model = infer_discrete(model, first_available_dim, temperature)
+    sampled_model = infer(model, first_available_dim, temperature)
     sampled_trace = poutine.trace(
         sampled_model).get_trace(num_particles)
     conditioned_traces = {(z1, z2): poutine.trace(model).get_trace(z1=torch.tensor(z1),
@@ -115,8 +172,12 @@ def test_distribution_2(temperature):
     assert_equal(expected_probs, actual_probs, prec=1e-2)
 
 
-@pytest.mark.parametrize('temperature', [0, 1], ids=['map', 'sample'])
-def test_distribution_3(temperature):
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+def test_distribution_3(infer, temperature):
     #       +---------+  +---------------+
     #  z1 --|--> x1   |  |  z2 ---> x2   |
     #       |       3 |  |             2 |
@@ -137,7 +198,7 @@ def test_distribution_3(temperature):
                 pyro.sample("x2", dist.Normal(loc[z2], 1.), obs=data[1])
 
     first_available_dim = -3
-    sampled_model = infer_discrete(model, first_available_dim, temperature)
+    sampled_model = infer(model, first_available_dim, temperature)
     sampled_trace = poutine.trace(
         sampled_model).get_trace(num_particles)
     conditioned_traces = {(z1, z20, z21): poutine.trace(model).get_trace(z1=torch.tensor(z1),
@@ -161,9 +222,51 @@ def test_distribution_3(temperature):
     assert_equal(expected_probs.reshape(-1), actual_probs.reshape(-1), prec=1e-2)
 
 
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+def test_distribution_masked(infer, temperature):
+    #      +-------+
+    #  z --|--> x  |
+    #      +-------+
+    num_particles = 10000
+    data = torch.tensor([1., 2., 3.])
+    mask = torch.tensor([True, False, False])
+
+    @config_enumerate
+    def model(num_particles=1, z=None):
+        p = pyro.param("p", torch.tensor(0.25))
+        with pyro.plate("num_particles", num_particles, dim=-2):
+            z = pyro.sample("z", dist.Bernoulli(p), obs=z)
+            logger.info("z.shape = {}".format(z.shape))
+            with pyro.plate("data", 3), poutine.mask(mask=mask):
+                pyro.sample("x", dist.Normal(z, 1.), obs=data)
+
+    first_available_dim = -3
+    sampled_model = infer(model, first_available_dim, temperature)
+    sampled_trace = poutine.trace(sampled_model).get_trace(num_particles)
+    conditioned_traces = {z: poutine.trace(model).get_trace(z=torch.tensor(z)) for z in [0., 1.]}
+
+    # Check  posterior over z.
+    actual_z_mean = sampled_trace.nodes["z"]["value"].mean()
+    if temperature:
+        expected_z_mean = 1 / (1 + (conditioned_traces[0].log_prob_sum() -
+                                    conditioned_traces[1].log_prob_sum()).exp())
+    else:
+        expected_z_mean = (conditioned_traces[1].log_prob_sum() >
+                           conditioned_traces[0].log_prob_sum()).float()
+    assert_equal(actual_z_mean, expected_z_mean, prec=1e-2)
+
+
 @pytest.mark.parametrize('length', [1, 2, 10, 100])
-@pytest.mark.parametrize('temperature', [0, 1], ids=['map', 'sample'])
-def test_hmm_smoke(temperature, length):
+@pytest.mark.parametrize('infer,temperature', [
+    (infer_discrete, 0),
+    (infer_discrete, 1),
+    (elbo_infer_discrete, 1),
+], ids=['map', 'sample', 'sample-elbo'])
+def test_hmm_smoke(infer, temperature, length):
 
     # This should match the example in the infer_discrete docstring.
     def hmm(data, hidden_dim=10):
@@ -182,8 +285,8 @@ def test_hmm_smoke(temperature, length):
     assert len(data) == length
     assert len(true_states) == 1 + len(data)
 
-    decoder = infer_discrete(config_enumerate(hmm),
-                             first_available_dim=-1, temperature=temperature)
+    decoder = infer(config_enumerate(hmm),
+                    first_available_dim=-1, temperature=temperature)
     inferred_states, _ = decoder(data)
     assert len(inferred_states) == len(true_states)
 

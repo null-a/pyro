@@ -70,6 +70,7 @@ def train(args, train_loader, gpmodule, optimizer, loss_fn, epoch):
         loss = loss_fn(gpmodule.model, gpmodule.guide)
         loss.backward()
         optimizer.step()
+        batch_idx = batch_idx + 1
         if batch_idx % args.log_interval == 0:
             print("Train Epoch: {:2d} [{:5d}/{} ({:2.0f}%)]\tLoss: {:.6f}"
                   .format(epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -89,7 +90,7 @@ def test(args, test_loader, gpmodule):
         # use its likelihood to give prediction class
         pred = gpmodule.likelihood(f_loc, f_var)
         # compare prediction and target to count accuaracy
-        correct += pred.eq(target).long().cpu().sum()
+        correct += pred.eq(target).long().cpu().sum().item()
 
     print("\nTest set: Accuracy: {}/{} ({:.2f}%)\n"
           .format(correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
@@ -163,7 +164,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert pyro.__version__.startswith('0.3.1')
+    assert pyro.__version__.startswith('0.3.4')
     parser = argparse.ArgumentParser(description='Pyro GP MNIST Example')
     parser.add_argument('--data-dir', type=str, default=None, metavar='PATH',
                         help='default directory to cache MNIST data')

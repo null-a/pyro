@@ -37,9 +37,9 @@ def torch_item(x):
 def torch_backward(x, retain_graph=None):
     """
     Like ``x.backward()`` for a :class:`~torch.Tensor`, but also accepts
-    numbers (a no-op if given a number).
+    numbers and tensors without grad_fn (resulting in a no-op)
     """
-    if torch.is_tensor(x):
+    if torch.is_tensor(x) and x.grad_fn:
         x.backward(retain_graph=retain_graph)
 
 
@@ -67,7 +67,7 @@ def zero_grads(tensors):
     """
     for p in tensors:
         if p.grad is not None:
-            p.grad = p.grad.new_zeros(p.shape)
+            p.grad = torch.zeros_like(p.grad)
 
 
 def get_plate_stacks(trace):
@@ -177,7 +177,7 @@ class Dice(object):
                         log_prob = log_prob - log_prob.detach()
                     log_prob = log_prob - math.log(num_samples)
                     if not isinstance(log_prob, torch.Tensor):
-                        log_prob = site["value"].new_tensor(log_prob)
+                        log_prob = torch.tensor(float(log_prob), device=site["value"].device)
                     log_prob._pyro_dims = dims
                     # I don't know why the following broadcast is needed, but it makes tests pass:
                     log_prob, _ = packed.broadcast_all(log_prob, site["packed"]["log_prob"])
@@ -236,7 +236,7 @@ class Dice(object):
                 for cost in cost_terms:
                     key = frozenset(cost._pyro_dims)
                     if queries[key] is None:
-                        query = cost.new_zeros(cost.shape)
+                        query = torch.zeros_like(cost)
                         query._pyro_dims = cost._pyro_dims
                         log_factors.append(query)
                         queries[key] = query

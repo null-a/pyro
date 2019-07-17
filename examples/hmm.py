@@ -47,6 +47,7 @@ import pyro.distributions as dist
 from pyro import poutine
 from pyro.contrib.autoguide import AutoDelta
 from pyro.infer import SVI, JitTraceEnum_ELBO, TraceEnum_ELBO
+from pyro.ops.indexing import Vindex
 from pyro.optim import Adam
 from pyro.util import ignore_jit_warnings
 
@@ -328,7 +329,6 @@ def model_4(sequences, lengths, args, batch_size=None, include_prior=True):
         assert lengths.shape == (num_sequences,)
         assert lengths.max() <= max_length
     hidden_dim = int(args.hidden_dim ** 0.5)  # split between w and x
-    hidden = torch.arange(hidden_dim, dtype=torch.long)
     with poutine.mask(mask=include_prior):
         probs_w = pyro.sample("probs_w",
                               dist.Dirichlet(0.9 * torch.eye(hidden_dim) + 0.1)
@@ -353,7 +353,7 @@ def model_4(sequences, lengths, args, batch_size=None, include_prior=True):
                 w = pyro.sample("w_{}".format(t), dist.Categorical(probs_w[w]),
                                 infer={"enumerate": "parallel"})
                 x = pyro.sample("x_{}".format(t),
-                                dist.Categorical(probs_x[w.unsqueeze(-1), x.unsqueeze(-1), hidden]),
+                                dist.Categorical(Vindex(probs_x)[w, x]),
                                 infer={"enumerate": "parallel"})
                 with tones_plate as tones:
                     pyro.sample("y_{}".format(t), dist.Bernoulli(probs_y[w, x, tones]),
@@ -380,16 +380,12 @@ class TonesGenerator(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x, y):
-        # Check dimension of y so this can be used with and without enumeration.
-        if y.dim() < 2:
-            y = y.unsqueeze(0)
-
         # Hidden units depend on two inputs: a one-hot encoded categorical variable x, and
         # a bernoulli variable y. Whereas x will typically be enumerated, y will be observed.
         # We apply x_to_hidden independently from y_to_hidden, then broadcast the non-enumerated
         # y part up to the enumerated x part in the + operation.
         x_onehot = y.new_zeros(x.shape[:-1] + (self.args.hidden_dim,)).scatter_(-1, x, 1)
-        y_conv = self.relu(self.conv(y.unsqueeze(-2))).reshape(y.shape[:-1] + (-1,))
+        y_conv = self.relu(self.conv(y.reshape(-1, 1, self.data_dim))).reshape(y.shape[:-1] + (-1,))
         h = self.relu(self.x_to_hidden(x_onehot) + self.y_to_hidden(y_conv))
         return self.hidden_to_logits(h)
 
@@ -453,7 +449,6 @@ def model_6(sequences, lengths, args, batch_size=None, include_prior=False):
     assert lengths.shape == (num_sequences,)
     assert lengths.max() <= max_length
     hidden_dim = args.hidden_dim
-    hidden = torch.arange(hidden_dim, dtype=torch.long)
 
     if not args.raftery_parameterization:
         # Explicitly parameterize the full tensor of transition probabilities, which
@@ -484,13 +479,48 @@ def model_6(sequences, lengths, args, batch_size=None, include_prior=False):
         # since our model is now 2-markov
         for t in pyro.markov(range(lengths.max()), history=2):
             with poutine.mask(mask=(t < lengths).unsqueeze(-1)):
-                probs_x_t = probs_x[x_prev.unsqueeze(-1), x_curr.unsqueeze(-1), hidden]
+                probs_x_t = Vindex(probs_x)[x_prev, x_curr]
                 x_prev, x_curr = x_curr, pyro.sample("x_{}".format(t), dist.Categorical(probs_x_t),
                                                      infer={"enumerate": "parallel"})
                 with tones_plate:
                     probs_y_t = probs_y[x_curr.squeeze(-1)]
                     pyro.sample("y_{}".format(t), dist.Bernoulli(probs_y_t),
                                 obs=sequences[batch, t])
+
+
+# Next we demonstrate how to parallelize the neural HMM above using Pyro's
+# DiscreteHMM distribution. This model is equivalent to model_5 above, but we
+# manually unroll loops and fuse ops, leading to a single sample statement.
+# DiscreteHMM can lead to over 10x speedup in models where it is applicable.
+def model_7(sequences, lengths, args, batch_size=None, include_prior=True):
+    with ignore_jit_warnings():
+        num_sequences, max_length, data_dim = map(int, sequences.shape)
+        assert lengths.shape == (num_sequences,)
+        assert lengths.max() <= max_length
+
+    # Initialize a global module instance if needed.
+    global tones_generator
+    if tones_generator is None:
+        tones_generator = TonesGenerator(args, data_dim)
+    pyro.module("tones_generator", tones_generator)
+
+    with poutine.mask(mask=include_prior):
+        probs_x = pyro.sample("probs_x",
+                              dist.Dirichlet(0.9 * torch.eye(args.hidden_dim) + 0.1)
+                                  .to_event(1))
+    with pyro.plate("sequences", num_sequences, batch_size, dim=-1) as batch:
+        lengths = lengths[batch]
+        y = sequences[batch] if args.jit else sequences[batch, :lengths.max()]
+        x = torch.arange(args.hidden_dim)
+        t = torch.arange(y.size(1))
+        init_logits = torch.full((args.hidden_dim,), -float('inf'))
+        init_logits[0] = 0
+        trans_logits = probs_x.log()
+        with ignore_jit_warnings():
+            obs_dist = dist.Bernoulli(logits=tones_generator(x, y.unsqueeze(-2))).to_event(1)
+            obs_dist = obs_dist.mask((t < lengths.unsqueeze(-1)).unsqueeze(-1))
+            hmm_dist = dist.DiscreteHMM(init_logits, trans_logits, obs_dist)
+        pyro.sample("y", hmm_dist, obs=y)
 
 
 models = {name[len('model_'):]: model
@@ -523,7 +553,7 @@ def main(args):
     num_observations = float(lengths.sum())
     pyro.set_rng_seed(0)
     pyro.clear_param_store()
-    pyro.enable_validation(True)
+    pyro.enable_validation(__debug__)
 
     # We'll train using MAP Baum-Welch, i.e. MAP estimation while marginalizing
     # out the hidden state x. This is accomplished via an automatic guide that
@@ -546,7 +576,9 @@ def main(args):
     # Enumeration requires a TraceEnum elbo and declaring the max_plate_nesting.
     # All of our models have two plates: "data" and "tones".
     Elbo = JitTraceEnum_ELBO if args.jit else TraceEnum_ELBO
-    elbo = Elbo(max_plate_nesting=1 if model is model_0 else 2)
+    elbo = Elbo(max_plate_nesting=1 if model is model_0 else 2,
+                strict_enumeration_warning=(model is not model_7),
+                jit_options={"optimize": model is model_7})
     optim = Adam({'lr': args.learning_rate})
     svi = SVI(model, guide, optim, elbo)
 
@@ -584,7 +616,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert pyro.__version__.startswith('0.3.1')
+    assert pyro.__version__.startswith('0.3.4')
     parser = argparse.ArgumentParser(description="MAP Baum-Welch learning Bach Chorales")
     parser.add_argument("-m", "--model", default="1", type=str,
                         help="one of: {}".format(", ".join(sorted(models.keys()))))

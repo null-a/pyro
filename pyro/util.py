@@ -3,13 +3,15 @@ from __future__ import absolute_import, division, print_function
 import functools
 import numbers
 import random
+import types
 import warnings
 from collections import defaultdict
-from contextlib2 import contextmanager
 
 import graphviz
+import six
 import torch
-from six.moves import zip_longest
+from contextlib2 import contextmanager
+from six.moves import copyreg, zip_longest
 
 from pyro.poutine.util import site_is_subsample
 
@@ -336,9 +338,15 @@ def ignore_jit_warnings(filter=None):
     Ignore JIT tracer warnings with messages that match `filter`. If
     `filter` is not specified all tracer warnings are ignored.
 
+    Note this only installs warning filters if executed within traced code.
+
     :param filter: A list containing either warning message (str),
         or tuple consisting of (warning message (str), Warning class).
     """
+    if not torch._C._get_tracing_state():
+        yield
+        return
+
     with warnings.catch_warnings():
         if filter is None:
             warnings.filterwarnings("ignore",
@@ -378,6 +386,17 @@ def optional(context_manager, condition):
         yield
 
 
+class ExperimentalWarning(UserWarning):
+    pass
+
+
+@contextmanager
+def ignore_experimental_warning():
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=ExperimentalWarning)
+        yield
+
+
 def deep_getattr(obj, name):
     """
     Python getattr() for arbitrarily deep attributes
@@ -394,3 +413,16 @@ def jit_compatible_arange(end, dtype=None, device=None):
 
 def torch_float(x):
     return x.float() if isinstance(x, torch.Tensor) else float(x)
+
+
+# TODO: Remove when python 2 support is removed.
+# Ability to serialize methods via pickle in Python 2.
+def _pickle_method(m):
+    if m.im_self is None:
+        return getattr, (m.im_class, m.im_func.func_name)
+    else:
+        return getattr, (m.im_self, m.im_func.func_name)
+
+
+if six.PY2:
+    copyreg.pickle(types.MethodType, _pickle_method)

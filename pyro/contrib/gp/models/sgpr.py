@@ -129,7 +129,7 @@ class SparseGPRegression(GPModel):
         Kuu.view(-1)[::M + 1] += self.jitter  # add jitter to the diagonal
         Luu = Kuu.cholesky()
         Kuf = self.kernel(self.Xu, self.X)
-        W = Kuf.trtrs(Luu, upper=False)[0].t()
+        W = Kuf.triangular_solve(Luu, upper=False)[0].t()
 
         D = self.noise.expand(N)
         if self.approx == "FITC" or self.approx == "VFE":
@@ -148,8 +148,10 @@ class SparseGPRegression(GPModel):
             return f_loc, f_var
         else:
             if self.approx == "VFE":
-                pyro.sample("trace_term", dist.Bernoulli(probs=torch.exp(-trace_term / 2.)),
-                            obs=trace_term.new_tensor(1.))
+                # inject trace_term to model's log_prob
+                pyro.sample("trace_term",
+                            dist.Delta(v=trace_term.new_tensor(0.), log_density=-trace_term / 2.),
+                            obs=trace_term.new_tensor(0.))
 
             return pyro.sample("y",
                                dist.LowRankMultivariateNormal(f_loc, W, D)
@@ -208,7 +210,7 @@ class SparseGPRegression(GPModel):
 
         Kuf = self.kernel(self.Xu, self.X)
 
-        W = Kuf.trtrs(Luu, upper=False)[0]
+        W = Kuf.triangular_solve(Luu, upper=False)[0]
         D = self.noise.expand(N)
         if self.approx == "FITC":
             Kffdiag = self.kernel(self.X, diag=True)
@@ -228,9 +230,9 @@ class SparseGPRegression(GPModel):
         # End caching ----------
 
         Kus = self.kernel(self.Xu, Xnew)
-        Ws = Kus.trtrs(Luu, upper=False)[0]
+        Ws = Kus.triangular_solve(Luu, upper=False)[0]
         pack = torch.cat((W_Dinv_y, Ws), dim=1)
-        Linv_pack = pack.trtrs(L, upper=False)[0]
+        Linv_pack = pack.triangular_solve(L, upper=False)[0]
         # unpack
         Linv_W_Dinv_y = Linv_pack[:, :W_Dinv_y.shape[1]]
         Linv_Ws = Linv_pack[:, W_Dinv_y.shape[1]:]
@@ -245,14 +247,15 @@ class SparseGPRegression(GPModel):
                 Kss.view(-1)[::C + 1] += self.noise  # add noise to the diagonal
             Qss = Ws.t().matmul(Ws)
             cov = Kss - Qss + Linv_Ws.t().matmul(Linv_Ws)
+            cov_shape = self.y.shape[:-1] + (C, C)
+            cov = cov.expand(cov_shape)
         else:
             Kssdiag = self.kernel(Xnew, diag=True)
             if not noiseless:
                 Kssdiag = Kssdiag + self.noise
             Qssdiag = Ws.pow(2).sum(dim=0)
             cov = Kssdiag - Qssdiag + Linv_Ws.pow(2).sum(dim=0)
-
-        cov_shape = self.y.shape[:-1] + (C, C)
-        cov = cov.expand(cov_shape)
+            cov_shape = self.y.shape[:-1] + (C,)
+            cov = cov.expand(cov_shape)
 
         return loc + self.mean_function(Xnew), cov

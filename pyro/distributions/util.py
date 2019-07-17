@@ -1,6 +1,8 @@
 from __future__ import absolute_import, division, print_function
 
+import functools
 import numbers
+import weakref
 from contextlib import contextmanager
 
 import torch
@@ -8,6 +10,7 @@ import torch.distributions as torch_dist
 from torch import logsumexp
 from torch.distributions.utils import broadcast_all
 
+from pyro.util import ignore_jit_warnings
 
 _VALIDATION_ENABLED = False
 
@@ -52,6 +55,42 @@ def copy_docs_from(source_class, full_text=False):
     return decorator
 
 
+def weakmethod(fn):
+    """
+    Decorator to enforce weak binding of a method, so as to avoid reference
+    cycles when passing a bound method as an argument to other functions.
+
+    In the following example, functional behavior is the same with and without
+    the ``@weakmethod`` decorator, but decoration avoids a reference cycle::
+
+        class Foo(object):
+            def __init__(self):
+                self.callback = self._callback
+            @weakmethod
+            def _callback(self, result):
+                print(result)
+    """
+    def weak_fn(weakself, *args, **kwargs):
+        self = weakself()
+        if self is None:
+            raise AttributeError("self was garbage collected when calling self.{}"
+                                 .format(fn.__name__))
+        return fn(self, *args, **kwargs)
+
+    @property
+    def weak_binder(self):
+        weakself = weakref.ref(self)
+        return functools.partial(weak_fn, weakself)
+
+    @weak_binder.setter
+    def weak_binder(self, new):
+        if not (isinstance(new, functools.partial) and new.func is weak_fn and
+                len(new.args) == 1 and new.args[0] is weakref.ref(self)):
+            raise AttributeError("cannot overwrite weakmethod {}".format(fn.__name__))
+
+    return weak_binder
+
+
 def is_identically_zero(x):
     """
     Check if argument is exactly the number zero. True for the number zero;
@@ -59,8 +98,9 @@ def is_identically_zero(x):
     """
     if isinstance(x, numbers.Number):
         return x == 0
-    elif isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
-        return x.item() == 0
+    if not torch._C._get_tracing_state():
+        if isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
+            return x.item() == 0
     return False
 
 
@@ -71,8 +111,9 @@ def is_identically_one(x):
     """
     if isinstance(x, numbers.Number):
         return x == 1
-    elif isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
-        return x.item() == 1
+    if not torch._C._get_tracing_state():
+        if isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
+            return x.item() == 1
     return False
 
 
@@ -106,7 +147,9 @@ def gather(value, index, dim):
     Broadcasted gather of indexed values along a named dim.
     """
     value, index = broadcast_all(value, index)
-    index = index.index_select(dim, index.new_tensor([0]))
+    with ignore_jit_warnings():
+        zero = torch.zeros(1, dtype=torch.long, device=index.device)
+    index = index.index_select(dim, zero)
     return value.gather(dim, index)
 
 
@@ -179,22 +222,25 @@ def scale_and_mask(tensor, scale=1.0, mask=None):
     :param mask: an optional masking tensor
     :type mask: torch.ByteTensor or None
     """
-    if not torch._C._get_tracing_state():
-        if is_identically_zero(tensor) or (mask is None and is_identically_one(scale)):
-            return tensor
+    if is_identically_zero(tensor) or (mask is None and is_identically_one(scale)):
+        return tensor
     if mask is None:
         return tensor * scale
     tensor, mask = broadcast_all(tensor, mask)
-    tensor = tensor * scale
+    tensor = tensor * scale  # triggers a copy, avoiding in-place op errors
     tensor.masked_fill_(mask == 0, 0.)
     return tensor
+
+
+def scalar_like(prototype, fill_value):
+    return torch.tensor(fill_value, dtype=prototype.dtype, device=prototype.device)
 
 
 # work around lack of jit support for torch.eye(..., out=value)
 def eye_like(value, m, n=None):
     if n is None:
         n = m
-    eye = value.new_zeros(m, n)
+    eye = torch.zeros(m, n, dtype=value.dtype, device=value.device)
     eye.view(-1)[:min(m, n) * n:n + 1] = 1
     return eye
 

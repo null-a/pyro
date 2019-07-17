@@ -29,9 +29,6 @@ class PyroOptim(object):
         # holds the torch optimizer objects
         self.optim_objs = {}
 
-        # holds the current epoch
-        self.epoch = None
-
         # any optimizer state that's waiting to be consumed (because that parameter hasn't been seen before)
         self._state_waiting_to_be_consumed = {}
 
@@ -54,14 +51,12 @@ class PyroOptim(object):
                     state = self._state_waiting_to_be_consumed.pop(param_name)
                     self.optim_objs[p].load_state_dict(state)
 
-            # actually perform the step for the optim object
-            self.optim_objs[p].step(*args, **kwargs)
-
-            # if optim object was a scheduler, perform an actual optim step
-            if isinstance(self.optim_objs[p], torch.optim.lr_scheduler._LRScheduler):
-                optim_kwargs = kwargs.copy()
-                optim_kwargs.pop('epoch', None)
-                self.optim_objs[p].optimizer.step(*args, **optim_kwargs)
+            if isinstance(self.optim_objs[p], torch.optim.lr_scheduler._LRScheduler) or \
+                    isinstance(self.optim_objs[p], torch.optim.lr_scheduler.ReduceLROnPlateau):
+                # if optim object was a scheduler, perform an optimizer step
+                self.optim_objs[p].optimizer.step(*args, **kwargs)
+            else:
+                self.optim_objs[p].step(*args, **kwargs)
 
     def get_state(self):
         """
@@ -128,15 +123,13 @@ class PyroOptim(object):
 
 def AdagradRMSProp(optim_args):
     """
-    A wrapper for an optimizer that is a mash-up of
-    :class:`~torch.optim.Adagrad` and :class:`~torch.optim.RMSprop`.
+    Wraps :class:`pyro.optim.adagrad_rmsprop.AdagradRMSProp` with :class:`~pyro.optim.optim.PyroOptim`.
     """
     return PyroOptim(pt_AdagradRMSProp, optim_args)
 
 
 def ClippedAdam(optim_args):
     """
-    A wrapper for a modification of the :class:`~torch.optim.Adam`
-    optimization algorithm that supports gradient clipping.
+    Wraps :class:`pyro.optim.clipped_adam.ClippedAdam` with :class:`~pyro.optim.optim.PyroOptim`.
     """
     return PyroOptim(pt_ClippedAdam, optim_args)

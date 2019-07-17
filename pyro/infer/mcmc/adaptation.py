@@ -86,13 +86,13 @@ class WarmupAdapter(object):
                                                 self._warmup_steps - 1))
         return adaptation_schedule
 
-    def reset_step_size_adaptation(self):
+    def reset_step_size_adaptation(self, z):
         r"""
         Finds a reasonable step size and resets step size adaptation scheme.
         """
         if self._find_reasonable_step_size is not None:
             with pyro.validation_enabled(False):
-                self.step_size = self._find_reasonable_step_size()
+                self.step_size = self._find_reasonable_step_size(z)
         self._step_size_adapt_scheme.prox_center = math.log(10 * self.step_size)
         self._step_size_adapt_scheme.reset()
 
@@ -104,7 +104,9 @@ class WarmupAdapter(object):
         self.step_size = math.exp(log_step_size)
 
     def _update_r_dist(self):
-        loc = self._inverse_mass_matrix.new_zeros(self._inverse_mass_matrix.size(0))
+        loc = torch.zeros(self._inverse_mass_matrix.size(0),
+                          dtype=self._inverse_mass_matrix.dtype,
+                          device=self._inverse_mass_matrix.device)
         if self.is_diag_mass:
             self._r_dist = dist.Normal(loc, self._inverse_mass_matrix.rsqrt())
         else:
@@ -173,7 +175,7 @@ class WarmupAdapter(object):
             if mass_matrix_adaptation_phase:
                 self.inverse_mass_matrix = self._mass_matrix_adapt_scheme.get_covariance()
                 if self.adapt_step_size:
-                    self.reset_step_size_adaptation()
+                    self.reset_step_size_adaptation(z)
 
             self._current_window += 1
 

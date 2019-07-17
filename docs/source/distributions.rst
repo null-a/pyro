@@ -77,6 +77,13 @@ DirichletMultinomial
     :undoc-members:
     :show-inheritance:
 
+DiscreteHMM
+--------------------
+.. autoclass:: pyro.distributions.DiscreteHMM
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 EmpiricalDistribution
 ----------------------
 .. autoclass:: pyro.distributions.Empirical
@@ -94,6 +101,20 @@ GammaPoisson
 GaussianScaleMixture
 ------------------------------------
 .. autoclass:: pyro.distributions.GaussianScaleMixture
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+InverseGamma
+------------
+.. autoclass:: pyro.distributions.InverseGamma
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+LKJCorrCholesky
+---------------
+.. autoclass:: pyro.distributions.LKJCorrCholesky
     :members:
     :undoc-members:
     :show-inheritance:
@@ -147,6 +168,13 @@ Rejector
     :undoc-members:
     :show-inheritance:
 
+SpanningTree
+------------
+.. autoclass:: pyro.distributions.SpanningTree
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 VonMises
 --------
 .. autoclass:: pyro.distributions.VonMises
@@ -164,36 +192,106 @@ VonMises3D
 Transformed Distributions
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
+AffineCoupling
+--------------
+.. autoclass:: pyro.distributions.transforms.AffineCoupling
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+BatchNormTransform
+------------------
+.. autoclass:: pyro.distributions.transforms.BatchNormTransform
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+BlockAutoregressive
+-------------------
+.. autoclass:: pyro.distributions.transforms.BlockAutoregressive
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+DeepELUFlow
+-----------
+.. autoclass:: pyro.distributions.transforms.DeepELUFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+DeepLeakyReLUFlow
+-----------------
+.. autoclass:: pyro.distributions.transforms.DeepLeakyReLUFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+DeepSigmoidalFlow
+-----------------
+.. autoclass:: pyro.distributions.transforms.DeepSigmoidalFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+HouseholderFlow
+---------------
+.. autoclass:: pyro.distributions.transforms.HouseholderFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 InverseAutoRegressiveFlow
 -------------------------
-.. autoclass:: pyro.distributions.InverseAutoregressiveFlow
+.. autoclass:: pyro.distributions.transforms.InverseAutoregressiveFlow
     :members:
     :undoc-members:
     :show-inheritance:
 
 InverseAutoRegressiveFlowStable
 -------------------------------
-.. autoclass:: pyro.distributions.InverseAutoregressiveFlowStable
+.. autoclass:: pyro.distributions.transforms.InverseAutoregressiveFlowStable
     :members:
     :undoc-members:
     :show-inheritance:
 
 PermuteTransform
 ----------------
-.. autoclass:: pyro.distributions.PermuteTransform
+.. autoclass:: pyro.distributions.transforms.PermuteTransform
     :members:
     :undoc-members:
     :show-inheritance:
 
 PlanarFlow
-----------------
-.. autoclass:: pyro.distributions.PlanarFlow
+----------
+.. autoclass:: pyro.distributions.transforms.PlanarFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+PolynomialFlow
+--------------
+.. autoclass:: pyro.distributions.transforms.PolynomialFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+RadialFlow
+----------
+.. autoclass:: pyro.distributions.transforms.RadialFlow
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+SylvesterFlow
+-------------
+.. autoclass:: pyro.distributions.transforms.SylvesterFlow
     :members:
     :undoc-members:
     :show-inheritance:
 
 TransformModule
-----------------
+---------------
 .. autoclass:: pyro.distributions.TransformModule
     :members:
     :undoc-members:
