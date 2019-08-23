@@ -106,7 +106,6 @@ def next_trial(formula, model_desc, data_so_far, meta):
         eig = torch.mean(logq).item()
         eigs.append(eig)
         print('eig: {}'.format(eig))
-        print('all zero would yield: {}'.format(torch.mean(torch.sum(1-targets_d, 1))))
         print('====================')
 
     plt.show()
