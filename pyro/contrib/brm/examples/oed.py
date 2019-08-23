@@ -39,8 +39,13 @@ def next_trial(formula, model_desc, data_so_far, meta):
     #print(design_space_df)
 
 
-    # Do HMC to get samples from p(theta|data_so_far)
-    posterior = pyro_backend.nuts(data_so_far_coded, model, iter=N)
+    if len(data_so_far) == 0:
+        print('Sampling from prior...')
+        posterior = pyro_backend.prior(data_so_far_coded, model, num_samples=N)
+    else:
+        # Do HMC to get samples from p(theta|data_so_far)
+        print('Running HMC...')
+        posterior = pyro_backend.nuts(data_so_far_coded, model, iter=N)
     fit = Fit(formula, data_so_far_coded, model_desc, model, posterior, pyro_backend)
     b_samples = posterior.get_param('b')
     assert b_samples.shape == (N, num_coefs)
@@ -233,12 +238,11 @@ def main():
 
     #print(model_repr(model_desc))
 
-    # TODO: Start with single sample from prior?
     data_so_far = pd.DataFrame(dict(
-        y=[0.],
-        x1=pd.Categorical(['a']),
-        x2=pd.Categorical(['c']),
-        #x3=pd.Categorical(['e']),
+        y=[],
+        x1=pd.Categorical([]),
+        x2=pd.Categorical([]),
+        #x3=pd.Categorical([]),
     ))
 
 
