@@ -102,13 +102,16 @@ def next_trial(formula, model_desc, data_so_far, meta):
 
         probs = q_net(inputs_d)
 
-        logq = torch.sum(targets_d*probs + (1-targets_d)*(1-probs), 1)
+        logq = torch.sum(targets_d*torch.log(probs) + (1-targets_d)*torch.log(1-probs), 1)
         eig = torch.mean(logq).item()
         eigs.append(eig)
         print('eig: {}'.format(eig))
         print('====================')
 
     plt.show()
+
+    #import pdb; pdb.set_trace()
+
 
     # Return argmax_d EIG(d)
     dstar = argmax(eigs)
@@ -147,7 +150,7 @@ def optimise(net, inputs, targets):
     for i in range(1000):
         optimizer.zero_grad()
         probs = net(inputs)
-        logq = torch.mean(torch.sum(targets*probs + (1-targets)*(1-probs), 1))
+        logq = torch.mean(torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), 1))
         loss = -logq
         loss.backward()
         optimizer.step()
@@ -261,7 +264,6 @@ def main():
         #print(data_so_far)
         design, dstar, eigs, plot_data = next_trial(formula, model_desc, data_so_far, meta)
         make_training_data_plot(plot_data)
-        import pdb; pdb.set_trace()
         print(eigs)
         print('Next trial: {}'.format(design))
         result = get_float_input('Enter result: ')
