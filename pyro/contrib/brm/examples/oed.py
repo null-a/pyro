@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 from pyro.contrib.brm import defm, makedesc
 from pyro.contrib.brm.design import metadata_from_df, metadata_from_cols, RealValued, Categorical, makedata
-from pyro.contrib.brm.family import Normal, HalfCauchy
+from pyro.contrib.brm.family import Normal, HalfCauchy, HalfNormal
 from pyro.contrib.brm.formula import parse
 from pyro.contrib.brm.model import model_repr
 from pyro.contrib.brm.fit import fitted, Fit
@@ -18,7 +18,7 @@ from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 
 def next_trial(formula, model_desc, data_so_far, meta):
     eps = 0.5
-    N = 50#1000
+    N = 1000
 
     num_coefs = len(model_desc.population.coefs)
 
@@ -213,6 +213,14 @@ def extend_df_with_result(formula, meta, data_so_far, design, result):
 
 
 
+# Current status: this tends to do something useful at the first time
+# step. (Suggesting the trial which isolates the influence of the
+# intercept.) Assume the result of this trial is -3. In the next
+# round, it looks like the training data are such that interesting
+# functions could be learned for two cases where just one coef is in
+# place (along with the intercept), but q doesn't in fact learn such a
+# function. I need to understand how to make this work.
+
 def main():
 
     formula = parse('y ~ 1 + x1 + x2')
@@ -226,14 +234,17 @@ def main():
     meta = metadata_from_cols([
         RealValued('y'),
         Categorical('x1', ['a','b']),
-        Categorical('x2', ['c','d','e']),
+        Categorical('x2', ['c','d']),
         #Categorical('x3', ['e', 'f']),
     ])
 
     #print(meta.columns)
     #print(meta.levels(['x1','x2']))
 
-    model_desc = makedesc(formula, meta, Normal, [Prior(('b',), Normal(0.,1.)), Prior(('resp','sigma'), HalfCauchy(.1))])
+    model_desc = makedesc(formula, meta, Normal, [
+        Prior(('b',),           Normal(0.,1.)),
+        Prior(('resp','sigma'), HalfNormal(.2)),
+    ])
 
     #print(model_repr(model_desc))
 
@@ -250,6 +261,7 @@ def main():
         #print(data_so_far)
         design, dstar, eigs, plot_data = next_trial(formula, model_desc, data_so_far, meta)
         make_training_data_plot(plot_data)
+        import pdb; pdb.set_trace()
         print(eigs)
         print('Next trial: {}'.format(design))
         result = get_float_input('Enter result: ')
