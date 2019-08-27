@@ -12,7 +12,7 @@ from pyro.contrib.brm.design import metadata_from_df, metadata_from_cols, RealVa
 from pyro.contrib.brm.family import Normal, HalfCauchy, HalfNormal
 from pyro.contrib.brm.formula import parse
 from pyro.contrib.brm.model import model_repr
-from pyro.contrib.brm.fit import fitted, Fit
+from pyro.contrib.brm.fit import fitted, Fit, marginals
 from pyro.contrib.brm.priors import Prior
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 
@@ -22,7 +22,7 @@ from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 # For clamping qnet output.
 qeps = 1e-6
 
-def next_trial(formula, model_desc, data_so_far, meta):
+def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
     eps = 0.5
     N = 1000
 
@@ -46,11 +46,13 @@ def next_trial(formula, model_desc, data_so_far, meta):
 
 
     if len(data_so_far) == 0:
-        print('Sampling from prior...')
+        if verbose:
+            print('Sampling from prior...')
         posterior = pyro_backend.prior(data_so_far_coded, model, num_samples=N)
     else:
         # Do HMC to get samples from p(theta|data_so_far)
-        print('Running HMC...')
+        if verbose:
+            print('Running HMC...')
         posterior = pyro_backend.nuts(data_so_far_coded, model, iter=N)
     fit = Fit(formula, data_so_far_coded, model_desc, model, posterior, pyro_backend)
     b_samples = posterior.get_param('b')
@@ -89,7 +91,7 @@ def next_trial(formula, model_desc, data_so_far, meta):
         targets_d = targets[N*j:N*(j+1)]
 
         q_net = mknet(num_coefs)
-        optimise(q_net, inputs_d, targets_d)
+        optimise(q_net, inputs_d, targets_d, verbose)
 
         # Make a picture of the training data.
 
@@ -111,8 +113,6 @@ def next_trial(formula, model_desc, data_so_far, meta):
         logq = torch.sum(targets_d*torch.log(probs) + (1-targets_d)*torch.log(1-probs), 1)
         eig = torch.mean(logq).item()
         eigs.append(eig)
-        print('eig: {}'.format(eig))
-        print('====================')
 
     plt.show()
 
@@ -122,7 +122,7 @@ def next_trial(formula, model_desc, data_so_far, meta):
     # Return argmax_d EIG(d)
     dstar = argmax(eigs)
 
-    return designs[dstar], dstar, eigs, plot_data
+    return designs[dstar], dstar, list(zip(designs, eigs)), fit, plot_data
 
 def make_training_data_plot(plot_data):
     plt.figure(figsize=(12,12))
@@ -147,7 +147,7 @@ def argmax(lst):
     return torch.argmax(torch.tensor(lst)).item()
 
 
-def optimise(net, inputs, targets):
+def optimise(net, inputs, targets, verbose=False):
 
     # TODO: Mini-batches. (On shuffled inputs/outputs.)
 
@@ -160,8 +160,11 @@ def optimise(net, inputs, targets):
         loss = -logq
         loss.backward()
         optimizer.step()
-        if (i+1) % 100 == 0:
-            print('{} | {}'.format(i+1,logq.item()))
+        if (i+1) % 100 == 0 and verbose:
+            print('{:5d} | {:.6f}'.format(i+1,logq.item()))
+
+    if verbose:
+       print('--------------------')
 
 def get_float_input(msg):
     try:
@@ -259,8 +262,10 @@ def main():
     for i in range(1000):
         #print('Num results: {}'.format(len(data_so_far)))
         #print(data_so_far)
-        design, dstar, eigs, plot_data = next_trial(formula, model_desc, data_so_far, meta)
+        design, dstar, eigs, fit, plot_data = next_trial(formula, model_desc, data_so_far, meta, verbose=True)
+        print(marginals(fit))
         make_training_data_plot(plot_data)
+        print('EIGs:')
         print(eigs)
         print('Next trial: {}'.format(design))
         result = get_float_input('Enter result: ')
