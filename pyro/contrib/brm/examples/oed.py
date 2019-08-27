@@ -114,11 +114,6 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
         eig = torch.mean(logq).item()
         eigs.append(eig)
 
-    plt.show()
-
-    #import pdb; pdb.set_trace()
-
-
     # Return argmax_d EIG(d)
     dstar = argmax(eigs)
 
