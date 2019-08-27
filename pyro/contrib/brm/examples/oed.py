@@ -16,6 +16,12 @@ from pyro.contrib.brm.fit import fitted, Fit
 from pyro.contrib.brm.priors import Prior
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 
+# TODO: There's probably something better than this -- parameterize
+# loss by logits? If not, move this into the nn module itself.
+
+# For clamping qnet output.
+qeps = 1e-6
+
 def next_trial(formula, model_desc, data_so_far, meta):
     eps = 0.5
     N = 1000
@@ -100,7 +106,7 @@ def next_trial(formula, model_desc, data_so_far, meta):
 
             plot_data[j][k] = (pos_cases.numpy(), neg_cases.numpy(), test_in.numpy(), test_out.numpy(), design)
 
-        probs = q_net(inputs_d)
+        probs = q_net(inputs_d).clamp(qeps, 1-qeps)
 
         logq = torch.sum(targets_d*torch.log(probs) + (1-targets_d)*torch.log(1-probs), 1)
         eig = torch.mean(logq).item()
@@ -149,7 +155,7 @@ def optimise(net, inputs, targets):
 
     for i in range(1000):
         optimizer.zero_grad()
-        probs = net(inputs)
+        probs = net(inputs).clamp(qeps, 1-qeps)
         logq = torch.mean(torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), 1))
         loss = -logq
         loss.backward()
