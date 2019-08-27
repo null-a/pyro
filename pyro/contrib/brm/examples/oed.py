@@ -221,15 +221,6 @@ def extend_df_with_result(formula, meta, data_so_far, design, result):
     return df_append_row(data_so_far, row)
 
 
-
-# Current status: this tends to do something useful at the first time
-# step. (Suggesting the trial which isolates the influence of the
-# intercept.) Assume the result of this trial is -3. In the next
-# round, it looks like the training data are such that interesting
-# functions could be learned for two cases where just one coef is in
-# place (along with the intercept), but q doesn't in fact learn such a
-# function. I need to understand how to make this work.
-
 def main():
 
     formula = parse('y ~ 1 + x1 + x2')
