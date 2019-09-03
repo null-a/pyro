@@ -16,11 +16,6 @@ from pyro.contrib.brm.fit import fitted, Fit, marginals
 from pyro.contrib.brm.priors import Prior
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 
-# TODO: There's probably something better than this -- parameterize
-# loss by logits? If not, move this into the nn module itself.
-
-# For clamping qnet output.
-qeps = 1e-6
 
 def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
     eps = 0.5
@@ -90,7 +85,7 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
         inputs_d = inputs[N*j:N*(j+1)]
         targets_d = targets[N*j:N*(j+1)]
 
-        q_net = mknet(num_coefs)
+        q_net = QIndep(num_coefs)
         optimise(q_net, inputs_d, targets_d, verbose)
 
         # Make a picture of the training data.
@@ -104,14 +99,11 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
             imin = inputs_d.min()
             imax = inputs_d.max()
             test_in = torch.arange(imin, imax, (imax-imin)/50.).reshape(-1, 1)
-            test_out = q_net(test_in)[:,k].detach()
+            test_out = q_net.marginal_logprobs(test_in, k).detach()
 
             plot_data[j][k] = (pos_cases.numpy(), neg_cases.numpy(), test_in.numpy(), test_out.numpy(), design)
 
-        probs = q_net(inputs_d).clamp(qeps, 1-qeps)
-
-        logq = torch.sum(targets_d*torch.log(probs) + (1-targets_d)*torch.log(1-probs), 1)
-        eig = torch.mean(logq).item()
+        eig = torch.mean(q_net.logprobs(inputs_d, targets_d)).item()
         eigs.append(eig)
 
     # Return argmax_d EIG(d)
@@ -150,13 +142,11 @@ def optimise(net, inputs, targets, verbose=False):
 
     for i in range(1000):
         optimizer.zero_grad()
-        probs = net(inputs).clamp(qeps, 1-qeps)
-        logq = torch.mean(torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), 1))
-        loss = -logq
+        loss = -torch.mean(net.logprobs(inputs, targets))
         loss.backward()
         optimizer.step()
         if (i+1) % 100 == 0 and verbose:
-            print('{:5d} | {:.6f}'.format(i+1,logq.item()))
+            print('{:5d} | {:.6f}'.format(i+1,loss.item()))
 
     if verbose:
        print('--------------------')
@@ -167,13 +157,49 @@ def get_float_input(msg):
     except ValueError:
         return get_float_input(msg)
 
-def mknet(outsize):
-    return nn.Sequential(nn.Linear(1, 100),
-                         nn.ReLU(),
-                         nn.Linear(100,50),
-                         nn.ReLU(),
-                         nn.Linear(50, outsize),
-                         nn.Sigmoid())
+
+class QIndep(nn.Module):
+    def __init__(self, num_coef):
+        super(QIndep, self).__init__()
+        assert type(num_coef) == int
+        assert num_coef > 0
+        self.num_coef = num_coef
+        self.net = nn.Sequential(nn.Linear(1, 100),
+                                 nn.ReLU(),
+                                 nn.Linear(100,50),
+                                 nn.ReLU(),
+                                 nn.Linear(50, num_coef),
+                                 nn.Sigmoid())
+
+    def forward(self, inputs):
+        assert inputs.shape[1] == 1
+        # TODO: There's probably a better approach than clamping --
+        # parameterize loss by logits?
+        eps = 1e-6
+        return self.net(inputs).clamp(eps, 1-eps)
+
+    # Compute (vectorised, over multiple y and m) q(m|y;d).
+    # m: targets
+    # y: inputs
+    # (;d because we make a fresh net for each design.)
+    def logprobs(self, inputs, targets):
+        assert inputs.shape[0] == targets.shape[0]
+        N = inputs.shape[0]
+        assert inputs.shape == (N, 1)
+        assert targets.shape == (N, self.num_coef)
+        probs = self.forward(inputs)
+        return torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), 1)
+
+    # Compute the marginal probability of a particular coefficient
+    # being within [-eps,eps]. For this particular Q (which assumes
+    # the joint is the product of the marginals) this only requires us
+    # to pick out the appropriate marginal.
+    def marginal_logprobs(self, inputs, coef):
+        assert type(coef) == int
+        assert 0 <= coef < self.num_coef
+        probs = self.forward(inputs)
+        return probs[:,coef]
+
 
 
 def df_append_row(df, row):
