@@ -69,7 +69,7 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
     assert inputs.shape == (N * len(designs), 1)
 
 
-    targets = ((-eps < b_samples) * (b_samples < eps)).float().repeat(len(designs), 1)
+    targets = ((-eps < b_samples) * (b_samples < eps)).long().repeat(len(designs), 1)
     assert targets.shape == (N * len(designs), num_coefs)
 
     #   b. Optimise. (Single net on all designs.)
@@ -190,7 +190,8 @@ class QIndep(nn.Module):
         assert inputs.shape == (N, 1)
         assert targets.shape == (N, self.num_coef)
         probs = self.forward(inputs)
-        return torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), 1)
+        targetsf = targets.float()
+        return torch.sum(targetsf*torch.log(probs) + (1-targetsf)*torch.log(1-probs), 1)
 
     # Compute the marginal probability of a particular coefficient
     # being within [-eps,eps]. For this particular Q (which assumes
@@ -252,7 +253,7 @@ class QFull(nn.Module):
         assert targets.shape == (N, self.num_coef)
         logprobs = self.forward(inputs)
         assert logprobs.shape[1] == 2 ** self.num_coef
-        return torch.sum(logprobs * bits2onehot(targets.long()).float(), 1)
+        return torch.sum(logprobs * bits2onehot(targets).float(), 1)
 
     def marginal_probs(self, inputs, coef):
         assert type(coef) == int
