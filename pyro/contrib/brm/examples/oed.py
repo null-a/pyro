@@ -77,6 +77,7 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
     # A (nested) list used to store data which can later be used to
     # make a picture of the "training data".
     plot_data = [[None] * num_coefs for _ in range(len(designs))]
+    #plot_data = [[None] * 2**num_coefs for _ in range(len(designs))]
 
     # (Un-normalised) EIG for each design.
     eigs = []
@@ -104,6 +105,20 @@ def next_trial(formula, model_desc, data_so_far, meta, verbose=False):
             test_out = q_net.marginal_probs(test_in, k).detach()
 
             plot_data[j][k] = (pos_cases.numpy(), neg_cases.numpy(), test_in.numpy(), test_out.numpy(), design)
+
+        # for k in range(2**num_coefs):
+
+        #     pos_cases = inputs_d[bits2long(targets_d) == k]
+        #     neg_cases = inputs_d[bits2long(targets_d) != k]
+
+        #     # Vis. the function implemented by the net.
+        #     imin = inputs_d.min()
+        #     imax = inputs_d.max()
+        #     test_in = torch.arange(imin, imax, (imax-imin)/50.).reshape(-1, 1)
+        #     test_out = torch.exp(q_net.logprobs(test_in, torch.tensor(int2bits(k,num_coefs)).expand(test_in.shape[0],-1)).detach())
+
+        #     plot_data[j][k] = (pos_cases.numpy(), neg_cases.numpy(), test_in.numpy(), test_out.numpy(), design)
+
 
         eig = torch.mean(q_net.logprobs(inputs_d, targets_d)).item()
         eigs.append(eig)
