@@ -139,6 +139,7 @@ def argmax(lst):
 def optimise(net, inputs, targets, verbose=False):
 
     # TODO: Mini-batches. (On shuffled inputs/outputs.)
+    # TODO: Note: using some weight decay probably makes sense here.
 
     optimizer = optim.Adam(net.parameters(), lr=0.01)
 
