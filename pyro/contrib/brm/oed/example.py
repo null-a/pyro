@@ -1,0 +1,97 @@
+import torch
+import numpy as np
+from matplotlib import pyplot as plt
+
+from pyro.contrib.brm.design import RealValued, Categorical
+from pyro.contrib.brm.priors import Prior
+from pyro.contrib.brm.family import Normal, HalfNormal
+from pyro.contrib.brm.fit import marginals
+from pyro.contrib.brm.oed import SequentialOED
+
+def get_float_input(msg):
+    try:
+        return float(input(msg))
+    except ValueError:
+        return get_float_input(msg)
+
+# Callback used to compute the data required to make a picture of the
+# training data seen by the networks during OED.
+def collect_plot_data(i, design, q_net, inputs, targets):
+    num_coefs = targets.shape[1]
+    out = []
+    for j in range(num_coefs):
+        neg_cases = inputs[targets[:,j] == 0]
+        pos_cases = inputs[targets[:,j] == 1]
+
+        # Vis. the function implemented by the net.
+        imin = inputs.min()
+        imax = inputs.max()
+        test_in = torch.arange(imin, imax, (imax-imin)/50.).unsqueeze(1)
+        test_out = q_net.marginal_probs(test_in, j).detach()
+
+        out.append((pos_cases.numpy(),
+                    neg_cases.numpy(),
+                    test_in.numpy(),
+                    test_out.numpy(),
+                    design))
+    return out
+
+# Here's a sketch of how to make plots showing the QFull's output on
+# all 2**M outputs.
+
+# for k in range(2**num_coefs):
+
+#     pos_cases = inputs_d[bits2long(targets_d) == k]
+#     neg_cases = inputs_d[bits2long(targets_d) != k]
+
+#     # Vis. the function implemented by the net.
+#     imin = inputs_d.min()
+#     imax = inputs_d.max()
+#     test_in = torch.arange(imin, imax, (imax-imin)/50.).reshape(-1, 1)
+#     test_out = torch.exp(q_net.logprobs(test_in, torch.tensor(int2bits(k,num_coefs)).expand(test_in.shape[0],-1)).detach())
+
+#     plot_data[j][k] = (pos_cases.numpy(), neg_cases.numpy(), test_in.numpy(), test_out.numpy(), design)
+
+
+def make_training_data_plot(plot_data):
+    plt.figure(figsize=(12,12))
+    for j, row in enumerate(plot_data):
+        for k, (pos_cases, neg_cases, test_in, test_out, design) in enumerate(row):
+            plt.subplot(len(plot_data), len(row), (j*len(row) + k)+1)
+            if j == 0:
+                plt.title('coef={}'.format(k))
+            if k == 0:
+                plt.ylabel('q(m|y;d={})'.format(design))
+            plt.xlabel('y')
+            plt.scatter(neg_cases, np.random.normal(0, 0.01, neg_cases.shape), marker='.', alpha=0.15, label='coef. not nr. zero')
+            plt.scatter(pos_cases, np.random.normal(1, 0.01, pos_cases.shape), marker='.', alpha=0.15, label='coef. nr. zero')
+            plt.ylim((-0.1, 1.1))
+            plt.plot(test_in, test_out, color='gray', label='q(m|y;d)')
+            #plt.legend()
+    plt.show()
+
+def main():
+
+    oed = SequentialOED('y ~ 1 + a + b', [
+        RealValued('y'),
+        Categorical('a', ['a1', 'a2']),
+        Categorical('b', ['b1', 'b2']),
+    ],
+    priors=[
+        Prior(('b',),           Normal(0., 1.)),
+        Prior(('resp','sigma'), HalfNormal(.2)),
+    ])
+
+    for _ in range(1000):
+        design, dstar, eigs, fit, plot_data = oed.next_trial(callback=collect_plot_data, verbose=True)
+        print(marginals(fit))
+        print('EIGs:')
+        print(eigs)
+        print('Next trial: {}'.format(design))
+        make_training_data_plot(plot_data)
+        result = get_float_input('Enter result: ')
+        oed.add_result(design, result)
+
+
+if __name__ == '__main__':
+    main()
