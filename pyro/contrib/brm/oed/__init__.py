@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 
 from pyro.contrib.brm import makedesc
-from pyro.contrib.brm.formula import parse
+from pyro.contrib.brm.formula import parse, OrderedSet
 from pyro.contrib.brm.design import makedata, metadata_from_cols, RealValued, Categorical
 from pyro.contrib.brm.family import Normal
 from pyro.contrib.brm.backend import data_from_numpy
@@ -156,20 +156,13 @@ def empty_df_from_cols(cols):
 
 
 # Extract the names of the columns associated with population level
-# effects. (Assumes no interactions. But only requires taking union of
-# all factors?)
+# effects.
 def design_space_cols(formula, meta):
-    coefs = []
+    cols = OrderedSet()
     for t in formula.terms:
-        if len(t.factors) == 0:
-            pass # intercept
-        elif len(t.factors) == 1:
-            factor = t.factors[0]
-            assert type(meta.column(factor)) == Categorical
-            coefs.append(factor)
-        else:
-            raise Exception('interactions not supported')
-    return coefs
+        cols = cols.union(t.factors)
+    assert all(type(meta.column(c) == Categorical) for c in cols)
+    return list(cols)
 
 
 # TODO: Does it *really* take this much work to add a row to a df?
