@@ -72,9 +72,9 @@ class SequentialOED:
 
         # Draw samples from current distribution over parameters.
         if len(self.data_so_far) == 0:
-            samples = self.backend.prior(dsf, self.model, self.num_samples)
+            samples = self.backend.prior(dsf, self.model, num_samples=self.num_samples)
         else:
-            samples = self.backend.nuts(dsf, self.model, self.num_samples)
+            samples = self.backend.nuts(dsf, self.model, iter=self.num_samples)
         fit = Fit(self.formula, dsf, self.model_desc, self.model, samples, self.backend)
 
         b_samples = get_param(fit, 'b') # Values sampled for population-level coefs. (numpy array.)
