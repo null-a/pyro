@@ -1,3 +1,5 @@
+import itertools
+
 import pandas as pd
 from pandas.api.types import is_categorical_dtype
 
@@ -6,7 +8,7 @@ import torch.optim as optim
 
 from pyro.contrib.brm import makedesc
 from pyro.contrib.brm.formula import parse, OrderedSet
-from pyro.contrib.brm.design import makedata, metadata_from_cols, RealValued, Categorical
+from pyro.contrib.brm.design import Metadata, makedata, metadata_from_cols, RealValued, Categorical
 from pyro.contrib.brm.family import Normal
 from pyro.contrib.brm.backend import data_from_numpy
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
@@ -30,7 +32,7 @@ from pyro.contrib.brm.oed.nets import QIndep, QFull
 # There are also methods/properties for obtaining information about
 # the current sequence:
 
-# oed.design_space
+# oed.design_space()
 # oed.data_so_far
 
 class SequentialOED:
@@ -41,12 +43,7 @@ class SequentialOED:
         model = backend.gen(model_desc)
         data_so_far = empty_df_from_cols(cols)
         num_coefs = len(model_desc.population.coefs)
-
-        # Build a data frame representing the design space.
         dscols = design_space_cols(formula, metadata)
-        design_space = metadata.levels(dscols)
-        design_space_df = pd.DataFrame(dict((name, pd.Categorical(col))
-                                            for name, col in zip(dscols, list(zip(*design_space)))))
 
         # TODO: Prefix non-public stuff with underscores?
         self.formula = formula
@@ -55,16 +52,18 @@ class SequentialOED:
         self.model = model
         self.data_so_far = data_so_far
         self.num_coefs = num_coefs
-        self.design_space = design_space
-        self.design_space_df = design_space_df
+        self.dscols = dscols
 
         self.backend = backend
         self.num_samples = 1000
 
-    def next_trial(self, callback=None, verbose=False):
+    def next_trial(self, callback=None, verbose=False, **kwargs):
 
         if callback is None:
             callback = lambda *args: None
+
+        design_space = self.design_space(**kwargs)
+        design_space_df = design_space_to_df(self.dscols, design_space)
 
         # Code the data-so-far data frame into design matrices.
         dsf = data_from_numpy(self.backend,
@@ -81,8 +80,8 @@ class SequentialOED:
         assert b_samples.shape == (self.num_samples, self.num_coefs)
 
         # Draw samples from p(y|theta;d)
-        y_samples = fitted(fit, 'sample', self.design_space_df) # numpy array.
-        assert y_samples.shape == (self.num_samples, len(self.design_space))
+        y_samples = fitted(fit, 'sample', design_space_df) # numpy array.
+        assert y_samples.shape == (self.num_samples, len(design_space))
 
         # All ANN work is done using PyTorch, so convert samples from
         # numpy to torch ready for what follows.
@@ -101,7 +100,7 @@ class SequentialOED:
         # Compute the (unnormalized) EIG for each design.
         eigs = []
         cbvals = []
-        for i, design in enumerate(self.design_space):
+        for i, design in enumerate(design_space):
             inputs = y_samples[:,i].unsqueeze(1) # The ys for this particular design.
 
             # Construct and optimised the network.
@@ -115,10 +114,13 @@ class SequentialOED:
             cbvals.append(callback(i, design, q_net, inputs, targets))
 
         dstar = argmax(eigs)
-        return self.design_space[dstar], dstar, list(zip(self.design_space, eigs)), fit, cbvals
+        return design_space[dstar], dstar, list(zip(design_space, eigs)), fit, cbvals
 
     def add_result(self, design, result):
         self.data_so_far = extend_df_with_result(self.formula, self.metadata, self.data_so_far, design, result)
+
+    def design_space(self, **kwargs):
+        return design_space(self.dscols, self.metadata, **kwargs)
 
 
 def argmax(lst):
@@ -155,14 +157,47 @@ def empty_df_from_cols(cols):
     return pd.DataFrame({col.name: emptydfcol(col) for col in cols})
 
 
-# Extract the names of the columns associated with population level
-# effects.
+# Extract the names of the columns/factors appearing on RHS of the
+# model formula.
+
+# TODO: This is similar to `allfactors` in formula.py -- consolidate?
+
 def design_space_cols(formula, meta):
     cols = OrderedSet()
     for t in formula.terms:
         cols = cols.union(t.factors)
+    for group in formula.groups:
+        cols = cols.union(OrderedSet(*group.columns))
+        for t in group.terms:
+            cols = cols.union(t.factors)
     assert all(type(meta.column(c) == Categorical) for c in cols)
     return list(cols)
+
+
+# This defaults to using the full Cartesian product of the columns,
+# but allows individual columns to be restricted to a subset of their
+# values.
+def design_space(names, metadata, **levels_lookup):
+    assert type(names) == list
+    assert all(type(name) == str for name in names)
+    assert type(metadata) == Metadata
+
+    def levels(name):
+        col = metadata.column(name)
+        assert type(col) == Categorical
+        if name in levels_lookup:
+            vals = levels_lookup[name]
+            assert set(vals).issubset(set(col.levels)), 'one of more invalid levels given for "{}"'.format(name)
+            return vals
+        else:
+            return col.levels
+
+    all_possible_vals = list(itertools.product(*[levels(name) for name in names]))
+    return all_possible_vals
+
+def design_space_to_df(dscols, design_space):
+    return pd.DataFrame(dict((name, pd.Categorical(col))
+                             for name, col in zip(dscols, list(zip(*design_space)))))
 
 
 # TODO: Does it *really* take this much work to add a row to a df?
