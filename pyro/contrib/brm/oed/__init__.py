@@ -8,7 +8,7 @@ import torch.optim as optim
 
 from pyro.contrib.brm import makedesc
 from pyro.contrib.brm.formula import parse, OrderedSet
-from pyro.contrib.brm.design import Metadata, makedata, metadata_from_cols, RealValued, Categorical
+from pyro.contrib.brm.design import Metadata, makedata, metadata_from_cols, RealValued, Categorical, code_lengths
 from pyro.contrib.brm.family import Normal
 from pyro.contrib.brm.backend import data_from_numpy
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
@@ -36,10 +36,10 @@ from pyro.contrib.brm.oed.nets import QIndep, QFull
 # oed.data_so_far
 
 class SequentialOED:
-    def __init__(self, formula_str, cols, family=Normal, priors=[], backend=pyro_backend):
+    def __init__(self, formula_str, cols, family=Normal, priors=[], contrasts={}, backend=pyro_backend):
         formula = parse(formula_str)
         metadata = metadata_from_cols(cols)
-        model_desc = makedesc(formula, metadata, family, priors)
+        model_desc = makedesc(formula, metadata, family, priors, code_lengths(contrasts))
         model = backend.gen(model_desc)
         data_so_far = empty_df_from_cols(cols)
         num_coefs = len(model_desc.population.coefs)
@@ -47,6 +47,7 @@ class SequentialOED:
 
         # TODO: Prefix non-public stuff with underscores?
         self.formula = formula
+        self.contrasts = contrasts
         self.metadata = metadata
         self.model_desc = model_desc
         self.model = model
@@ -67,14 +68,14 @@ class SequentialOED:
 
         # Code the data-so-far data frame into design matrices.
         dsf = data_from_numpy(self.backend,
-                              makedata(self.formula, self.data_so_far, self.metadata))
+                              makedata(self.formula, self.data_so_far, self.metadata, self.contrasts))
 
         # Draw samples from current distribution over parameters.
         if len(self.data_so_far) == 0:
             samples = self.backend.prior(dsf, self.model, num_samples=self.num_samples)
         else:
             samples = self.backend.nuts(dsf, self.model, iter=self.num_samples)
-        fit = Fit(self.formula, dsf, self.model_desc, self.model, samples, self.backend)
+        fit = Fit(self.formula, self.contrasts, dsf, self.model_desc, self.model, samples, self.backend)
 
         b_samples = get_param(fit, 'b') # Values sampled for population-level coefs. (numpy array.)
         assert b_samples.shape == (self.num_samples, self.num_coefs)
