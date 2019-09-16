@@ -75,7 +75,7 @@ class SequentialOED:
             samples = self.backend.prior(dsf, self.model, num_samples=self.num_samples)
         else:
             samples = self.backend.nuts(dsf, self.model, iter=self.num_samples)
-        fit = Fit(self.formula, self.contrasts, dsf, self.model_desc, self.model, samples, self.backend)
+        fit = Fit(self.formula, self.metadata, self.contrasts, dsf, self.model_desc, self.model, samples, self.backend)
 
         b_samples = get_param(fit, 'b') # Values sampled for population-level coefs. (numpy array.)
         assert b_samples.shape == (self.num_samples, self.num_coefs)
