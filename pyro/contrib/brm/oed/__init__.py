@@ -1,4 +1,5 @@
 import itertools
+import time
 
 import pandas as pd
 from pandas.api.types import is_categorical_dtype
@@ -14,7 +15,7 @@ from pyro.contrib.brm.backend import data_from_numpy
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 from pyro.contrib.brm.fit import Fit, get_param, fitted
 
-from pyro.contrib.brm.oed.nets import QIndep, QFull
+from pyro.contrib.brm.oed.nets import QIndep, QFull, QFullM
 
 # Provides a convenient interface for performing sequential OED.
 
@@ -97,6 +98,33 @@ class SequentialOED:
         # to float. (e.g. In `log_probs` of `QIndep`.)
         targets = ((-eps < b_samples) & (b_samples < eps)).long()
         assert targets.shape == (self.num_samples, self.num_coefs)
+
+
+
+
+        # Compute the (unnormalized) EIG for all designs.
+
+        # targetsM = targets.unsqueeze(0).expand(len(design_space), -1, -1)
+        # inputsM = y_samples.transpose(0,1).unsqueeze(-1)
+
+        # q_net = QFullM(self.num_coefs, len(design_space))
+
+        # optimizer = optim.Adam(q_net.parameters(), lr=0.01)
+
+        # #t0 = time.time()
+        # for i in range(1000):
+        #     optimizer.zero_grad()
+        #     loss = -torch.sum(torch.mean(q_net.logprobs(inputsM, targetsM), -1))
+        #     loss.backward()
+        #     optimizer.step()
+        #     if (i+1) % 100 == 0:# and verbose:
+        #         print('{:5d} | {:.6f}'.format(i+1,loss.item()))
+        # #print('elapsed: {}'.format(time.time()-t0))
+        # eigs = torch.mean(q_net.logprobs(inputsM, targetsM), -1)
+        # cbvals = []
+
+        #assert False, 'HALT'
+
 
         # Compute the (unnormalized) EIG for each design.
         eigs = []
