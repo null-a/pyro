@@ -142,11 +142,9 @@ class QFullM(nn.Module):
         assert logprobs.shape == (self.num_designs, N, 2 ** self.num_coef)
         return torch.sum(logprobs * bits2onehot(targets).float(), -1)
 
-    def marginal_probs(self, inputs, coef):
-        assert type(coef) == int
-        assert 0 <= coef < self.num_coef
+    def marginal_probs(self, inputs):
         logprobs = self.forward(inputs)
-        cols = bits2long(target_values_for_marginal(coef, self.num_coef))
+        cols = torch.stack([bits2long(target_values_for_marginal(i, self.num_coef)) for i in range(self.num_coef)])
         return torch.sum(torch.exp(logprobs[..., cols]), -1)
 
 

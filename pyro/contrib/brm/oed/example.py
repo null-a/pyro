@@ -54,14 +54,7 @@ def collect_plot_data2(q_net, inputs, targets, design_space):
     test_inputs = torch.cat(tis, 0).unsqueeze(-1)
 
     # Compute the marginal prob of each coef on the test inputs.
-    marginal_probs = []
-    for j in range(num_coefs):
-        # TODO: It might be possible to modify `marginal_probs` to
-        # return all of the marginals while only running the net
-        # forward once.
-        ps = q_net.marginal_probs(test_inputs, j).detach()
-        marginal_probs.append(ps.unsqueeze(-1))
-    test_out = torch.cat(marginal_probs, -1) # (D, |test_in|, num_coefs)
+    test_out = q_net.marginal_probs(test_inputs).detach()
 
     # Assemble a nested array of the relevant data for plotting.
     out = []
