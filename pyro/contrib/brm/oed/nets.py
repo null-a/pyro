@@ -147,6 +147,12 @@ class QFullM(nn.Module):
         cols = torch.stack([bits2long(target_values_for_marginal(i, self.num_coef)) for i in range(self.num_coef)])
         return torch.sum(torch.exp(logprobs[..., cols]), -1)
 
+# Note that if (a degenerate configuration of) this is used to compare
+# the performance of vectorizing over designs vs. using separate nets
+# then I ought to comment out addition of the bias in `forward` for
+# the separate nets case. This is because `nn.Linear` uses `addmm`
+# internally, which is faster the adding the bias separately, hence
+# commenting out makes for a fairer test.
 
 class MultiLinear(nn.Module):
     def __init__(self, *shape):
