@@ -36,6 +36,52 @@ def collect_plot_data(i, design, q_net, inputs, targets):
                     design))
     return out
 
+# Call back for net. that is vectorized over designs.
+def collect_plot_data2(q_net, inputs, targets, design_space):
+    # inputs (D, N, 1)
+    # targets (D, N, num_coefs) replicated across designs
+
+    num_designs = inputs.shape[0]
+    num_coefs = targets.shape[-1]
+
+    # Build test inputs at which to sample the network output.
+    tis = []
+    for i in range(num_designs):
+        imin = inputs[i].min() # Test each design over the range spanned by the inputs.
+        imax = inputs[i].max()
+        ti = torch.linspace(imin, imax, 50).unsqueeze(0)
+        tis.append(ti)
+    test_inputs = torch.cat(tis, 0).unsqueeze(-1)
+
+    # Compute the marginal prob of each coef on the test inputs.
+    marginal_probs = []
+    for j in range(num_coefs):
+        # TODO: It might be possible to modify `marginal_probs` to
+        # return all of the marginals while only running the net
+        # forward once.
+        ps = q_net.marginal_probs(test_inputs, j).detach()
+        marginal_probs.append(ps.unsqueeze(-1))
+    test_out = torch.cat(marginal_probs, -1) # (D, |test_in|, num_coefs)
+
+    # Assemble a nested array of the relevant data for plotting.
+    out = []
+    for i in range(num_designs):
+        row = []
+        for j in range(num_coefs):
+            neg_cases = inputs[i, targets[i,:,j] == 0]
+            pos_cases = inputs[i, targets[i,:,j] == 1]
+            row.append((pos_cases.numpy(),
+                        neg_cases.numpy(),
+                        test_inputs[i].numpy(),
+                        test_out[i,:,j].numpy(),
+                        design_space[i]))
+        out.append(row)
+
+    return out
+
+
+
+
 # Here's a sketch of how to make plots showing the QFull's output on
 # all 2**M outputs.
 
