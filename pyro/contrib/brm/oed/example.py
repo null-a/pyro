@@ -16,28 +16,7 @@ def get_float_input(msg):
 
 # Callback used to compute the data required to make a picture of the
 # training data seen by the networks during OED.
-def collect_plot_data(i, design, q_net, inputs, targets):
-    num_coefs = targets.shape[1]
-    out = []
-    for j in range(num_coefs):
-        neg_cases = inputs[targets[:,j] == 0]
-        pos_cases = inputs[targets[:,j] == 1]
-
-        # Vis. the function implemented by the net.
-        imin = inputs.min()
-        imax = inputs.max()
-        test_in = torch.arange(imin, imax, (imax-imin)/50.).unsqueeze(1)
-        test_out = q_net.marginal_probs(test_in, j).detach()
-
-        out.append((pos_cases.numpy(),
-                    neg_cases.numpy(),
-                    test_in.numpy(),
-                    test_out.numpy(),
-                    design))
-    return out
-
-# Call back for net. that is vectorized over designs.
-def collect_plot_data2(q_net, inputs, targets, design_space):
+def collect_plot_data(q_net, inputs, targets, design_space):
     # inputs (D, N, 1)
     # targets (D, N, num_coefs) replicated across designs
 
@@ -122,7 +101,7 @@ def main():
     ])
 
     for _ in range(1000):
-        design, dstar, eigs, fit, plot_data = oed.next_trial(verbose=True)#callback=collect_plot_data, verbose=True)
+        design, dstar, eigs, fit, plot_data = oed.next_trial(callback=collect_plot_data, verbose=True)
         print(marginals(fit))
         print('EIGs:')
         print(eigs)

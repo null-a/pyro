@@ -140,7 +140,7 @@ def optall(Q, targets, inputs, design_space, callback, verbose):
         eigs.append(eig)
         elapsed += (time.time() - t0)
 
-        #cbvals.append(callback(i, design, q_net, inputs, targets))
+        cbvals.append(callback(q_net, inputs_i, targets, [design])[0])
 
     return eigs, cbvals, elapsed
 
