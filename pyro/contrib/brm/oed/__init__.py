@@ -154,7 +154,7 @@ def optall_vec(Q, targets, inputs, design_space, callback, verbose):
     eigs = torch.mean(q_net.logprobs(inputs, targets_rep), -1)
     elapsed = time.time() - t0
     cbvals = callback(q_net, inputs, targets_rep, design_space)
-    return eigs, cbvals, elapsed
+    return eigs.tolist(), cbvals, elapsed
 
 
 def optimise(net, inputs, targets, verbose):
