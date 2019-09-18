@@ -29,10 +29,10 @@ class QIndep(nn.Module):
         eps = 1e-6
         return self.net(inputs).clamp(eps, 1-eps)
 
-    # Compute (vectorised, over multiple y and m) q(m|y;d).
+    # Compute (vectorized over y/m pair and designs) q(m|y;d).
     # m: targets
     # y: inputs
-    # (;d because we make a fresh net for each design.)
+    # d: design
     def logprobs(self, inputs, targets):
         assert inputs.shape[0] == targets.shape[0]
         assert inputs.shape[1] == targets.shape[1]
@@ -47,8 +47,12 @@ class QIndep(nn.Module):
         return self.forward(inputs)
 
 
-
-# e.g. tensor([[0,0,1], [1,1,0]]) => tensor([1,6])
+# e.g. bits2long(torch.tensor([[[0,0,0], [0,0,1]],
+#                              [[0,1,0], [1,1,1]]]))
+# =>
+# tensor([[0, 1],
+#         [2, 7]])
+#
 def bits2long(t):
     batch_dims = t.shape[0:-1]
     width = t.shape[-1]
@@ -57,19 +61,42 @@ def bits2long(t):
     assert out.shape == batch_dims
     return out
 
-# e.g. (3,4) => [0,0,1,1]
+# e.g. int2bits(3,4) => [0,0,1,1]
 def int2bits(i, width):
     assert i < 2**width
     return [int(b) for b in ('{:0'+str(width)+'b}').format(i)]
 
-# All of the target values (as bit vectors) that satisfy \theta_coef == 1
+# All of the target values (as bit vectors) that satisfy \theta_coef == 1.
+#
+# e.g.
+# target_values_for_marginal(0, 3)
+# =>
+# tensor([[1, 0, 0],
+#         [1, 0, 1],
+#         [1, 1, 0],
+#         [1, 1, 1]])
+#
+# target_values_for_marginal(1, 3)
+# =>
+# tensor([[0, 1, 0],
+#         [0, 1, 1],
+#         [1, 1, 0],
+#         [1, 1, 1]])
+#
 def target_values_for_marginal(coef, num_coef):
-    #print(list(int2bits(i, num_coef) for i in range(2**num_coef)))
     values = [bits for bits in (int2bits(i, num_coef) for i in range(2**num_coef)) if bits[coef] == 1]
-    #print(values)
     return torch.tensor(values)
 
-# e.g. [[1,0,1],[0,0,1]] => [[0,0,0,0,0,1,0,0],[0,1,0,0,0,0,0,0]]
+# e.g.
+# bits2onehot(torch.tensor([[[0,0,0], [0,0,1]]
+#                           [[0,1,0], [1,1,1]]]))
+# =>
+# tensor([[[1, 0, 0, 0, 0, 0, 0, 0],
+#          [0, 1, 0, 0, 0, 0, 0, 0]],
+#
+#         [[0, 0, 1, 0, 0, 0, 0, 0],
+#          [0, 0, 0, 0, 0, 0, 0, 1]]])
+#
 def bits2onehot(t):
     width = t.shape[-1]
     return one_hot(bits2long(t), 2**width)
@@ -108,6 +135,10 @@ class QFull(nn.Module):
 
     def marginal_probs(self, inputs):
         logprobs = self.forward(inputs)
+        # e.g. For num_coefs == 3, `cols` will be:
+        # tensor([[4, 5, 6, 7],
+        #         [2, 3, 6, 7],
+        #         [1, 3, 5, 7]])
         cols = torch.stack([bits2long(target_values_for_marginal(i, self.num_coef)) for i in range(self.num_coef)])
         return torch.sum(torch.exp(logprobs[..., cols]), -1)
 
@@ -117,7 +148,7 @@ class QFull(nn.Module):
 # the addition of the bias for the separate nets case. This is because
 # `nn.Linear` uses `addmm` internally, which is faster the adding the
 # bias separately, hence commenting out makes for a fairer test. (The
-# existence of `baddbmm` does't change the preceeding.)
+# existence of `baddbmm` does't change the proceeding.)
 
 class BatchLinear(nn.Module):
     def __init__(self, batch_size, in_features, out_features):
@@ -126,9 +157,6 @@ class BatchLinear(nn.Module):
         self.weight = nn.Parameter(torch.empty(batch_size, in_features, out_features))
         self.bias = nn.Parameter(torch.empty(batch_size, 1, out_features))
         self.reset_parameters()
-        # print(self.weight)
-        # print(self.bias)
-        # assert False
 
     def reset_parameters(self):
         # Apply the init. from nn.Linear to each sub-network.
@@ -147,6 +175,7 @@ class BatchLinear(nn.Module):
 
 def main():
     pass
+
 
 if __name__ == '__main__':
     main()
