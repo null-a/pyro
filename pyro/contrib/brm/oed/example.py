@@ -40,8 +40,8 @@ def collect_plot_data(q_net, inputs, targets, design_space):
     for i in range(num_designs):
         row = []
         for j in range(num_coefs):
-            neg_cases = inputs[i, targets[i,:,j] == 0]
-            pos_cases = inputs[i, targets[i,:,j] == 1]
+            neg_cases = inputs[i, targets[:,j] == 0]
+            pos_cases = inputs[i, targets[:,j] == 1]
             row.append((pos_cases.numpy(),
                         neg_cases.numpy(),
                         test_inputs[i].numpy(),

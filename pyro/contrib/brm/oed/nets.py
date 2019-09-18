@@ -22,6 +22,10 @@ class QIndep(nn.Module):
                                  BatchLinear(num_designs, 50, num_coef),
                                  nn.Sigmoid())
 
+    @staticmethod
+    def encode(targets):
+        return targets.float()
+
     def forward(self, inputs):
         assert inputs.shape[-1] == 1
         # TODO: There's probably a better approach than clamping --
@@ -40,8 +44,7 @@ class QIndep(nn.Module):
         assert inputs.shape == (self.num_designs, N, 1)
         assert targets.shape == (self.num_designs, N, self.num_coef)
         probs = self.forward(inputs)
-        targetsf = targets.float()
-        return torch.sum(targetsf*torch.log(probs) + (1-targetsf)*torch.log(1-probs), -1)
+        return torch.sum(targets*torch.log(probs) + (1-targets)*torch.log(1-probs), -1)
 
     def marginal_probs(self, inputs):
         return self.forward(inputs)
@@ -118,20 +121,25 @@ class QFull(nn.Module):
                                  BatchLinear(num_designs, 50, 2**num_coef),
                                  nn.LogSoftmax(dim=-1))
 
+    # Encode raw targets in the format output by the network.
+    @staticmethod
+    def encode(targets):
+        return bits2onehot(targets).float()
+
     def forward(self, inputs):
         assert len(inputs.shape) == 3
         N = inputs.shape[1]
         assert inputs.shape == (self.num_designs, N, 1)
         return self.net(inputs)
 
-    def logprobs(self, inputs, targets):
-        assert len(targets.shape) == 3
-        assert inputs.shape[1] == targets.shape[1]
+    def logprobs(self, inputs, targets_enc):
+        assert len(targets_enc.shape) == 3
+        assert inputs.shape[1] == targets_enc.shape[1]
         N = inputs.shape[1]
-        assert targets.shape == (self.num_designs, N, self.num_coef)
+        assert targets_enc.shape == (self.num_designs, N, 2 ** self.num_coef)
         logprobs = self.forward(inputs)
         assert logprobs.shape == (self.num_designs, N, 2 ** self.num_coef)
-        return torch.sum(logprobs * bits2onehot(targets).float(), -1)
+        return torch.sum(logprobs * targets_enc, -1)
 
     def marginal_probs(self, inputs):
         logprobs = self.forward(inputs)

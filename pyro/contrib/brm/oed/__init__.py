@@ -127,16 +127,16 @@ def optall(Q, targets, inputs, design_space, callback, verbose):
     eigs = []
     cbvals = []
     elapsed = 0.0
-    targets = targets.unsqueeze(0)
+    targets_enc = Q.encode(targets).unsqueeze(0)
     for i, design in enumerate(design_space):
         inputs_i = inputs[i].unsqueeze(0)
 
         # Construct and optimised the network.
         q_net = Q(num_coefs, num_designs=1)
         t0 = time.time()
-        optimise(q_net, inputs_i, targets, verbose)
+        optimise(q_net, inputs_i, targets_enc, verbose)
 
-        eig = torch.mean(q_net.logprobs(inputs_i, targets)).item()
+        eig = torch.mean(q_net.logprobs(inputs_i, targets_enc)).item()
         eigs.append(eig)
         elapsed += (time.time() - t0)
 
@@ -146,14 +146,14 @@ def optall(Q, targets, inputs, design_space, callback, verbose):
 
 def optall_vec(Q, targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
-    # Repeat target for each design.
-    targets_rep = targets.unsqueeze(0).expand(len(design_space), -1, -1)
+    # Encode targets, and replicate for each design.
+    targets_enc = Q.encode(targets).unsqueeze(0).expand(len(design_space), -1, -1)
     q_net = Q(num_coefs, len(design_space))
     t0 = time.time()
-    optimise(q_net, inputs, targets_rep, verbose)
-    eigs = torch.mean(q_net.logprobs(inputs, targets_rep), -1)
+    optimise(q_net, inputs, targets_enc, verbose)
+    eigs = torch.mean(q_net.logprobs(inputs, targets_enc), -1)
     elapsed = time.time() - t0
-    cbvals = callback(q_net, inputs, targets_rep, design_space)
+    cbvals = callback(q_net, inputs, targets, design_space)
     return eigs.tolist(), cbvals, elapsed
 
 
