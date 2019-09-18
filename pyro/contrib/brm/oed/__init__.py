@@ -103,8 +103,9 @@ class SequentialOED:
         assert inputs.shape == (len(design_space), self.num_samples, 1)
 
         # Estimate EIGs
+        Q = QFull # QIndep
         vectorize = True
-        eigs, cbvals, elapsed = (optall_vec if vectorize else optall)(targets, inputs, design_space, callback, verbose)
+        eigs, cbvals, elapsed = (optall_vec if vectorize else optall)(Q, targets, inputs, design_space, callback, verbose)
         if verbose:
             print('Elapsed: {}'.format(elapsed))
 
@@ -121,7 +122,7 @@ class SequentialOED:
 def argmax(lst):
     return torch.argmax(torch.tensor(lst)).item()
 
-def optall(targets, inputs, design_space, callback, verbose):
+def optall(Q, targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     eigs = []
     cbvals = []
@@ -131,8 +132,7 @@ def optall(targets, inputs, design_space, callback, verbose):
         inputs_i = inputs[i].unsqueeze(0)
 
         # Construct and optimised the network.
-        #q_net = QIndep(self.num_coefs)
-        q_net = QFull(num_coefs, num_designs=1)
+        q_net = Q(num_coefs, num_designs=1)
         t0 = time.time()
         optimise(q_net, inputs_i, targets, verbose)
 
@@ -144,11 +144,11 @@ def optall(targets, inputs, design_space, callback, verbose):
 
     return eigs, cbvals, elapsed
 
-def optall_vec(targets, inputs, design_space, callback, verbose):
+def optall_vec(Q, targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     # Repeat target for each design.
     targets_rep = targets.unsqueeze(0).expand(len(design_space), -1, -1)
-    q_net = QFull(num_coefs, len(design_space))
+    q_net = Q(num_coefs, len(design_space))
     t0 = time.time()
     optimise(q_net, inputs, targets_rep, verbose)
     eigs = torch.mean(q_net.logprobs(inputs, targets_rep), -1)
