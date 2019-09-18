@@ -15,11 +15,11 @@ class QIndep(nn.Module):
         assert num_designs > 0
         self.num_coef = num_coef
         self.num_designs = num_designs
-        self.net = nn.Sequential(MultiLinear(num_designs, 1, 100),
+        self.net = nn.Sequential(BatchLinear(num_designs, 1, 100),
                                  nn.ReLU(),
-                                 MultiLinear(num_designs, 100,50),
+                                 BatchLinear(num_designs, 100,50),
                                  nn.ReLU(),
-                                 MultiLinear(num_designs, 50, num_coef),
+                                 BatchLinear(num_designs, 50, num_coef),
                                  nn.Sigmoid())
 
     def forward(self, inputs):
@@ -84,11 +84,11 @@ class QFull(nn.Module):
         assert num_designs > 0
         self.num_coef = num_coef
         self.num_designs = num_designs
-        self.net = nn.Sequential(MultiLinear(num_designs, 1, 100),
+        self.net = nn.Sequential(BatchLinear(num_designs, 1, 100),
                                  nn.ReLU(),
-                                 MultiLinear(num_designs, 100, 50),
+                                 BatchLinear(num_designs, 100, 50),
                                  nn.ReLU(),
-                                 MultiLinear(num_designs, 50, 2**num_coef),
+                                 BatchLinear(num_designs, 50, 2**num_coef),
                                  nn.LogSoftmax(dim=-1))
 
     def forward(self, inputs):
@@ -118,14 +118,12 @@ class QFull(nn.Module):
 # internally, which is faster the adding the bias separately, hence
 # commenting out makes for a fairer test.
 
-class MultiLinear(nn.Module):
-    def __init__(self, *shape):
-        super(MultiLinear, self).__init__()
-        self.batch_shape   = shape[0:-2]
-        self.in_features  = shape[-2]
-        self.out_features = shape[-1]
-        self.weight = nn.Parameter(torch.empty(*self.batch_shape, self.in_features, self.out_features))
-        self.bias = nn.Parameter(torch.empty(*self.batch_shape, 1, self.out_features))
+class BatchLinear(nn.Module):
+    def __init__(self, batch_size, in_features, out_features):
+        super(BatchLinear, self).__init__()
+        self.batch_size = batch_size
+        self.weight = nn.Parameter(torch.empty(batch_size, in_features, out_features))
+        self.bias = nn.Parameter(torch.empty(batch_size, 1, out_features))
         self.reset_parameters()
         # print(self.weight)
         # print(self.bias)
@@ -133,14 +131,14 @@ class MultiLinear(nn.Module):
 
     def reset_parameters(self):
         # Apply the init. from nn.Linear to each sub-network.
-        for ix in itertools.product(*[range(i) for i in self.batch_shape]):
-            init.kaiming_uniform_(self.weight[ix], a=math.sqrt(5))
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight[ix])
+        for i in range(self.batch_size):
+            init.kaiming_uniform_(self.weight[i], a=math.sqrt(5))
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight[i])
             bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias[ix], -bound, bound)
+            init.uniform_(self.bias[i], -bound, bound)
 
-    # Given an input of shape `batch_dims + (N, in_features)`, this
-    # returns a tensor with shape `batch_dims + (N, out_features)`.
+    # Given an input of shape `(batch_size, N, in_features)`, this
+    # returns a tensor with shape `(batch_size, N, out_features)`.
     def forward(self, inp):
         return torch.matmul(inp, self.weight) + self.bias
 
