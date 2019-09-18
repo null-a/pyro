@@ -113,10 +113,11 @@ class QFull(nn.Module):
 
 # Note that if (a degenerate configuration of) this is used to compare
 # the performance of vectorizing over designs vs. using separate nets
-# then I ought to comment out addition of the bias in `forward` for
-# the separate nets case. This is because `nn.Linear` uses `addmm`
-# internally, which is faster the adding the bias separately, hence
-# commenting out makes for a fairer test.
+# then I ought to revert `forward` to using `matmul` and comment out
+# the addition of the bias for the separate nets case. This is because
+# `nn.Linear` uses `addmm` internally, which is faster the adding the
+# bias separately, hence commenting out makes for a fairer test. (The
+# existence of `baddbmm` does't change the preceeding.)
 
 class BatchLinear(nn.Module):
     def __init__(self, batch_size, in_features, out_features):
@@ -140,7 +141,8 @@ class BatchLinear(nn.Module):
     # Given an input of shape `(batch_size, N, in_features)`, this
     # returns a tensor with shape `(batch_size, N, out_features)`.
     def forward(self, inp):
-        return torch.matmul(inp, self.weight) + self.bias
+        #return torch.matmul(inp, self.weight) + self.bias
+        return torch.baddbmm(self.bias, inp, self.weight)
 
 
 def main():
