@@ -99,13 +99,12 @@ class SequentialOED:
         targets = ((-eps < b_samples) & (b_samples < eps)).long()
         assert targets.shape == (self.num_samples, self.num_coefs)
 
-        # TODO: Format an `inputs` tensor here rather than in
-        # `optall_vec`. (Transpose `y_samples`, perhaps `unsqueeze`.
-        # Will require small change to `optall` also.)
+        inputs = y_samples.t().unsqueeze(-1)
+        assert inputs.shape == (len(design_space), self.num_samples, 1)
 
         # Estimate EIGs
         vectorize = True
-        eigs, cbvals, elapsed = (optall_vec if vectorize else optall)(targets, y_samples, design_space, callback, verbose)
+        eigs, cbvals, elapsed = (optall_vec if vectorize else optall)(targets, inputs, design_space, callback, verbose)
         if verbose:
             print('Elapsed: {}'.format(elapsed))
 
@@ -122,21 +121,21 @@ class SequentialOED:
 def argmax(lst):
     return torch.argmax(torch.tensor(lst)).item()
 
-def optall(targets, y_samples, design_space, callback, verbose):
+def optall(targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     eigs = []
     cbvals = []
     elapsed = 0.0
     for i, design in enumerate(design_space):
-        inputs = y_samples[:,i].unsqueeze(1) # The ys for this particular design.
+        inputs_i = inputs[i]
 
         # Construct and optimised the network.
         #q_net = QIndep(self.num_coefs)
         q_net = QFull(num_coefs)
         t0 = time.time()
-        optimise(q_net, inputs, targets, verbose)
+        optimise(q_net, inputs_i, targets, verbose)
 
-        eig = torch.mean(q_net.logprobs(inputs, targets)).item()
+        eig = torch.mean(q_net.logprobs(inputs_i, targets)).item()
         eigs.append(eig)
         elapsed += (time.time() - t0)
 
@@ -144,16 +143,16 @@ def optall(targets, y_samples, design_space, callback, verbose):
 
     return eigs, cbvals, elapsed
 
-def optall_vec(targets, y_samples, design_space, callback, verbose):
+def optall_vec(targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
-    targetsM = targets.unsqueeze(0).expand(len(design_space), -1, -1)
-    inputsM = y_samples.transpose(0,1).unsqueeze(-1)
+    # Repeat target for each design.
+    targets_rep = targets.unsqueeze(0).expand(len(design_space), -1, -1)
     q_net = QFullM(num_coefs, len(design_space))
     t0 = time.time()
-    optimise(q_net, inputsM, targetsM, verbose)
-    eigs = torch.mean(q_net.logprobs(inputsM, targetsM), -1)
+    optimise(q_net, inputs, targets_rep, verbose)
+    eigs = torch.mean(q_net.logprobs(inputs, targets_rep), -1)
     elapsed = time.time() - t0
-    cbvals = callback(q_net, inputsM, targetsM, design_space)
+    cbvals = callback(q_net, inputs, targets_rep, design_space)
     return eigs, cbvals, elapsed
 
 
