@@ -105,7 +105,7 @@ class SequentialOED:
         # Estimate EIGs
         Q = QFull # QIndep
         vectorize = True
-        eigs, cbvals, elapsed = (optall_vec if vectorize else optall)(Q, targets, inputs, design_space, callback, verbose)
+        eigs, cbvals, elapsed = (est_eig_vec if vectorize else est_eig)(Q, targets, inputs, design_space, callback, verbose)
         if verbose:
             print('Elapsed: {}'.format(elapsed))
 
@@ -122,7 +122,8 @@ class SequentialOED:
 def argmax(lst):
     return torch.argmax(torch.tensor(lst)).item()
 
-def optall(Q, targets, inputs, design_space, callback, verbose):
+# Estimate the EIG for each design.
+def est_eig(Q, targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     eigs = []
     cbvals = []
@@ -144,7 +145,8 @@ def optall(Q, targets, inputs, design_space, callback, verbose):
 
     return eigs, cbvals, elapsed
 
-def optall_vec(Q, targets, inputs, design_space, callback, verbose):
+# Estimate the EIG for each design. (Vectorized over designs.)
+def est_eig_vec(Q, targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     # Encode targets, and replicate for each design.
     targets_enc = Q.encode(targets).unsqueeze(0).expand(len(design_space), -1, -1)
