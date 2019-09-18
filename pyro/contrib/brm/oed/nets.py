@@ -78,42 +78,10 @@ def bits2onehot(t):
     width = t.shape[-1]
     return one_hot(bits2long(t), 2**width)
 
+
 class QFull(nn.Module):
-    def __init__(self, num_coef):
-        super(QFull, self).__init__()
-        assert type(num_coef) == int
-        assert num_coef > 0
-        self.num_coef = num_coef
-        self.net = nn.Sequential(nn.Linear(1, 100, bias=True),
-                                 nn.ReLU(),
-                                 nn.Linear(100, 50, bias=True),
-                                 nn.ReLU(),
-                                 nn.Linear(50, 2**num_coef, bias=True),
-                                 nn.LogSoftmax(dim=1))
-
-    def forward(self, inputs):
-        assert inputs.shape[1] == 1
-        return self.net(inputs)
-
-    def logprobs(self, inputs, targets):
-        assert inputs.shape[0] == targets.shape[0]
-        N = inputs.shape[0]
-        assert inputs.shape == (N, 1)
-        assert targets.shape == (N, self.num_coef)
-        logprobs = self.forward(inputs)
-        assert logprobs.shape[1] == 2 ** self.num_coef
-        return torch.sum(logprobs * bits2onehot(targets).float(), 1)
-
-    def marginal_probs(self, inputs, coef):
-        assert type(coef) == int
-        assert 0 <= coef < self.num_coef
-        logprobs = self.forward(inputs)
-        cols = bits2long(target_values_for_marginal(coef, self.num_coef))
-        return torch.sum(torch.exp(logprobs[:,cols]), 1)
-
-class QFullM(nn.Module):
     def __init__(self, num_coef, num_designs):
-        super(QFullM, self).__init__()
+        super(QFull, self).__init__()
         assert type(num_coef) == int
         assert type(num_designs) == int
         assert num_coef > 0

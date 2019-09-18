@@ -15,7 +15,7 @@ from pyro.contrib.brm.backend import data_from_numpy
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
 from pyro.contrib.brm.fit import Fit, get_param, fitted
 
-from pyro.contrib.brm.oed.nets import QIndep, QFull, QFullM
+from pyro.contrib.brm.oed.nets import QIndep, QFull
 
 # Provides a convenient interface for performing sequential OED.
 
@@ -126,12 +126,13 @@ def optall(targets, inputs, design_space, callback, verbose):
     eigs = []
     cbvals = []
     elapsed = 0.0
+    targets = targets.unsqueeze(0)
     for i, design in enumerate(design_space):
-        inputs_i = inputs[i]
+        inputs_i = inputs[i].unsqueeze(0)
 
         # Construct and optimised the network.
         #q_net = QIndep(self.num_coefs)
-        q_net = QFull(num_coefs)
+        q_net = QFull(num_coefs, num_designs=1)
         t0 = time.time()
         optimise(q_net, inputs_i, targets, verbose)
 
@@ -147,7 +148,7 @@ def optall_vec(targets, inputs, design_space, callback, verbose):
     num_coefs = targets.shape[1]
     # Repeat target for each design.
     targets_rep = targets.unsqueeze(0).expand(len(design_space), -1, -1)
-    q_net = QFullM(num_coefs, len(design_space))
+    q_net = QFull(num_coefs, len(design_space))
     t0 = time.time()
     optimise(q_net, inputs, targets_rep, verbose)
     eigs = torch.mean(q_net.logprobs(inputs, targets_rep), -1)
