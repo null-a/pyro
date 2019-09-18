@@ -122,7 +122,7 @@ def main():
     ])
 
     for _ in range(1000):
-        #design, dstar, eigs, fit, plot_data = oed.next_trial(callback=collect_plot_data, verbose=True)
+        design, dstar, eigs, fit, plot_data = oed.next_trial(verbose=True)#callback=collect_plot_data, verbose=True)
         print(marginals(fit))
         print('EIGs:')
         print(eigs)

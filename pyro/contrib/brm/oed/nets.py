@@ -7,20 +7,23 @@ import torch.nn.init as init
 from torch.nn.functional import one_hot
 
 class QIndep(nn.Module):
-    def __init__(self, num_coef):
+    def __init__(self, num_coef, num_designs):
         super(QIndep, self).__init__()
         assert type(num_coef) == int
+        assert type(num_designs) == int
         assert num_coef > 0
+        assert num_designs > 0
         self.num_coef = num_coef
-        self.net = nn.Sequential(nn.Linear(1, 100),
+        self.num_designs = num_designs
+        self.net = nn.Sequential(MultiLinear(num_designs, 1, 100),
                                  nn.ReLU(),
-                                 nn.Linear(100,50),
+                                 MultiLinear(num_designs, 100,50),
                                  nn.ReLU(),
-                                 nn.Linear(50, num_coef),
+                                 MultiLinear(num_designs, 50, num_coef),
                                  nn.Sigmoid())
 
     def forward(self, inputs):
-        assert inputs.shape[1] == 1
+        assert inputs.shape[-1] == 1
         # TODO: There's probably a better approach than clamping --
         # parameterize loss by logits?
         eps = 1e-6
@@ -32,23 +35,16 @@ class QIndep(nn.Module):
     # (;d because we make a fresh net for each design.)
     def logprobs(self, inputs, targets):
         assert inputs.shape[0] == targets.shape[0]
-        N = inputs.shape[0]
-        assert inputs.shape == (N, 1)
-        assert targets.shape == (N, self.num_coef)
+        assert inputs.shape[1] == targets.shape[1]
+        N = inputs.shape[1]
+        assert inputs.shape == (self.num_designs, N, 1)
+        assert targets.shape == (self.num_designs, N, self.num_coef)
         probs = self.forward(inputs)
         targetsf = targets.float()
-        return torch.sum(targetsf*torch.log(probs) + (1-targetsf)*torch.log(1-probs), 1)
+        return torch.sum(targetsf*torch.log(probs) + (1-targetsf)*torch.log(1-probs), -1)
 
-    # Compute the marginal probability of a particular coefficient
-    # being within [-eps,eps]. For this particular Q (which assumes
-    # the joint is the product of the marginals) this only requires us
-    # to pick out the appropriate marginal.
-    def marginal_probs(self, inputs, coef):
-        assert type(coef) == int
-        assert 0 <= coef < self.num_coef
-        probs = self.forward(inputs)
-        return probs[:,coef]
-
+    def marginal_probs(self, inputs):
+        return self.forward(inputs)
 
 
 
