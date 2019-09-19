@@ -8,12 +8,12 @@ import torch
 import torch.optim as optim
 
 from pyro.contrib.brm import makedesc
-from pyro.contrib.brm.formula import parse, OrderedSet
+from pyro.contrib.brm.formula import parse, OrderedSet, unique
 from pyro.contrib.brm.design import Metadata, makedata, metadata_from_cols, RealValued, Categorical, code_lengths
 from pyro.contrib.brm.family import Normal
 from pyro.contrib.brm.backend import data_from_numpy
 from pyro.contrib.brm.pyro_backend import backend as pyro_backend
-from pyro.contrib.brm.fit import Fit, get_param, fitted
+from pyro.contrib.brm.fit import Fit, get_scalar_param, fitted
 
 from pyro.contrib.brm.oed.nets import QIndep, QFull
 
@@ -37,14 +37,23 @@ from pyro.contrib.brm.oed.nets import QIndep, QFull
 # oed.data_so_far
 
 class SequentialOED:
-    def __init__(self, formula_str, cols, family=Normal, priors=[], contrasts={}, backend=pyro_backend):
+    def __init__(self, formula_str, cols, family=Normal, priors=[], contrasts={}, target_coefs=[], backend=pyro_backend):
         formula = parse(formula_str)
         metadata = metadata_from_cols(cols)
         model_desc = makedesc(formula, metadata, family, priors, code_lengths(contrasts))
         model = backend.gen(model_desc)
         data_so_far = empty_df_from_cols(cols)
-        num_coefs = len(model_desc.population.coefs)
         dscols = design_space_cols(formula, metadata)
+
+        assert type(target_coefs) == list
+        if len(target_coefs) == 0:
+            target_coefs = model_desc.population.coefs
+        else:
+            # TODO: Move `unique` to utils or similar.
+            target_coefs = unique(target_coefs)
+            assert set(target_coefs).issubset(set(model_desc.population.coefs)), 'unknown target coefficient given'
+
+        num_coefs = len(target_coefs)
 
         # TODO: Prefix non-public stuff with underscores?
         self.formula = formula
@@ -54,6 +63,7 @@ class SequentialOED:
         self.model = model
         self.data_so_far = data_so_far
         self.num_coefs = num_coefs
+        self.target_coefs = target_coefs
         self.dscols = dscols
 
         self.backend = backend
@@ -78,21 +88,22 @@ class SequentialOED:
             samples = self.backend.nuts(dsf, self.model, iter=self.num_samples)
         fit = Fit(self.formula, self.metadata, self.contrasts, dsf, self.model_desc, self.model, samples, self.backend)
 
-        b_samples = get_param(fit, 'b') # Values sampled for population-level coefs. (numpy array.)
-        assert b_samples.shape == (self.num_samples, self.num_coefs)
+        # Values sampled for (population-level) target coefs. (numpy array.)
+        latent_samples = [get_scalar_param(fit, 'b_{}'.format(tc)) for tc in self.target_coefs]
 
         # Draw samples from p(y|theta;d)
         y_samples = fitted(fit, 'sample', design_space_df) # numpy array.
-        assert y_samples.shape == (self.num_samples, len(design_space))
 
         # All ANN work is done using PyTorch, so convert samples from
         # numpy to torch ready for what follows.
-        b_samples = torch.tensor(b_samples)
+        latent_samples = torch.stack([torch.tensor(col) for col in latent_samples], 1)
         y_samples = torch.tensor(y_samples)
+        assert latent_samples.shape == (self.num_samples, self.num_coefs)
+        assert y_samples.shape == (self.num_samples, len(design_space))
 
         # Compute the targets. (These are used by all designs.)
         eps = 0.5
-        targets = ((-eps < b_samples) & (b_samples < eps)).long()
+        targets = ((-eps < latent_samples) & (latent_samples < eps)).long()
         assert targets.shape == (self.num_samples, self.num_coefs)
 
         inputs = y_samples.t().unsqueeze(-1)
