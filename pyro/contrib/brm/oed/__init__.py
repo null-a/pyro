@@ -92,10 +92,6 @@ class SequentialOED:
 
         # Compute the targets. (These are used by all designs.)
         eps = 0.5
-        # TODO: This is a long tensor for the benefit of QFull. It
-        # might be worth considering whether it's possible to
-        # reorganise things to avoid repeatedly converting from long
-        # to float. (e.g. In `log_probs` of `QIndep`.)
         targets = ((-eps < b_samples) & (b_samples < eps)).long()
         assert targets.shape == (self.num_samples, self.num_coefs)
 
