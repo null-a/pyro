@@ -112,7 +112,7 @@ class SequentialOED:
         # Estimate EIGs
         Q = QFull # QIndep
         vectorize = True
-        eigs, cbvals, elapsed = (est_eig_vec if vectorize else est_eig)(Q, targets, inputs, design_space, callback, verbose)
+        eigs, cbvals, elapsed = (est_eig_vec if vectorize else est_eig)(Q, targets, inputs, design_space, self.target_coefs, callback, verbose)
         if verbose:
             print('Elapsed: {}'.format(elapsed))
 
@@ -130,7 +130,7 @@ def argmax(lst):
     return torch.argmax(torch.tensor(lst)).item()
 
 # Estimate the EIG for each design.
-def est_eig(Q, targets, inputs, design_space, callback, verbose):
+def est_eig(Q, targets, inputs, design_space, target_coefs, callback, verbose):
     num_coefs = targets.shape[1]
     eigs = []
     cbvals = []
@@ -148,12 +148,12 @@ def est_eig(Q, targets, inputs, design_space, callback, verbose):
         eigs.append(eig)
         elapsed += (time.time() - t0)
 
-        cbvals.append(callback(q_net, inputs_i, targets, [design])[0])
+        cbvals.append(callback(q_net, inputs_i, targets, [design], target_coefs)[0])
 
     return eigs, cbvals, elapsed
 
 # Estimate the EIG for each design. (Vectorized over designs.)
-def est_eig_vec(Q, targets, inputs, design_space, callback, verbose):
+def est_eig_vec(Q, targets, inputs, design_space, target_coefs, callback, verbose):
     num_coefs = targets.shape[1]
     # Encode targets, and replicate for each design.
     targets_enc = Q.encode(targets).unsqueeze(0).expand(len(design_space), -1, -1)
@@ -162,7 +162,7 @@ def est_eig_vec(Q, targets, inputs, design_space, callback, verbose):
     optimise(q_net, inputs, targets_enc, verbose)
     eigs = torch.mean(q_net.logprobs(inputs, targets_enc), -1)
     elapsed = time.time() - t0
-    cbvals = callback(q_net, inputs, targets, design_space)
+    cbvals = callback(q_net, inputs, targets, design_space, target_coefs)
     return eigs.tolist(), cbvals, elapsed
 
 

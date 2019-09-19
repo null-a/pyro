@@ -16,7 +16,7 @@ def get_float_input(msg):
 
 # Callback used to compute the data required to make a picture of the
 # training data seen by the networks during OED.
-def collect_plot_data(q_net, inputs, targets, design_space):
+def collect_plot_data(q_net, inputs, targets, design_space, target_coefs):
     # inputs (D, N, 1)
     # targets (D, N, num_coefs) replicated across designs
 
@@ -46,7 +46,8 @@ def collect_plot_data(q_net, inputs, targets, design_space):
                         neg_cases.numpy(),
                         test_inputs[i].numpy(),
                         test_out[i,:,j].numpy(),
-                        design_space[i]))
+                        design_space[i],
+                        target_coefs[j]))
         out.append(row)
 
     return out
@@ -74,10 +75,10 @@ def collect_plot_data(q_net, inputs, targets, design_space):
 def make_training_data_plot(plot_data):
     plt.figure(figsize=(12,12))
     for j, row in enumerate(plot_data):
-        for k, (pos_cases, neg_cases, test_in, test_out, design) in enumerate(row):
+        for k, (pos_cases, neg_cases, test_in, test_out, design, coef) in enumerate(row):
             plt.subplot(len(plot_data), len(row), (j*len(row) + k)+1)
             if j == 0:
-                plt.title('coef={}'.format(k))
+                plt.title('coef={}'.format(coef))
             if k == 0:
                 plt.ylabel('q(m|y;d={})'.format(design))
             plt.xlabel('y')
