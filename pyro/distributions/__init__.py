@@ -25,6 +25,7 @@ from pyro.distributions.util import enable_validation, is_validation_enabled, va
 from pyro.distributions.von_mises import VonMises
 from pyro.distributions.von_mises_3d import VonMises3D
 from pyro.distributions.zero_inflated_poisson import ZeroInflatedPoisson
+from pyro.distributions.zero_one_inflated_beta import ZeroOneInflatedBeta
 from pyro.distributions.lkj import (LKJCorrCholesky, CorrLCholeskyTransform, corr_cholesky_constraint)
 from pyro.distributions.transforms import * # noqa F403
 
@@ -55,6 +56,7 @@ __all__ = [
     "VonMises",
     "VonMises3D",
     "ZeroInflatedPoisson",
+    "ZeroOneInflatedBeta",
     "enable_validation",
     "is_validation_enabled",
     "validation_enabled",
