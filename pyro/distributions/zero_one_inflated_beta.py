@@ -64,7 +64,6 @@ class ZeroOneInflatedBeta(TorchDistribution):
         shape0 = self.loc * self.prec
         shape1 = (1 - self.loc) * self.prec
 
-        # TODO: stack and then expand?
         dir_alpha = torch.stack([shape0.expand(shape), shape1.expand(shape)], -1)
 
         with torch.no_grad():
