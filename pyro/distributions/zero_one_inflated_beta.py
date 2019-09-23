@@ -33,9 +33,6 @@ class ZeroOneInflatedBeta(TorchDistribution):
         event_shape = torch.Size()
         super(ZeroOneInflatedBeta, self).__init__(batch_shape, event_shape, validate_args)
 
-    # TODO: This is a mix of a pmf and a pdf, right? plotting this
-    # against samples won't line up? but do things work out? (i guess
-    # they will, since we often successfully mix these in a ppl?)
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
@@ -44,7 +41,15 @@ class ZeroOneInflatedBeta(TorchDistribution):
         shape0 = loc * prec
         shape1 = (1 - loc) * prec
 
-        beta_log_prob = prec.lgamma() - shape0.lgamma() - shape1.lgamma() + (shape0-1)*value.log() + (shape1-1)*(1-value).log()
+        # Avoid values close to boundary, otherwise differentiating
+        # log prob will return nan. Strangely, it's necessary to do
+        # this for values exactly on the boundary, even though their
+        # log probs are replaced by the log prob from the discrete
+        # part of the process below.
+        eps = 1e-6
+        cvalue = value.clamp(eps, 1-eps)
+
+        beta_log_prob = prec.lgamma() - shape0.lgamma() - shape1.lgamma() + (shape0-1)*cvalue.log() + (shape1-1)*(1-cvalue).log()
         log_prob = (1-alpha).log() + beta_log_prob
         zeros = value == 0.
         log_prob[zeros] = alpha[zeros].log() + (1-gamma[zeros]).log()
@@ -79,7 +84,7 @@ class ZeroOneInflatedBeta(TorchDistribution):
         new = self._get_checked_instance(ZeroOneInflatedBeta, _instance)
         batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
-        new.prec = self.loc.expand(batch_shape)
+        new.prec = self.prec.expand(batch_shape)
         new.alpha = self.alpha.expand(batch_shape)
         new.gamma = self.gamma.expand(batch_shape)
         super(ZeroOneInflatedBeta, new).__init__(batch_shape, self.event_shape, validate_args=False)
