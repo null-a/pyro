@@ -78,6 +78,10 @@ class ZeroOneInflatedBeta(TorchDistribution):
 
         return samples
 
+    @lazy_property
+    def mean(self):
+        return self.alpha * self.gamma + (1 - self.alpha) * self.loc
+
     # TODO: How should this be implemented? (a la Delta, or ZeroInflatedPoisson?)
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ZeroOneInflatedBeta, _instance)
